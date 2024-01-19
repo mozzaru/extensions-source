@@ -106,7 +106,10 @@ object Extension {
                 .filter { it.isFile }
                 .forEach {
                     zos.putNextEntry(ZipEntry(it.relativeTo(assetsFolder).toString().replace('\\', '/')))
-                    it.inputStream().copyTo(zos)
+                    it.inputStream().run {
+                        copyTo(zos)
+                        close()
+                    }
                     zos.closeEntry()
                 }
 
@@ -118,6 +121,9 @@ object Extension {
 
         jarFile.delete()
         tempJarFile.renameTo(jarFile)
-        assetsFolder.deleteRecursively()
+
+        if (!assetsFolder.deleteRecursively()) {
+            throw Exception("Could not delete assets folder.")
+        }
     }
 }
