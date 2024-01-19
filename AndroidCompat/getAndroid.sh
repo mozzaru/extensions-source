@@ -28,7 +28,7 @@ fi
 echo "Getting required Android.jar..."
 rm -rf "tmp"
 mkdir -p "tmp"
-pushd "tmp"
+pushd "tmp" || exit 1
 
 curl "https://android.googlesource.com/platform/prebuilts/sdk/+/6cd31be5e4e25901aadf838120d71a79b46d9add/30/public/android.jar?format=TEXT" | base64 --decode > android.jar
 
@@ -71,7 +71,7 @@ zip --delete android.jar android/text/Html.class
 # Dedup overridden Android classes
 ABS_JAR="$(realpath android.jar)"
 function dedup() {
-    pushd "$1"
+    pushd "$1" || exit 1
     CLASSES="$(find ./* -type f)"
     echo "$CLASSES" | while read -r class
     do
@@ -79,12 +79,11 @@ function dedup() {
         echo "Processing class: $NAME"
         zip --delete "$ABS_JAR" "$NAME.class" "$NAME\$*.class" "${NAME}Kt.class" "${NAME}Kt\$*.class" > /dev/null
     done
-    popd
+    popd || exit 1
 }
 
-popd
+popd || exit 1
 dedup AndroidCompat/src/main/java
-dedup server/src/main/kotlin
 
 echo "Copying Android.jar to library folder..."
 mv tmp/android.jar AndroidCompat/lib
