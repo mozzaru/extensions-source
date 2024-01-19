@@ -1,8 +1,8 @@
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
-    kotlin("jvm") version "1.8.0"
-    kotlin("plugin.serialization") version "1.8.0" apply false
+    kotlin("jvm") version "1.7.21"
+    kotlin("plugin.serialization") version "1.7.21" apply false
     id("org.jmailen.kotlinter") version "3.9.0" apply false
     id("com.github.gmazzo.buildconfig") version "3.0.3" apply false
     id("com.github.johnrengelman.shadow") version "7.1.2" apply false
@@ -77,7 +77,8 @@ configure(projects) {
         implementation("io.github.config4k:config4k:0.4.2")
 
         // dex2jar
-        val dex2jarVersion = "v76"
+        // Stuck at v64 because of https://github.com/ThexXTURBOXx/dex2jar/issues/27
+        val dex2jarVersion = "v64"
         implementation("com.github.ThexXTURBOXx.dex2jar:dex-translator:$dex2jarVersion")
         implementation("com.github.ThexXTURBOXx.dex2jar:dex-tools:$dex2jarVersion")
 
