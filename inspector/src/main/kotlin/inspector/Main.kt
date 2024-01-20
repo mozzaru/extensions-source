@@ -11,6 +11,9 @@ package inspector
 import eu.kanade.tachiyomi.App
 import eu.kanade.tachiyomi.source.online.HttpSource
 import inspector.util.Extension
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -29,6 +32,7 @@ import kotlin.streams.asSequence
 private val logger = KotlinLogging.logger {}
 private val androidCompat by lazy { AndroidCompat() }
 
+@Suppress("BlockingMethodInNonBlockingContext")
 suspend fun main(args: Array<String>) {
     if (args.size < 3) {
         throw RuntimeException("Inspector must be given the path of apks directory, output json, and a tmp dir")
@@ -47,11 +51,15 @@ suspend fun main(args: Array<String>) {
 
     logger.info("Found ${extensions.size} extensions")
 
-    val extensionsInfo = extensions.associate {
-        logger.debug("Installing $it")
-        val (pkgName, sources) = Extension.installApk(tmpDir) { it.toFile() }
-        pkgName to sources.map { source -> SourceJson(source) }
-    }
+    val extensionsInfo = coroutineScope {
+        extensions.map {
+            async {
+                logger.debug("Installing {}", it)
+                val (pkgName, sources) = Extension.installApk(tmpDir) { it.toFile() }
+                pkgName to sources.map { source -> SourceJson(source) }
+            }
+        }.awaitAll()
+    }.toMap()
 
     File(outputPath).writeText(Json.encodeToString(extensionsInfo))
 }

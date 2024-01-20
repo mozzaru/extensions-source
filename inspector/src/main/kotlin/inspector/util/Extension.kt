@@ -63,7 +63,7 @@ object Extension {
         // collect sources from the extension
         return packageInfo.packageName to when (
             val instance =
-                loadExtensionSources(jarFile.absolutePath, className)
+                loadExtensionSources(jarFile, className)
         ) {
             is Source -> listOf(instance).filterIsInstance<HttpSource>()
             is SourceFactory -> instance.createSources().filterIsInstance<HttpSource>()

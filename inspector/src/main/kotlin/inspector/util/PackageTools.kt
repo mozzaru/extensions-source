@@ -22,7 +22,6 @@ import org.w3c.dom.Node
 import xyz.nulldev.androidcompat.pm.InstalledPackage.Companion.toList
 import xyz.nulldev.androidcompat.pm.toPackageInfo
 import java.io.File
-import java.net.URL
 import java.net.URLClassLoader
 import java.nio.file.Files
 import java.nio.file.Path
@@ -119,8 +118,8 @@ object PackageTools {
      * loads the extension main class called $className from the jar located at $jarPath
      * It may return an instance of HttpSource or SourceFactory depending on the extension.
      */
-    fun loadExtensionSources(jarPath: String, className: String): Any {
-        val classLoader = URLClassLoader(arrayOf<URL>(URL("file:$jarPath")))
+    fun loadExtensionSources(jarFile: File, className: String): Any {
+        val classLoader = URLClassLoader(arrayOf(jarFile.toURI().toURL()))
         val classToLoad = Class.forName(className, false, classLoader)
         return classToLoad.getDeclaredConstructor().newInstance()
     }
