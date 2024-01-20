@@ -6,37 +6,25 @@ import java.io.BufferedReader
 
 plugins {
     application
-    kotlin("jvm")
-    kotlin("plugin.serialization")
-    id("org.jmailen.kotlinter")
-    id("com.github.johnrengelman.shadow")
-    id("com.github.gmazzo.buildconfig")
+    alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.kotlinter)
+    alias(libs.plugins.shadowjar)
+    alias(libs.plugins.buildconfig)
 }
 
 dependencies {
-    // okhttp
-    val okhttpVersion = "5.0.0-alpha.11" // version is locked by Tachiyomi extensions
-    implementation("com.squareup.okhttp3:okhttp:$okhttpVersion")
-    implementation("com.squareup.okhttp3:logging-interceptor:$okhttpVersion")
-    implementation("com.squareup.okhttp3:okhttp-dnsoverhttps:$okhttpVersion")
-    implementation("com.squareup.okio:okio:3.3.0")
-
-    // dependencies of Tachiyomi extensions, some are duplicate, keeping it here for reference
-    implementation("com.github.inorichi.injekt:injekt-core:65b0440")
-    implementation("com.squareup.okhttp3:okhttp:$okhttpVersion")
-    implementation("io.reactivex:rxjava:1.3.8")
-    implementation("org.jsoup:jsoup:1.15.3")
-    implementation("app.cash.quickjs:quickjs-jvm:0.9.2")
+    implementation(libs.bundles.okhttp)
+    implementation(libs.bundles.tachiyomi)
 
     // AndroidCompat
     implementation(project(":AndroidCompat"))
     implementation(project(":AndroidCompat:Config"))
-
-    // uncomment to test extensions directly
-//    implementation(fileTree("lib/"))
 }
 
+@Suppress("PropertyName")
 val MainClass = "inspector.MainKt"
+
 application {
     mainClass.set(MainClass)
 }
@@ -56,7 +44,7 @@ val inspectorVersion = "v1.4.5"
 val inspectorRevision = runCatching {
     System.getenv("ProductRevision") ?: Runtime
         .getRuntime()
-        .exec("git rev-list HEAD --count")
+        .exec(arrayOf("git", "rev-list", "HEAD", "--count"))
         .let { process ->
             process.waitFor()
             val output = process.inputStream.use {
@@ -87,7 +75,7 @@ tasks {
                 mapOf(
                     "Main-Class" to MainClass,
                     "Implementation-Title" to rootProject.name,
-                    "Implementation-Vendor" to "The Tachiyomi Open Source Project",
+                    "Implementation-Vendor" to "The Keiyoushi Project",
                     "Specification-Version" to inspectorVersion,
                     "Implementation-Version" to inspectorRevision
                 )
@@ -101,10 +89,10 @@ tasks {
     withType<KotlinCompile> {
         kotlinOptions {
             freeCompilerArgs = listOf(
-                "-Xopt-in=kotlin.RequiresOptIn",
-                "-Xopt-in=kotlinx.coroutines.ExperimentalCoroutinesApi",
-                "-Xopt-in=kotlinx.coroutines.InternalCoroutinesApi",
-                "-Xopt-in=kotlin.io.path.ExperimentalPathApi",
+                "-opt-in=kotlin.RequiresOptIn",
+                "-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi",
+                "-opt-in=kotlinx.coroutines.InternalCoroutinesApi",
+                "-opt-in=kotlin.io.path.ExperimentalPathApi",
             )
         }
     }
