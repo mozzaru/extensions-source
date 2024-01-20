@@ -60,11 +60,10 @@ object Extension {
         dex2jar(apkFile, jarFile)
         extractAssetsFromApk(apkFile, jarFile)
 
+        val instance = loadExtensionSources(jarFile, className)
+
         // collect sources from the extension
-        return packageInfo.packageName to when (
-            val instance =
-                loadExtensionSources(jarFile, className)
-        ) {
+        return packageInfo.packageName to when (instance) {
             is Source -> listOf(instance).filterIsInstance<HttpSource>()
             is SourceFactory -> instance.createSources().filterIsInstance<HttpSource>()
             else -> throw RuntimeException("Unknown source class type! ${instance.javaClass}")
@@ -72,58 +71,31 @@ object Extension {
     }
 
     private fun extractAssetsFromApk(apkFile: File, jarFile: File) {
-        val assetsFolder = File("${apkFile.parent}/${apkFile.nameWithoutExtension}_assets")
-
-        assetsFolder.mkdirs()
-
-        ZipInputStream(apkFile.inputStream()).use { zis ->
-            generateSequence { zis.nextEntry }
-                .filter { it.name.startsWith("assets/") }
-                .forEach {
-                    val assetFile = File(assetsFolder, it.name)
-
-                    assetFile.parentFile.mkdirs()
-                    FileOutputStream(assetFile).use { os -> zis.copyTo(os) }
-                }
-            zis.closeEntry()
-            zis.close()
-        }
-
         val tempJarFile = File("${jarFile.parent}/${jarFile.nameWithoutExtension}_temp.jar")
+        val zos = ZipOutputStream(FileOutputStream(tempJarFile))
 
         ZipInputStream(jarFile.inputStream()).use { zis ->
-            val zos = ZipOutputStream(FileOutputStream(tempJarFile))
-
             generateSequence { zis.nextEntry }
                 .filterNot { it.name.startsWith("META-INF/") }
                 .forEach {
                     zos.putNextEntry(ZipEntry(it.name))
                     zis.copyTo(zos)
-                    zos.closeEntry()
                 }
-
-            assetsFolder.walkTopDown()
-                .filter { it.isFile }
-                .forEach {
-                    zos.putNextEntry(ZipEntry(it.relativeTo(assetsFolder).toString().replace('\\', '/')))
-                    it.inputStream().run {
-                        copyTo(zos)
-                        close()
-                    }
-                    zos.closeEntry()
-                }
-
-            zis.closeEntry()
             zis.close()
-            zos.closeEntry()
-            zos.close()
         }
 
+        ZipInputStream(apkFile.inputStream()).use { zis ->
+            generateSequence { zis.nextEntry }
+                .filter { it.name.startsWith("assets/") }
+                .forEach {
+                    zos.putNextEntry(ZipEntry(it.name))
+                    zis.copyTo(zos)
+                }
+            zis.close()
+        }
+
+        zos.close()
         jarFile.delete()
         tempJarFile.renameTo(jarFile)
-
-        if (!assetsFolder.deleteRecursively()) {
-            throw Exception("Could not delete assets folder.")
-        }
     }
 }
