@@ -1,58 +1,46 @@
 package eu.kanade.tachiyomi.extension.id.mgkomik
 
 import eu.kanade.tachiyomi.multisrc.madara.Madara
-import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
-import okhttp3.Request
+import okhttp3.Headers
+import okhttp3.OkHttpClient
 import java.text.SimpleDateFormat
 import java.util.Locale
+import java.util.concurrent.TimeUnit
+import kotlin.random.Random
 
-class MGKomik : Madara(
-    "MG Komik",
-    "https://mgkomik.org",
-    "id",
-    SimpleDateFormat("dd MMM yy", Locale.US),
-) {
-    override val useLoadMoreRequest = LoadMoreStrategy.Never
-    override val useNewChapterEndpoint = false
+class MGKomik : Madara("MG Komik", "https://mgkomik.org", "id", SimpleDateFormat("dd MMM yy", Locale.US)) {
+
+    override val client: OkHttpClient = super.client.newBuilder()
+        .rateLimit(20, 5, TimeUnit.SECONDS)
+        .build()
+
+    override fun headersBuilder(): Headers.Builder = super.headersBuilder()
+        .add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8")
+        .add("Accept-Language", "en-US,en;q=0.9,id;q=0.8")
+        .add("Sec-Fetch-Dest", "document")
+        .add("Sec-Fetch-Mode", "navigate")
+        .add("Sec-Fetch-Site", "same-origin")
+        .add("Sec-Fetch-User", "?1")
+        .add("Upgrade-Insecure-Requests", "1")
+        .add("X-Requested-With", randomString)
+
+    private fun generateRandomString(length: Int): String {
+        val charset = "HALOGaES.BCDFHIJKMNPQRTUVWXYZ.bcdefghijklmnopqrstuvwxyz0123456789"
+        return (1..length)
+            .map { charset.random() }
+            .joinToString("")
+    }
+
+    override fun searchPage(page: Int): String = if (page > 1) "page/$page/" else ""
+
+    private val randomLength = Random.Default.nextInt(13, 21)
+
+    private val randomString = generateRandomString(randomLength)
 
     override val mangaSubString = "komik"
 
-    override fun headersBuilder() = super.headersBuilder().apply {
-        add("Sec-Fetch-Dest", "document")
-        add("Sec-Fetch-Mode", "navigate")
-        add("Sec-Fetch-Site", "same-origin")
-        add("Upgrade-Insecure-Requests", "1")
-        add("X-Requested-With", randomString((1..20).random())) // added for webview, and removed in interceptor for normal use
-    }
-
-    override val client = network.cloudflareClient.newBuilder()
-        .addInterceptor { chain ->
-            val request = chain.request()
-            val headers = request.headers.newBuilder().apply {
-                removeAll("X-Requested-With")
-            }.build()
-
-            chain.proceed(request.newBuilder().headers(headers).build())
-        }
-        .rateLimit(9, 2)
-        .build()
-
-    override fun popularMangaNextPageSelector() = ".wp-pagenavi span.current + a"
-
     override fun searchMangaNextPageSelector() = "a.page.larger"
 
-    override fun latestUpdatesRequest(page: Int): Request =
-        if (useLoadMoreRequest()) {
-            loadMoreRequest(page, popular = false)
-        } else {
-            GET("$baseUrl/$mangaSubString/${searchPage(page)}", headers)
-        }
-
     override val chapterUrlSuffix = ""
-
-    private fun randomString(length: Int): String {
-        val charPool = ('a'..'z') + ('A'..'Z') + ('.')
-        return List(length) { charPool.random() }.joinToString("")
-    }
 }
