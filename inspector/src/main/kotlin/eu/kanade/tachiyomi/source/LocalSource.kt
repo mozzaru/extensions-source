@@ -8,7 +8,9 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import rx.Observable
 
-class LocalSource(private val context: Context) : CatalogueSource {
+class LocalSource(
+    private val context: Context,
+) : CatalogueSource {
     companion object {
         const val ID = 0L
     }
@@ -37,7 +39,7 @@ class LocalSource(private val context: Context) : CatalogueSource {
     override fun fetchSearchManga(
         page: Int,
         query: String,
-        filters: FilterList
+        filters: FilterList,
     ): Observable<MangasPage> {
         TODO("Not yet implemented")
     }

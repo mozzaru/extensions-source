@@ -5,7 +5,6 @@ import eu.kanade.tachiyomi.source.model.MangasPage
 import rx.Observable
 
 interface CatalogueSource : Source {
-
     /**
      * An ISO 639-1 compliant language code (two letters in lower case).
      */
@@ -30,7 +29,11 @@ interface CatalogueSource : Source {
      * @param query the search query.
      * @param filters the list of filters to apply.
      */
-    fun fetchSearchManga(page: Int, query: String, filters: FilterList): Observable<MangasPage>
+    fun fetchSearchManga(
+        page: Int,
+        query: String,
+        filters: FilterList,
+    ): Observable<MangasPage>
 
     /**
      * Returns an observable containing a page with a list of latest manga updates.

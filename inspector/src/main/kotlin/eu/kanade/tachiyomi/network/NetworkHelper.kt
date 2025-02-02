@@ -13,21 +13,25 @@ import eu.kanade.tachiyomi.network.interceptor.CloudflareInterceptor
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
-class NetworkHelper(context: Context) {
-
+class NetworkHelper(
+    context: Context,
+) {
     val cookieManager = MemoryCookieJar()
 
     val client by lazy {
-        val builder = OkHttpClient.Builder()
-            .cookieJar(cookieManager)
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(5, TimeUnit.MINUTES)
-            .writeTimeout(5, TimeUnit.MINUTES)
+        val builder =
+            OkHttpClient
+                .Builder()
+                .cookieJar(cookieManager)
+                .connectTimeout(30, TimeUnit.SECONDS)
+                .readTimeout(5, TimeUnit.MINUTES)
+                .writeTimeout(5, TimeUnit.MINUTES)
         builder.build()
     }
 
     val cloudflareClient by lazy {
-        client.newBuilder()
+        client
+            .newBuilder()
             .addInterceptor(CloudflareInterceptor())
             .build()
     }

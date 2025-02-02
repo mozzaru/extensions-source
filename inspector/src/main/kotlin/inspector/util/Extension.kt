@@ -30,7 +30,7 @@ object Extension {
 
     suspend fun installApk(
         tmpDir: File,
-        fetcher: suspend () -> File
+        fetcher: suspend () -> File,
     ): Pair<String, List<HttpSource>> {
         val apkFile = fetcher()
 
@@ -47,13 +47,15 @@ object Extension {
         if (libVersion < LIB_VERSION_MIN || libVersion > LIB_VERSION_MAX) {
             throw Exception(
                 "Lib version is $libVersion, while only versions " +
-                    "$LIB_VERSION_MIN to $LIB_VERSION_MAX are allowed"
+                    "$LIB_VERSION_MIN to $LIB_VERSION_MAX are allowed",
             )
         }
 
-        val className = packageInfo.packageName + packageInfo.applicationInfo.metaData.getString(
-            METADATA_SOURCE_CLASS
-        )
+        val className =
+            packageInfo.packageName +
+                packageInfo.applicationInfo.metaData.getString(
+                    METADATA_SOURCE_CLASS,
+                )
 
         logger.trace("Main class for extension is $className")
 
@@ -63,14 +65,18 @@ object Extension {
         val instance = loadExtensionSources(jarFile, className)
 
         // collect sources from the extension
-        return packageInfo.packageName to when (instance) {
-            is Source -> listOf(instance).filterIsInstance<HttpSource>()
-            is SourceFactory -> instance.createSources().filterIsInstance<HttpSource>()
-            else -> throw RuntimeException("Unknown source class type! ${instance.javaClass}")
-        }
+        return packageInfo.packageName to
+            when (instance) {
+                is Source -> listOf(instance).filterIsInstance<HttpSource>()
+                is SourceFactory -> instance.createSources().filterIsInstance<HttpSource>()
+                else -> throw RuntimeException("Unknown source class type! ${instance.javaClass}")
+            }
     }
 
-    private fun extractAssetsFromApk(apkFile: File, jarFile: File) {
+    private fun extractAssetsFromApk(
+        apkFile: File,
+        jarFile: File,
+    ) {
         val tempJarFile = File("${jarFile.parent}/${jarFile.nameWithoutExtension}_temp.jar")
         val zos = ZipOutputStream(FileOutputStream(tempJarFile))
 

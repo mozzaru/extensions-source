@@ -31,25 +31,25 @@ private class RateLimitInterceptor(
     period: Long,
     unit: TimeUnit,
 ) : Interceptor {
-
     private val requestQueue = ArrayList<Long>(permits)
     private val rateLimitMillis = unit.toMillis(period)
 
     override fun intercept(chain: Interceptor.Chain): Response {
         synchronized(requestQueue) {
             val now = SystemClock.elapsedRealtime()
-            val waitTime = if (requestQueue.size < permits) {
-                0
-            } else {
-                val oldestReq = requestQueue[0]
-                val newestReq = requestQueue[permits - 1]
-
-                if (newestReq - oldestReq > rateLimitMillis) {
+            val waitTime =
+                if (requestQueue.size < permits) {
                     0
                 } else {
-                    oldestReq + rateLimitMillis - now // Remaining time
+                    val oldestReq = requestQueue[0]
+                    val newestReq = requestQueue[permits - 1]
+
+                    if (newestReq - oldestReq > rateLimitMillis) {
+                        0
+                    } else {
+                        oldestReq + rateLimitMillis - now // Remaining time
+                    }
                 }
-            }
 
             if (requestQueue.size == permits) {
                 requestQueue.removeAt(0)

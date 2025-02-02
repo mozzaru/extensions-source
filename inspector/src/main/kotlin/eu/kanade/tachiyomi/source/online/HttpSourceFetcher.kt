@@ -12,14 +12,14 @@ fun HttpSource.getImageUrl(page: Page): Observable<Page> {
         .map { page }
 }
 
-fun HttpSource.fetchAllImageUrlsFromPageList(pages: List<Page>): Observable<Page> {
-    return Observable.from(pages)
+fun HttpSource.fetchAllImageUrlsFromPageList(pages: List<Page>): Observable<Page> =
+    Observable
+        .from(pages)
         .filter { !it.imageUrl.isNullOrEmpty() }
         .mergeWith(fetchRemainingImageUrlsFromPageList(pages))
-}
 
-fun HttpSource.fetchRemainingImageUrlsFromPageList(pages: List<Page>): Observable<Page> {
-    return Observable.from(pages)
+fun HttpSource.fetchRemainingImageUrlsFromPageList(pages: List<Page>): Observable<Page> =
+    Observable
+        .from(pages)
         .filter { it.imageUrl.isNullOrEmpty() }
         .concatMap { getImageUrl(it) }
-}

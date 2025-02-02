@@ -34,7 +34,10 @@ class MemoryCookieJar : CookieJar {
     }
 
     @Synchronized
-    override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
+    override fun saveFromResponse(
+        url: HttpUrl,
+        cookies: List<Cookie>,
+    ) {
         val cookiesToAdd = cookies.map { WrappedCookie.wrap(it) }
 
         cache.removeAll(cookiesToAdd)
@@ -47,7 +50,9 @@ class MemoryCookieJar : CookieJar {
     }
 }
 
-class WrappedCookie private constructor(val cookie: Cookie) {
+class WrappedCookie private constructor(
+    val cookie: Cookie,
+) {
     fun unwrap() = cookie
 
     fun isExpired() = cookie.expiresAt < System.currentTimeMillis()

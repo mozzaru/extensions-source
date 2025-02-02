@@ -1,3 +1,5 @@
+@file:Suppress("ktlint:standard:function-naming")
+
 package eu.kanade.tachiyomi.network
 
 import okhttp3.CacheControl
@@ -15,14 +17,14 @@ private val DEFAULT_BODY: RequestBody = FormBody.Builder().build()
 fun GET(
     url: String,
     headers: Headers = DEFAULT_HEADERS,
-    cache: CacheControl = DEFAULT_CACHE_CONTROL
-): Request {
-    return Request.Builder()
+    cache: CacheControl = DEFAULT_CACHE_CONTROL,
+): Request =
+    Request
+        .Builder()
         .url(url)
         .headers(headers)
         .cacheControl(cache)
         .build()
-}
 
 /**
  * @since extensions-lib 1.4
@@ -31,24 +33,24 @@ fun GET(
     url: HttpUrl,
     headers: Headers = DEFAULT_HEADERS,
     cache: CacheControl = DEFAULT_CACHE_CONTROL,
-): Request {
-    return Request.Builder()
+): Request =
+    Request
+        .Builder()
         .url(url)
         .headers(headers)
         .cacheControl(cache)
         .build()
-}
 
 fun POST(
     url: String,
     headers: Headers = DEFAULT_HEADERS,
     body: RequestBody = DEFAULT_BODY,
-    cache: CacheControl = DEFAULT_CACHE_CONTROL
-): Request {
-    return Request.Builder()
+    cache: CacheControl = DEFAULT_CACHE_CONTROL,
+): Request =
+    Request
+        .Builder()
         .url(url)
         .post(body)
         .headers(headers)
         .cacheControl(cache)
         .build()
-}

@@ -8,9 +8,8 @@ open class Page(
     val index: Int,
     val url: String = "",
     var imageUrl: String? = null,
-    @Transient var uri: Uri? = null // Deprecated but can't be deleted due to extensions
+    @Transient var uri: Uri? = null, // Deprecated but can't be deleted due to extensions
 ) : ProgressListener {
-
     val number: Int
         get() = index + 1
 
@@ -37,12 +36,17 @@ open class Page(
     @Transient
     private var statusCallback: ((Page) -> Unit)? = null
 
-    override fun update(bytesRead: Long, contentLength: Long, done: Boolean) {
-        progress = if (contentLength > 0) {
-            (100 * bytesRead / contentLength).toInt()
-        } else {
-            -1
-        }
+    override fun update(
+        bytesRead: Long,
+        contentLength: Long,
+        done: Boolean,
+    ) {
+        progress =
+            if (contentLength > 0) {
+                (100 * bytesRead / contentLength).toInt()
+            } else {
+                -1
+            }
     }
 
     fun setStatusSubject(subject: Subject<Int, Int>?) {

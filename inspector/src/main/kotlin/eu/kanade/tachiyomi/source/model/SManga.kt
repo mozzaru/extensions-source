@@ -1,9 +1,10 @@
+@file:Suppress("ktlint:standard:property-naming")
+
 package eu.kanade.tachiyomi.source.model
 
 import java.io.Serializable
 
 interface SManga : Serializable {
-
     var url: String
 
     var title: String
@@ -61,8 +62,6 @@ interface SManga : Serializable {
         const val CANCELLED = 5
         const val ON_HIATUS = 6
 
-        fun create(): SManga {
-            return SMangaImpl()
-        }
+        fun create(): SManga = SMangaImpl()
     }
 }

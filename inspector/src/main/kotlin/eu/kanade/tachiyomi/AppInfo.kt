@@ -7,5 +7,6 @@ package eu.kanade.tachiyomi
  */
 object AppInfo {
     fun getVersionCode() = BuildConfig.VERSION_CODE
+
     fun getVersionName() = BuildConfig.VERSION_NAME
 }
