@@ -15635,10 +15635,10 @@
   {
     "name": "Tachiyomi: Knight No Scanlation",
     "pkg": "eu.kanade.tachiyomi.extension.es.knightnoscanlation",
-    "apk": "tachiyomi-es.knightnoscanlation-v1.4.44.apk",
+    "apk": "tachiyomi-es.knightnoscanlation-v1.4.45.apk",
     "lang": "es",
-    "code": 44,
-    "version": "1.4.44",
+    "code": 45,
+    "version": "1.4.45",
     "nsfw": 1,
     "sources": [
       {
@@ -15873,17 +15873,17 @@
   {
     "name": "Tachiyomi: Manga Crab",
     "pkg": "eu.kanade.tachiyomi.extension.es.mangacrab",
-    "apk": "tachiyomi-es.mangacrab-v1.4.50.apk",
+    "apk": "tachiyomi-es.mangacrab-v1.4.51.apk",
     "lang": "es",
-    "code": 50,
-    "version": "1.4.50",
+    "code": 51,
+    "version": "1.4.51",
     "nsfw": 0,
     "sources": [
       {
         "name": "Manga Crab",
         "lang": "es",
         "id": "6167683270485370369",
-        "baseUrl": "https://wikicrab.xyz"
+        "baseUrl": "https://mangacrab.org"
       }
     ]
   },
@@ -25010,17 +25010,17 @@
   {
     "name": "Tachiyomi: Gri Melek",
     "pkg": "eu.kanade.tachiyomi.extension.tr.siyahmelek",
-    "apk": "tachiyomi-tr.siyahmelek-v1.4.51.apk",
+    "apk": "tachiyomi-tr.siyahmelek-v1.4.52.apk",
     "lang": "tr",
-    "code": 51,
-    "version": "1.4.51",
+    "code": 52,
+    "version": "1.4.52",
     "nsfw": 1,
     "sources": [
       {
         "name": "Gri Melek",
         "lang": "tr",
         "id": "6419959498055001014",
-        "baseUrl": "https://grimelek.love"
+        "baseUrl": "https://grimelek.online"
       }
     ]
   },
