@@ -19799,6 +19799,23 @@
     ]
   },
   {
+    "name": "Tachiyomi: Manga Mura",
+    "pkg": "eu.kanade.tachiyomi.extension.ja.mangamura",
+    "apk": "tachiyomi-ja.mangamura-v1.4.3.apk",
+    "lang": "ja",
+    "code": 3,
+    "version": "1.4.3",
+    "nsfw": 1,
+    "sources": [
+      {
+        "name": "Manga Mura",
+        "lang": "ja",
+        "id": "1006356371941619891",
+        "baseUrl": "https://mangamura.net"
+      }
+    ]
+  },
+  {
     "name": "Tachiyomi: Manga Raw.org",
     "pkg": "eu.kanade.tachiyomi.extension.ja.mangaraworg",
     "apk": "tachiyomi-ja.mangaraworg-v1.4.31.apk",
