@@ -20543,6 +20543,23 @@
     ]
   },
   {
+    "name": "Tachiyomi: Ego Toons",
+    "pkg": "eu.kanade.tachiyomi.extension.pt.egotoons",
+    "apk": "tachiyomi-pt.egotoons-v1.4.1.apk",
+    "lang": "pt-BR",
+    "code": 1,
+    "version": "1.4.1",
+    "nsfw": 1,
+    "sources": [
+      {
+        "name": "Ego Toons",
+        "lang": "pt-BR",
+        "id": "5217284007257242497",
+        "baseUrl": "https://egotoons.com"
+      }
+    ]
+  },
+  {
     "name": "Tachiyomi: Eleven Scanlator",
     "pkg": "eu.kanade.tachiyomi.extension.pt.elevenscanlator",
     "apk": "tachiyomi-pt.elevenscanlator-v1.4.10.apk",
@@ -20698,16 +20715,16 @@
   {
     "name": "Tachiyomi: Galinha Samurai Scan",
     "pkg": "eu.kanade.tachiyomi.extension.pt.galinhasamuraiscan",
-    "apk": "tachiyomi-pt.galinhasamuraiscan-v1.4.41.apk",
+    "apk": "tachiyomi-pt.galinhasamuraiscan-v1.4.42.apk",
     "lang": "pt-BR",
-    "code": 41,
-    "version": "1.4.41",
+    "code": 42,
+    "version": "1.4.42",
     "nsfw": 0,
     "sources": [
       {
         "name": "Galinha Samurai Scan",
         "lang": "pt-BR",
-        "id": "6629098298979987882",
+        "id": "5085205208030136350",
         "baseUrl": "https://galinhasamurai.com"
       }
     ]
@@ -21478,6 +21495,23 @@
     ]
   },
   {
+    "name": "Tachiyomi: Neko Toons",
+    "pkg": "eu.kanade.tachiyomi.extension.pt.nekotoons",
+    "apk": "tachiyomi-pt.nekotoons-v1.4.1.apk",
+    "lang": "pt-BR",
+    "code": 1,
+    "version": "1.4.1",
+    "nsfw": 1,
+    "sources": [
+      {
+        "name": "Neko Toons",
+        "lang": "pt-BR",
+        "id": "9002071416352882483",
+        "baseUrl": "https://nekotoons.site"
+      }
+    ]
+  },
+  {
     "name": "Tachiyomi: Ninja Scan",
     "pkg": "eu.kanade.tachiyomi.extension.pt.ninjascan",
     "apk": "tachiyomi-pt.ninjascan-v1.4.43.apk",
@@ -21633,17 +21667,17 @@
   {
     "name": "Tachiyomi: Pluma Comics",
     "pkg": "eu.kanade.tachiyomi.extension.pt.plumacomics",
-    "apk": "tachiyomi-pt.plumacomics-v1.4.41.apk",
+    "apk": "tachiyomi-pt.plumacomics-v1.4.42.apk",
     "lang": "pt-BR",
-    "code": 41,
-    "version": "1.4.41",
+    "code": 42,
+    "version": "1.4.42",
     "nsfw": 0,
     "sources": [
       {
         "name": "Pluma Comics",
         "lang": "pt-BR",
-        "id": "7649412087005162215",
-        "baseUrl": "https://plumacomics.cloud"
+        "id": "94625443821099088",
+        "baseUrl": "https://new.plumacomics.cloud"
       }
     ]
   },
@@ -21854,16 +21888,16 @@
   {
     "name": "Tachiyomi: Spectral Scan",
     "pkg": "eu.kanade.tachiyomi.extension.pt.spectralscan",
-    "apk": "tachiyomi-pt.spectralscan-v1.4.41.apk",
+    "apk": "tachiyomi-pt.spectralscan-v1.4.42.apk",
     "lang": "pt-BR",
-    "code": 41,
-    "version": "1.4.41",
+    "code": 42,
+    "version": "1.4.42",
     "nsfw": 0,
     "sources": [
       {
         "name": "Spectral Scan",
         "lang": "pt-BR",
-        "id": "8652712100827488648",
+        "id": "3635528497630589819",
         "baseUrl": "https://spectralscan.xyz"
       }
     ]
@@ -22262,10 +22296,10 @@
   {
     "name": "Tachiyomi: Yushuke Mangas",
     "pkg": "eu.kanade.tachiyomi.extension.pt.yushukemangas",
-    "apk": "tachiyomi-pt.yushukemangas-v1.4.6.apk",
+    "apk": "tachiyomi-pt.yushukemangas-v1.4.7.apk",
     "lang": "pt-BR",
-    "code": 6,
-    "version": "1.4.6",
+    "code": 7,
+    "version": "1.4.7",
     "nsfw": 0,
     "sources": [
       {
