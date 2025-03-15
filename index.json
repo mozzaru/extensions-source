@@ -10586,10 +10586,10 @@
   {
     "name": "Tachiyomi: MangaFox.fun",
     "pkg": "eu.kanade.tachiyomi.extension.en.mangafoxfun",
-    "apk": "tachiyomi-en.mangafoxfun-v1.4.29.apk",
+    "apk": "tachiyomi-en.mangafoxfun-v1.4.30.apk",
     "lang": "en",
-    "code": 29,
-    "version": "1.4.29",
+    "code": 30,
+    "version": "1.4.30",
     "nsfw": 1,
     "sources": [
       {
@@ -10756,10 +10756,10 @@
   {
     "name": "Tachiyomi: MangaHere.onl",
     "pkg": "eu.kanade.tachiyomi.extension.en.mangahereonl",
-    "apk": "tachiyomi-en.mangahereonl-v1.4.29.apk",
+    "apk": "tachiyomi-en.mangahereonl-v1.4.30.apk",
     "lang": "en",
-    "code": 29,
-    "version": "1.4.29",
+    "code": 30,
+    "version": "1.4.30",
     "nsfw": 1,
     "sources": [
       {
@@ -10773,10 +10773,10 @@
   {
     "name": "Tachiyomi: MangaHub",
     "pkg": "eu.kanade.tachiyomi.extension.en.mangahubio",
-    "apk": "tachiyomi-en.mangahubio-v1.4.39.apk",
+    "apk": "tachiyomi-en.mangahubio-v1.4.40.apk",
     "lang": "en",
-    "code": 39,
-    "version": "1.4.39",
+    "code": 40,
+    "version": "1.4.40",
     "nsfw": 1,
     "sources": [
       {
@@ -10807,10 +10807,10 @@
   {
     "name": "Tachiyomi: Mangakakalot.fun",
     "pkg": "eu.kanade.tachiyomi.extension.en.mangakakalotfun",
-    "apk": "tachiyomi-en.mangakakalotfun-v1.4.29.apk",
+    "apk": "tachiyomi-en.mangakakalotfun-v1.4.30.apk",
     "lang": "en",
-    "code": 29,
-    "version": "1.4.29",
+    "code": 30,
+    "version": "1.4.30",
     "nsfw": 1,
     "sources": [
       {
@@ -10943,10 +10943,10 @@
   {
     "name": "Tachiyomi: MangaNel",
     "pkg": "eu.kanade.tachiyomi.extension.en.manganel",
-    "apk": "tachiyomi-en.manganel-v1.4.29.apk",
+    "apk": "tachiyomi-en.manganel-v1.4.30.apk",
     "lang": "en",
-    "code": 29,
-    "version": "1.4.29",
+    "code": 30,
+    "version": "1.4.30",
     "nsfw": 1,
     "sources": [
       {
@@ -10994,10 +10994,10 @@
   {
     "name": "Tachiyomi: MangaOnline.fun",
     "pkg": "eu.kanade.tachiyomi.extension.en.mangaonlinefun",
-    "apk": "tachiyomi-en.mangaonlinefun-v1.4.29.apk",
+    "apk": "tachiyomi-en.mangaonlinefun-v1.4.30.apk",
     "lang": "en",
-    "code": 29,
-    "version": "1.4.29",
+    "code": 30,
+    "version": "1.4.30",
     "nsfw": 1,
     "sources": [
       {
@@ -11045,10 +11045,10 @@
   {
     "name": "Tachiyomi: MangaPanda.onl",
     "pkg": "eu.kanade.tachiyomi.extension.en.mangapandaonl",
-    "apk": "tachiyomi-en.mangapandaonl-v1.4.29.apk",
+    "apk": "tachiyomi-en.mangapandaonl-v1.4.30.apk",
     "lang": "en",
-    "code": 29,
-    "version": "1.4.29",
+    "code": 30,
+    "version": "1.4.30",
     "nsfw": 0,
     "sources": [
       {
@@ -11181,10 +11181,10 @@
   {
     "name": "Tachiyomi: MangaReader.site",
     "pkg": "eu.kanade.tachiyomi.extension.en.mangareadersite",
-    "apk": "tachiyomi-en.mangareadersite-v1.4.29.apk",
+    "apk": "tachiyomi-en.mangareadersite-v1.4.30.apk",
     "lang": "en",
-    "code": 29,
-    "version": "1.4.29",
+    "code": 30,
+    "version": "1.4.30",
     "nsfw": 0,
     "sources": [
       {
@@ -11300,10 +11300,10 @@
   {
     "name": "Tachiyomi: MangaToday",
     "pkg": "eu.kanade.tachiyomi.extension.en.mangatoday",
-    "apk": "tachiyomi-en.mangatoday-v1.4.29.apk",
+    "apk": "tachiyomi-en.mangatoday-v1.4.30.apk",
     "lang": "en",
-    "code": 29,
-    "version": "1.4.29",
+    "code": 30,
+    "version": "1.4.30",
     "nsfw": 1,
     "sources": [
       {
@@ -12524,10 +12524,10 @@
   {
     "name": "Tachiyomi: 1Manga.co",
     "pkg": "eu.kanade.tachiyomi.extension.en.onemangaco",
-    "apk": "tachiyomi-en.onemangaco-v1.4.29.apk",
+    "apk": "tachiyomi-en.onemangaco-v1.4.30.apk",
     "lang": "en",
-    "code": 29,
-    "version": "1.4.29",
+    "code": 30,
+    "version": "1.4.30",
     "nsfw": 1,
     "sources": [
       {
@@ -12541,10 +12541,10 @@
   {
     "name": "Tachiyomi: OneManga.info",
     "pkg": "eu.kanade.tachiyomi.extension.en.onemangainfo",
-    "apk": "tachiyomi-en.onemangainfo-v1.4.29.apk",
+    "apk": "tachiyomi-en.onemangainfo-v1.4.30.apk",
     "lang": "en",
-    "code": 29,
-    "version": "1.4.29",
+    "code": 30,
+    "version": "1.4.30",
     "nsfw": 1,
     "sources": [
       {
@@ -26121,17 +26121,17 @@
   {
     "name": "Tachiyomi: Yidan Girl",
     "pkg": "eu.kanade.tachiyomi.extension.zh.yidan",
-    "apk": "tachiyomi-zh.yidan-v1.4.3.apk",
+    "apk": "tachiyomi-zh.yidan-v1.4.4.apk",
     "lang": "zh",
-    "code": 3,
-    "version": "1.4.3",
+    "code": 4,
+    "version": "1.4.4",
     "nsfw": 1,
     "sources": [
       {
         "name": "一耽女孩",
         "lang": "zh",
         "id": "2417676426413230210",
-        "baseUrl": "https://ydan.cc"
+        "baseUrl": "https://yidan1.club"
       }
     ]
   },
