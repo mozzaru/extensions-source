@@ -10127,10 +10127,10 @@
   {
     "name": "Tachiyomi: Lily Manga",
     "pkg": "eu.kanade.tachiyomi.extension.en.lilymanga",
-    "apk": "tachiyomi-en.lilymanga-v1.4.44.apk",
+    "apk": "tachiyomi-en.lilymanga-v1.4.45.apk",
     "lang": "en",
-    "code": 44,
-    "version": "1.4.44",
+    "code": 45,
+    "version": "1.4.45",
     "nsfw": 1,
     "sources": [
       {
