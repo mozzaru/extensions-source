@@ -8748,6 +8748,23 @@
     ]
   },
   {
+    "name": "Tachiyomi: El Goonish Shive",
+    "pkg": "eu.kanade.tachiyomi.extension.en.egscomics",
+    "apk": "tachiyomi-en.egscomics-v1.4.1.apk",
+    "lang": "en",
+    "code": 1,
+    "version": "1.4.1",
+    "nsfw": 0,
+    "sources": [
+      {
+        "name": "El Goonish Shive",
+        "lang": "en",
+        "id": "6631281276194159210",
+        "baseUrl": "https://www.egscomics.com"
+      }
+    ]
+  },
+  {
     "name": "Tachiyomi: 18 Porn Comic",
     "pkg": "eu.kanade.tachiyomi.extension.en.eighteenporncomic",
     "apk": "tachiyomi-en.eighteenporncomic-v1.4.1.apk",
@@ -25271,17 +25288,17 @@
   {
     "name": "Tachiyomi: Top Truyen",
     "pkg": "eu.kanade.tachiyomi.extension.vi.toptruyen",
-    "apk": "tachiyomi-vi.toptruyen-v1.4.15.apk",
+    "apk": "tachiyomi-vi.toptruyen-v1.4.16.apk",
     "lang": "vi",
-    "code": 15,
-    "version": "1.4.15",
+    "code": 16,
+    "version": "1.4.16",
     "nsfw": 1,
     "sources": [
       {
         "name": "Top Truyen",
         "lang": "vi",
         "id": "1166901607721102706",
-        "baseUrl": "https://www.toptruyentv.pro"
+        "baseUrl": "https://www.toptruyentv2.pro"
       }
     ]
   },
