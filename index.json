@@ -225,6 +225,23 @@
     ]
   },
   {
+    "name": "Tachiyomi: BaoBua",
+    "pkg": "eu.kanade.tachiyomi.extension.all.baobua",
+    "apk": "tachiyomi-all.baobua-v1.4.1.apk",
+    "lang": "all",
+    "code": 1,
+    "version": "1.4.1",
+    "nsfw": 1,
+    "sources": [
+      {
+        "name": "BaoBua",
+        "lang": "all",
+        "id": "514187608699312366",
+        "baseUrl": "https://www.baobua.net"
+      }
+    ]
+  },
+  {
     "name": "Tachiyomi: Bato.to",
     "pkg": "eu.kanade.tachiyomi.extension.all.batoto",
     "apk": "tachiyomi-all.batoto-v1.4.49.apk",
@@ -4899,6 +4916,23 @@
         "lang": "all",
         "id": "3558188315762724556",
         "baseUrl": "https://mihentai.com"
+      }
+    ]
+  },
+  {
+    "name": "Tachiyomi: MissKon",
+    "pkg": "eu.kanade.tachiyomi.extension.all.misskon",
+    "apk": "tachiyomi-all.misskon-v1.4.1.apk",
+    "lang": "all",
+    "code": 1,
+    "version": "1.4.1",
+    "nsfw": 1,
+    "sources": [
+      {
+        "name": "MissKon",
+        "lang": "all",
+        "id": "492049561920540214",
+        "baseUrl": "https://misskon.com"
       }
     ]
   },
