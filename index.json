@@ -3053,10 +3053,10 @@
   {
     "name": "Tachiyomi: Komga",
     "pkg": "eu.kanade.tachiyomi.extension.all.komga",
-    "apk": "tachiyomi-all.komga-v1.4.61.apk",
+    "apk": "tachiyomi-all.komga-v1.4.62.apk",
     "lang": "all",
-    "code": 61,
-    "version": "1.4.61",
+    "code": 62,
+    "version": "1.4.62",
     "nsfw": 0,
     "sources": [
       {
@@ -17528,10 +17528,10 @@
   {
     "name": "Tachiyomi: DoujinDesu",
     "pkg": "eu.kanade.tachiyomi.extension.id.doujindesu",
-    "apk": "tachiyomi-id.doujindesu-v1.4.9.apk",
+    "apk": "tachiyomi-id.doujindesu-v1.4.10.apk",
     "lang": "id",
-    "code": 9,
-    "version": "1.4.9",
+    "code": 10,
+    "version": "1.4.10",
     "nsfw": 1,
     "sources": [
       {
@@ -25129,17 +25129,17 @@
   {
     "name": "Tachiyomi: CBHentai",
     "pkg": "eu.kanade.tachiyomi.extension.vi.hentaicube",
-    "apk": "tachiyomi-vi.hentaicube-v1.4.58.apk",
+    "apk": "tachiyomi-vi.hentaicube-v1.4.59.apk",
     "lang": "vi",
-    "code": 58,
-    "version": "1.4.58",
+    "code": 59,
+    "version": "1.4.59",
     "nsfw": 1,
     "sources": [
       {
         "name": "CBHentai",
         "lang": "vi",
         "id": "823638192569572166",
-        "baseUrl": "https://hentaicb.bar"
+        "baseUrl": "https://hentaicb.fit"
       }
     ]
   },
