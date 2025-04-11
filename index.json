@@ -8412,6 +8412,23 @@
     ]
   },
   {
+    "name": "Tachiyomi: ComicHubFree",
+    "pkg": "eu.kanade.tachiyomi.extension.en.comichubfree",
+    "apk": "tachiyomi-en.comichubfree-v1.4.1.apk",
+    "lang": "en",
+    "code": 1,
+    "version": "1.4.1",
+    "nsfw": 0,
+    "sources": [
+      {
+        "name": "ComicHubFree",
+        "lang": "en",
+        "id": "2310489567413492709",
+        "baseUrl": "https://comichubfree.com"
+      }
+    ]
+  },
+  {
     "name": "Tachiyomi: Manhuagold",
     "pkg": "eu.kanade.tachiyomi.extension.en.comickiba",
     "apk": "tachiyomi-en.comickiba-v1.4.37.apk",
