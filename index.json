@@ -21470,23 +21470,6 @@
     ]
   },
   {
-    "name": "Tachiyomi: Lunar Scan",
-    "pkg": "eu.kanade.tachiyomi.extension.pt.lunarscan",
-    "apk": "tachiyomi-pt.lunarscan-v1.4.44.apk",
-    "lang": "pt-BR",
-    "code": 44,
-    "version": "1.4.44",
-    "nsfw": 0,
-    "sources": [
-      {
-        "name": "Lunar Scan",
-        "lang": "pt-BR",
-        "id": "5914813814432882097",
-        "baseUrl": "https://lunarrscan.com"
-      }
-    ]
-  },
-  {
     "name": "Tachiyomi: MahouScan",
     "pkg": "eu.kanade.tachiyomi.extension.pt.mahouscan",
     "apk": "tachiyomi-pt.mahouscan-v1.4.4.apk",
@@ -22135,10 +22118,10 @@
   {
     "name": "Tachiyomi: Remangas",
     "pkg": "eu.kanade.tachiyomi.extension.pt.remangas",
-    "apk": "tachiyomi-pt.remangas-v1.4.43.apk",
+    "apk": "tachiyomi-pt.remangas-v1.4.44.apk",
     "lang": "pt-BR",
-    "code": 43,
-    "version": "1.4.43",
+    "code": 44,
+    "version": "1.4.44",
     "nsfw": 1,
     "sources": [
       {
