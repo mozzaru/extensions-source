@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.extension.id.mgkomik
 
+import eu.kanade.tachiyomi.extension.id.mgkomik.UserAgents
 import eu.kanade.tachiyomi.multisrc.madara.Madara
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
@@ -23,18 +24,29 @@ class MGKomik : Madara(
     override val mangaSubString = "komik"
 
     override fun headersBuilder() = super.headersBuilder().apply {
-        add("Sec-Fetch-Dest", "document")
-        add("Sec-Fetch-Mode", "navigate")
-        add("Sec-Fetch-Site", "same-origin")
-        add("Upgrade-Insecure-Requests", "1")
-        add("X-Requested-With", randomString((1..20).random())) // added for webview, and removed in interceptor for normal use
+    val userAgents = listOf(
+        UserAgents.CHROME_MOBILE,
+        UserAgents.FIREFOX_MOBILE,
+        UserAgents.CHROME_DESKTOP,
+        UserAgents.FIREFOX_DESKTOP,
+    )
+
+    set("User-Agent", userAgents.random()) // Random User-Agent dari object
+    set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
+    set("Accept-Language", "en-US,en;q=0.5")
+    set("Referer", baseUrl)
+    add("Sec-Fetch-Dest", "document")
+    add("Sec-Fetch-Mode", "navigate")
+    add("Sec-Fetch-Site", "same-origin")
+    add("Upgrade-Insecure-Requests", "1")
+    add("X-Requested-With", randomString((1..20).random())) // added for webview
     }
 
     override val client = network.cloudflareClient.newBuilder()
         .addInterceptor { chain ->
             val request = chain.request()
             val headers = request.headers.newBuilder().apply {
-                removeAll("X-Requested-With")
+                removeAll("X-Requested-With") // remove for normal requests
             }.build()
 
             chain.proceed(request.newBuilder().headers(headers).build())
@@ -42,11 +54,7 @@ class MGKomik : Madara(
         .rateLimit(9, 2)
         .build()
 
-    // ================================== Popular ======================================
-
     override fun popularMangaNextPageSelector() = ".wp-pagenavi span.current + a"
-
-    // ================================== Latest =======================================
 
     override fun latestUpdatesRequest(page: Int): Request =
         if (useLoadMoreRequest()) {
@@ -54,8 +62,6 @@ class MGKomik : Madara(
         } else {
             GET("$baseUrl/$mangaSubString/${searchPage(page)}", headers)
         }
-
-    // ================================== Search =======================================
 
     override fun searchRequest(page: Int, query: String, filters: FilterList): Request {
         filters.forEach { filter ->
@@ -77,11 +83,7 @@ class MGKomik : Madara(
 
     override fun searchMangaNextPageSelector() = "a.page.larger"
 
-    // ================================ Chapters ================================
-
     override val chapterUrlSuffix = ""
-
-    // ================================ Filters ================================
 
     override fun getFilterList(): FilterList {
         launchIO { fetchGenres() }
@@ -121,8 +123,6 @@ class MGKomik : Madara(
         }
         return genres
     }
-
-    // =============================== Utilities ==============================
 
     private fun randomString(length: Int): String {
         val charPool = ('a'..'z') + ('A'..'Z') + ('.')
