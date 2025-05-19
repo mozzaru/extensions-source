@@ -7,7 +7,7 @@ class AinzScansID : MangaThemesia(
     "Ainz Scans ID",
     "https://ainzscans.net",
     "id",
-    "/series"
+    "/series",
 ) {
     override val hasProjectPage = true
 

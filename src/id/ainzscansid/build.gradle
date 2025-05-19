@@ -3,7 +3,7 @@ ext {
     extClass = '.AinzScansID'
     themePkg = 'mangathemesia'
     baseUrl = 'https://ainzscans.net'
-    overrideVersionCode = 1
+    overrideVersionCode = 2
     isNsfw = false
 }
 
