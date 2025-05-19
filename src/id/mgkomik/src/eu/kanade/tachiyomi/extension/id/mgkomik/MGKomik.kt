@@ -16,6 +16,7 @@ class MGKomik : Madara(
     "id",
     SimpleDateFormat("dd MMM yy", Locale.US),
 ) {
+
     override val useLoadMoreRequest = LoadMoreStrategy.Never
 
     override val useNewChapterEndpoint = false
@@ -23,11 +24,12 @@ class MGKomik : Madara(
     override val mangaSubString = "komik"
 
     override fun headersBuilder() = super.headersBuilder().apply {
+        add("User-Agent", USER_AGENT)
         add("Sec-Fetch-Dest", "document")
         add("Sec-Fetch-Mode", "navigate")
         add("Sec-Fetch-Site", "same-origin")
         add("Upgrade-Insecure-Requests", "1")
-        add("X-Requested-With", randomString((1..20).random())) // added for webview, and removed in interceptor for normal use
+        add("X-Requested-With", randomString((1..20).random()))
     }
 
     override val client = network.cloudflareClient.newBuilder()
@@ -36,17 +38,16 @@ class MGKomik : Madara(
             val headers = request.headers.newBuilder().apply {
                 removeAll("X-Requested-With")
             }.build()
-
             chain.proceed(request.newBuilder().headers(headers).build())
         }
         .rateLimit(9, 2)
         .build()
 
-    // ================================== Popular ======================================
+    // ============================== Popular ==============================
 
     override fun popularMangaNextPageSelector() = ".wp-pagenavi span.current + a"
 
-    // ================================== Latest =======================================
+    // ============================== Latest ==============================
 
     override fun latestUpdatesRequest(page: Int): Request =
         if (useLoadMoreRequest()) {
@@ -55,37 +56,35 @@ class MGKomik : Madara(
             GET("$baseUrl/$mangaSubString/${searchPage(page)}", headers)
         }
 
-    // ================================== Search =======================================
+    // ============================== Search ==============================
 
     override fun searchRequest(page: Int, query: String, filters: FilterList): Request {
         filters.forEach { filter ->
             when (filter) {
                 is GenreContentFilter -> {
                     val url = filter.toUriPart()
-                    if (url.isBlank()) {
-                        return@forEach
+                    if (url.isNotBlank()) {
+                        return GET("$baseUrl$url", headers)
                     }
-                    return GET(filter.toUriPart(), headers)
                 }
-                else -> {}
+                else -> { /* no-op for other filters */ }
             }
         }
         return super.searchRequest(page, query, filters)
     }
 
-    override fun searchMangaSelector() = "${super.searchMangaSelector()}, .page-listing-item .page-item-detail"
+    override fun searchMangaSelector() =
+        "${super.searchMangaSelector()}, .page-listing-item .page-item-detail"
 
     override fun searchMangaNextPageSelector() = "a.page.larger"
 
-    // ================================ Chapters ================================
+    // ============================== Chapters ==============================
 
     override val chapterUrlSuffix = ""
 
-    // ================================ Filters ================================
+    // ============================== Filters ==============================
 
     override fun getFilterList(): FilterList {
-        launchIO { fetchGenres() }
-
         val filters = super.getFilterList().list.toMutableList()
 
         filters += if (genresList.isNotEmpty()) {
@@ -106,10 +105,8 @@ class MGKomik : Madara(
         return FilterList(filters)
     }
 
-    private class GenreContentFilter(title: String, options: List<Pair<String, String>>) : UriPartFilter(
-        title,
-        options.toTypedArray(),
-    )
+    private class GenreContentFilter(title: String, options: List<Pair<String, String>>) :
+        UriPartFilter(title, options.toTypedArray())
 
     override fun genresRequest() = GET("$baseUrl/$mangaSubString", headers)
 
@@ -117,15 +114,20 @@ class MGKomik : Madara(
         val genres = mutableListOf<Genre>()
         genres += Genre("All", "")
         genres += document.select(".row.genres li a").map { a ->
-            Genre(a.text(), a.absUrl("href"))
+            Genre(a.text(), a.absUrl("href").removePrefix(baseUrl))
         }
         return genres
     }
 
-    // =============================== Utilities ==============================
+    // ============================== Utilities ==============================
 
     private fun randomString(length: Int): String {
-        val charPool = ('a'..'z') + ('A'..'Z') + ('.')
+        val charPool = ('a'..'z') + ('A'..'Z') + '.'
         return List(length) { charPool.random() }.joinToString("")
+    }
+
+    companion object {
+        private const val USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     }
 }
