@@ -24,30 +24,22 @@ class MGKomik : Madara(
     override val mangaSubString = "komik"
 
     override fun headersBuilder() = super.headersBuilder().apply {
-        add("User-Agent", USER_AGENT)
         add("Sec-Fetch-Dest", "document")
         add("Sec-Fetch-Mode", "navigate")
         add("Sec-Fetch-Site", "same-origin")
         add("Upgrade-Insecure-Requests", "1")
-        add("X-Requested-With", randomString((1..20).random()))
+        add("User-Agent", "Mozilla/5.0 (Android 10; Mobile; rv:91.0) Gecko/91.0 Firefox/91.0")
     }
 
     override val client = network.cloudflareClient.newBuilder()
-        .addInterceptor { chain ->
-            val request = chain.request()
-            val headers = request.headers.newBuilder().apply {
-                removeAll("X-Requested-With")
-            }.build()
-            chain.proceed(request.newBuilder().headers(headers).build())
-        }
         .rateLimit(9, 2)
         .build()
 
-    // ============================== Popular ==============================
+    // ============================= Popular ==============================
 
     override fun popularMangaNextPageSelector() = ".wp-pagenavi span.current + a"
 
-    // ============================== Latest ==============================
+    // ============================= Latest ===============================
 
     override fun latestUpdatesRequest(page: Int): Request =
         if (useLoadMoreRequest()) {
@@ -56,18 +48,19 @@ class MGKomik : Madara(
             GET("$baseUrl/$mangaSubString/${searchPage(page)}", headers)
         }
 
-    // ============================== Search ==============================
+    // ============================= Search ===============================
 
     override fun searchRequest(page: Int, query: String, filters: FilterList): Request {
         filters.forEach { filter ->
             when (filter) {
                 is GenreContentFilter -> {
                     val url = filter.toUriPart()
-                    if (url.isNotBlank()) {
-                        return GET("$baseUrl$url", headers)
+                    if (url.isBlank()) {
+                        return@forEach
                     }
+                    return GET(filter.toUriPart(), headers)
                 }
-                else -> { /* no-op for other filters */ }
+                else -> {}
             }
         }
         return super.searchRequest(page, query, filters)
@@ -78,13 +71,15 @@ class MGKomik : Madara(
 
     override fun searchMangaNextPageSelector() = "a.page.larger"
 
-    // ============================== Chapters ==============================
+    // ============================= Chapters =============================
 
     override val chapterUrlSuffix = ""
 
-    // ============================== Filters ==============================
+    // ============================= Filters ==============================
 
     override fun getFilterList(): FilterList {
+        launchIO { fetchGenres() }
+
         val filters = super.getFilterList().list.toMutableList()
 
         filters += if (genresList.isNotEmpty()) {
@@ -114,20 +109,8 @@ class MGKomik : Madara(
         val genres = mutableListOf<Genre>()
         genres += Genre("All", "")
         genres += document.select(".row.genres li a").map { a ->
-            Genre(a.text(), a.absUrl("href").removePrefix(baseUrl))
+            Genre(a.text(), a.absUrl("href"))
         }
         return genres
-    }
-
-    // ============================== Utilities ==============================
-
-    private fun randomString(length: Int): String {
-        val charPool = ('a'..'z') + ('A'..'Z') + '.'
-        return List(length) { charPool.random() }.joinToString("")
-    }
-
-    companion object {
-        private const val USER_AGENT =
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     }
 }
