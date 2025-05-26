@@ -1,7 +1,9 @@
 {
   "meta": {
-    "name": "Keiyoushi",
-    "website": "https://keiyoushi.github.io",
-    "signingKeyFingerprint": "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2"
-  }
+    "name": "mozzaru",
+    "shortName": "mozzaru",
+    "website": "https://github.com/mozzaru/extensions-source/tree/repo",
+    "signingKeyFingerprint": "FA46E6A2B54CF505F27BCA75F5C885AED4C9BE5677CBC18D8B21E9BE459B8EAF"
+  },
+  "extensions": "https://raw.githubusercontent.com/mozzaru/extensions-source/repo/index.min.json"
 }
