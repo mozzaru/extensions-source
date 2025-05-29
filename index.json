@@ -10595,17 +10595,17 @@
   {
     "name": "Tachiyomi: Magus Manga",
     "pkg": "eu.kanade.tachiyomi.extension.en.magusmanga",
-    "apk": "tachiyomi-en.magusmanga-v1.4.52.apk",
+    "apk": "tachiyomi-en.magusmanga-v1.4.53.apk",
     "lang": "en",
-    "code": 52,
-    "version": "1.4.52",
+    "code": 53,
+    "version": "1.4.53",
     "nsfw": 0,
     "sources": [
       {
         "name": "Magus Manga",
         "lang": "en",
-        "id": "8637252306330424523",
-        "baseUrl": "https://magustoon.com"
+        "id": "1589747287364201069",
+        "baseUrl": "https://magustoon.org"
       }
     ]
   },
@@ -13740,17 +13740,17 @@
   {
     "name": "Tachiyomi: Reset Scans",
     "pkg": "eu.kanade.tachiyomi.extension.en.resetscans",
-    "apk": "tachiyomi-en.resetscans-v1.4.52.apk",
+    "apk": "tachiyomi-en.resetscans-v1.4.53.apk",
     "lang": "en",
-    "code": 52,
-    "version": "1.4.52",
+    "code": 53,
+    "version": "1.4.53",
     "nsfw": 0,
     "sources": [
       {
         "name": "Reset Scans",
         "lang": "en",
         "id": "8358008083447218926",
-        "baseUrl": "https://reset-scans.co"
+        "baseUrl": "https://reset-scans.org"
       }
     ]
   },
@@ -14097,10 +14097,10 @@
   {
     "name": "Tachiyomi: SpyFakku",
     "pkg": "eu.kanade.tachiyomi.extension.en.spyfakku",
-    "apk": "tachiyomi-en.spyfakku-v1.4.10.apk",
+    "apk": "tachiyomi-en.spyfakku-v1.4.11.apk",
     "lang": "en",
-    "code": 10,
-    "version": "1.4.10",
+    "code": 11,
+    "version": "1.4.11",
     "nsfw": 1,
     "sources": [
       {
@@ -15820,17 +15820,17 @@
   {
     "name": "Tachiyomi: Jeaz Scans",
     "pkg": "eu.kanade.tachiyomi.extension.es.jeazscans",
-    "apk": "tachiyomi-es.jeazscans-v1.4.47.apk",
+    "apk": "tachiyomi-es.jeazscans-v1.4.48.apk",
     "lang": "es",
-    "code": 47,
-    "version": "1.4.47",
+    "code": 48,
+    "version": "1.4.48",
     "nsfw": 0,
     "sources": [
       {
-        "name": "JeazScans",
+        "name": "Jeaz Scans",
         "lang": "es",
         "id": "5292079548510508306",
-        "baseUrl": "https://marcialhub.xyz"
+        "baseUrl": "https://lectorhub.j5z.xyz"
       }
     ]
   },
@@ -16035,6 +16035,23 @@
         "lang": "es",
         "id": "1420213267345607410",
         "baseUrl": "https://lector.lolivault.net"
+      }
+    ]
+  },
+  {
+    "name": "Tachiyomi: MangaClub",
+    "pkg": "eu.kanade.tachiyomi.extension.es.mangaclub",
+    "apk": "tachiyomi-es.mangaclub-v1.4.2.apk",
+    "lang": "es",
+    "code": 2,
+    "version": "1.4.2",
+    "nsfw": 0,
+    "sources": [
+      {
+        "name": "MangaClub",
+        "lang": "es",
+        "id": "6766836918158705826",
+        "baseUrl": "https://mangaclub.moe"
       }
     ]
   },
@@ -16600,6 +16617,23 @@
     ]
   },
   {
+    "name": "Tachiyomi: 6ianfranc9",
+    "pkg": "eu.kanade.tachiyomi.extension.es.sixianfranc9",
+    "apk": "tachiyomi-es.sixianfranc9-v1.4.2.apk",
+    "lang": "es",
+    "code": 2,
+    "version": "1.4.2",
+    "nsfw": 0,
+    "sources": [
+      {
+        "name": "6ianfranc9",
+        "lang": "es",
+        "id": "852558842404987566",
+        "baseUrl": "https://6ianfranc9.capibaratraductor.com"
+      }
+    ]
+  },
+  {
     "name": "Tachiyomi: SkyMangas",
     "pkg": "eu.kanade.tachiyomi.extension.es.skymangas",
     "apk": "tachiyomi-es.skymangas-v1.4.32.apk",
@@ -16634,36 +16668,19 @@
     ]
   },
   {
-    "name": "Tachiyomi: Taikutsu",
-    "pkg": "eu.kanade.tachiyomi.extension.es.taikutsu",
-    "apk": "tachiyomi-es.taikutsu-v1.4.3.apk",
-    "lang": "es",
-    "code": 3,
-    "version": "1.4.3",
-    "nsfw": 0,
-    "sources": [
-      {
-        "name": "Taikutsu",
-        "lang": "es",
-        "id": "2272086146156858772",
-        "baseUrl": "https://taikutsutl.capibaratraductor.com"
-      }
-    ]
-  },
-  {
     "name": "Tachiyomi: Taurus Fansub",
     "pkg": "eu.kanade.tachiyomi.extension.es.taurusfansub",
-    "apk": "tachiyomi-es.taurusfansub-v1.4.47.apk",
+    "apk": "tachiyomi-es.taurusfansub-v1.4.48.apk",
     "lang": "es",
-    "code": 47,
-    "version": "1.4.47",
+    "code": 48,
+    "version": "1.4.48",
     "nsfw": 0,
     "sources": [
       {
         "name": "Taurus Fansub",
         "lang": "es",
         "id": "5157867187592331768",
-        "baseUrl": "https://lectortaurus.yopres.com"
+        "baseUrl": "https://lectortaurus2.yopres.com"
       }
     ]
   },
@@ -18682,17 +18699,17 @@
   {
     "name": "Tachiyomi: Monzee Komik",
     "pkg": "eu.kanade.tachiyomi.extension.id.monzeekomik",
-    "apk": "tachiyomi-id.monzeekomik-v1.4.31.apk",
+    "apk": "tachiyomi-id.monzeekomik-v1.4.32.apk",
     "lang": "id",
-    "code": 31,
-    "version": "1.4.31",
+    "code": 32,
+    "version": "1.4.32",
     "nsfw": 1,
     "sources": [
       {
         "name": "Monzee Komik",
         "lang": "id",
         "id": "6468031272052511755",
-        "baseUrl": "https://monzeekomik.my.id"
+        "baseUrl": "https://monzee01.my.id"
       }
     ]
   },
@@ -20399,19 +20416,19 @@
         "name": "늑대닷컴 - 웹툰",
         "lang": "ko",
         "id": "5583626852311652499",
-        "baseUrl": "https://wfwf391.com"
+        "baseUrl": "https://wfwf392.com"
       },
       {
         "name": "늑대닷컴 - 만화책",
         "lang": "ko",
         "id": "7074060458114951398",
-        "baseUrl": "https://wfwf391.com"
+        "baseUrl": "https://wfwf392.com"
       },
       {
         "name": "늑대닷컴 - 포토툰",
         "lang": "ko",
         "id": "4225505094399546613",
-        "baseUrl": "https://wfwf391.com"
+        "baseUrl": "https://wfwf392.com"
       }
     ]
   },
@@ -22252,23 +22269,6 @@
     ]
   },
   {
-    "name": "Tachiyomi: SS Reading",
-    "pkg": "eu.kanade.tachiyomi.extension.pt.ssreading",
-    "apk": "tachiyomi-pt.ssreading-v1.4.43.apk",
-    "lang": "pt-BR",
-    "code": 43,
-    "version": "1.4.43",
-    "nsfw": 1,
-    "sources": [
-      {
-        "name": "SS Reading",
-        "lang": "pt-BR",
-        "id": "6282617458069414622",
-        "baseUrl": "https://ssreading.com.br"
-      }
-    ]
-  },
-  {
     "name": "Tachiyomi: Yomu Comics",
     "pkg": "eu.kanade.tachiyomi.extension.pt.sssscanlator",
     "apk": "tachiyomi-pt.sssscanlator-v1.4.38.apk",
@@ -22518,7 +22518,7 @@
       {
         "name": "Wind Scan",
         "lang": "pt-BR",
-        "id": "3281831928801935157",
+        "id": "7361411707034654704",
         "baseUrl": "https://windscan.xyz"
       }
     ]
@@ -23546,17 +23546,17 @@
   {
     "name": "Tachiyomi: Moodtoon",
     "pkg": "eu.kanade.tachiyomi.extension.th.moodtoon",
-    "apk": "tachiyomi-th.moodtoon-v1.4.31.apk",
+    "apk": "tachiyomi-th.moodtoon-v1.4.32.apk",
     "lang": "th",
-    "code": 31,
-    "version": "1.4.31",
+    "code": 32,
+    "version": "1.4.32",
     "nsfw": 1,
     "sources": [
       {
         "name": "Moodtoon",
         "lang": "th",
         "id": "8560199796461456661",
-        "baseUrl": "https://moodtoon.net"
+        "baseUrl": "https://moon-toon.com"
       }
     ]
   },
@@ -23625,6 +23625,23 @@
         "lang": "th",
         "id": "2123874844305574539",
         "baseUrl": "https://www.ntr-manga.com"
+      }
+    ]
+  },
+  {
+    "name": "Tachiyomi: OneManga",
+    "pkg": "eu.kanade.tachiyomi.extension.th.onemanga",
+    "apk": "tachiyomi-th.onemanga-v1.4.31.apk",
+    "lang": "th",
+    "code": 31,
+    "version": "1.4.31",
+    "nsfw": 1,
+    "sources": [
+      {
+        "name": "One-Manga",
+        "lang": "th",
+        "id": "2248402620929558947",
+        "baseUrl": "https://one-manga.com"
       }
     ]
   },
@@ -25722,17 +25739,17 @@
   {
     "name": "Tachiyomi: Team Lanh Lung",
     "pkg": "eu.kanade.tachiyomi.extension.vi.teamlanhlung",
-    "apk": "tachiyomi-vi.teamlanhlung-v1.4.22.apk",
+    "apk": "tachiyomi-vi.teamlanhlung-v1.4.23.apk",
     "lang": "vi",
-    "code": 22,
-    "version": "1.4.22",
+    "code": 23,
+    "version": "1.4.23",
     "nsfw": 1,
     "sources": [
       {
         "name": "Team Lạnh Lùng",
         "lang": "vi",
         "id": "1832370231745386795",
-        "baseUrl": "https://teamlanhlung5.shop"
+        "baseUrl": "https://teamlanhlung9.shop"
       }
     ]
   },
