@@ -12,22 +12,22 @@ import java.util.Locale
 
 class MGKomik : Madara(
     "MG Komik",
-    "https://mgkomik.org",
+    "https://id.mgkomik.cc", // Ganti domain langsung di sini jika perlu
     "id",
     SimpleDateFormat("dd MMM yy", Locale.US),
 ) {
+
     override val useLoadMoreRequest = LoadMoreStrategy.Never
-
     override val useNewChapterEndpoint = false
-
     override val mangaSubString = "komik"
 
     override fun headersBuilder() = super.headersBuilder().apply {
+        add("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.124 Safari/537.36 Edg/102.0.1245.44")
         add("Sec-Fetch-Dest", "document")
         add("Sec-Fetch-Mode", "navigate")
         add("Sec-Fetch-Site", "same-origin")
         add("Upgrade-Insecure-Requests", "1")
-        add("X-Requested-With", randomString((1..20).random())) // added for webview, and removed in interceptor for normal use
+        add("X-Requested-With", randomString((1..20).random()))
     }
 
     override val client = network.cloudflareClient.newBuilder()
@@ -36,17 +36,12 @@ class MGKomik : Madara(
             val headers = request.headers.newBuilder().apply {
                 removeAll("X-Requested-With")
             }.build()
-
             chain.proceed(request.newBuilder().headers(headers).build())
         }
         .rateLimit(9, 2)
         .build()
 
-    // ================================== Popular ======================================
-
     override fun popularMangaNextPageSelector() = ".wp-pagenavi span.current + a"
-
-    // ================================== Latest =======================================
 
     override fun latestUpdatesRequest(page: Int): Request =
         if (useLoadMoreRequest()) {
@@ -55,39 +50,26 @@ class MGKomik : Madara(
             GET("$baseUrl/$mangaSubString/${searchPage(page)}", headers)
         }
 
-    // ================================== Search =======================================
-
     override fun searchRequest(page: Int, query: String, filters: FilterList): Request {
         filters.forEach { filter ->
-            when (filter) {
-                is GenreContentFilter -> {
-                    val url = filter.toUriPart()
-                    if (url.isBlank()) {
-                        return@forEach
-                    }
-                    return GET(filter.toUriPart(), headers)
-                }
-                else -> {}
+            if (filter is GenreContentFilter) {
+                val url = filter.toUriPart()
+                if (url.isNotBlank()) return GET(url, headers)
             }
         }
         return super.searchRequest(page, query, filters)
     }
 
-    override fun searchMangaSelector() = "${super.searchMangaSelector()}, .page-listing-item .page-item-detail"
+    override fun searchMangaSelector() =
+        "${super.searchMangaSelector()}, .page-listing-item .page-item-detail"
 
     override fun searchMangaNextPageSelector() = "a.page.larger"
 
-    // ================================ Chapters ================================
-
     override val chapterUrlSuffix = ""
-
-    // ================================ Filters ================================
 
     override fun getFilterList(): FilterList {
         launchIO { fetchGenres() }
-
         val filters = super.getFilterList().list.toMutableList()
-
         filters += if (genresList.isNotEmpty()) {
             listOf(
                 Filter.Separator(),
@@ -102,14 +84,11 @@ class MGKomik : Madara(
                 Filter.Header(intl["genre_missing_warning"]),
             )
         }
-
         return FilterList(filters)
     }
 
-    private class GenreContentFilter(title: String, options: List<Pair<String, String>>) : UriPartFilter(
-        title,
-        options.toTypedArray(),
-    )
+    private class GenreContentFilter(title: String, options: List<Pair<String, String>>) :
+        UriPartFilter(title, options.toTypedArray())
 
     override fun genresRequest() = GET("$baseUrl/$mangaSubString", headers)
 
@@ -122,10 +101,8 @@ class MGKomik : Madara(
         return genres
     }
 
-    // =============================== Utilities ==============================
-
     private fun randomString(length: Int): String {
-        val charPool = ('a'..'z') + ('A'..'Z') + ('.')
+        val charPool = ('a'..'z') + ('A'..'Z') + '.'
         return List(length) { charPool.random() }.joinToString("")
     }
 }
