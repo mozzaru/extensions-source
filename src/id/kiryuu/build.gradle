@@ -3,7 +3,7 @@ ext {
     extClass = '.Kiryuu'
     themePkg = 'mangathemesia'
     baseUrl = 'https://kiryuu01.com'
-    overrideVersionCode = 10
+    overrideVersionCode = 12
     isNsfw = false
 }
 
