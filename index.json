@@ -17730,10 +17730,10 @@
   {
     "name": "Tachiyomi: Ainz Scans ID",
     "pkg": "eu.kanade.tachiyomi.extension.id.ainzscansid",
-    "apk": "tachiyomi-id.ainzscansid-v1.4.32.apk",
+    "apk": "tachiyomi-id.ainzscansid-v1.4.31.apk",
     "lang": "id",
-    "code": 32,
-    "version": "1.4.32",
+    "code": 31,
+    "version": "1.4.31",
     "nsfw": 0,
     "sources": [
       {
@@ -18002,10 +18002,10 @@
   {
     "name": "Tachiyomi: Kiryuu",
     "pkg": "eu.kanade.tachiyomi.extension.id.kiryuu",
-    "apk": "tachiyomi-id.kiryuu-v1.4.41.apk",
+    "apk": "tachiyomi-id.kiryuu-v1.4.42.apk",
     "lang": "id",
-    "code": 41,
-    "version": "1.4.41",
+    "code": 42,
+    "version": "1.4.42",
     "nsfw": 0,
     "sources": [
       {
@@ -18665,17 +18665,17 @@
   {
     "name": "Tachiyomi: MG Komik",
     "pkg": "eu.kanade.tachiyomi.extension.id.mgkomik",
-    "apk": "tachiyomi-id.mgkomik-v1.4.58.apk",
+    "apk": "tachiyomi-id.mgkomik-v1.4.59.apk",
     "lang": "id",
-    "code": 58,
-    "version": "1.4.58",
+    "code": 59,
+    "version": "1.4.59",
     "nsfw": 0,
     "sources": [
       {
         "name": "MG Komik",
         "lang": "id",
         "id": "5845004992097969882",
-        "baseUrl": "https://mgkomik.org"
+        "baseUrl": "https://id.mgkomik.cc"
       }
     ]
   },
