@@ -1,7 +1,0 @@
-ext {
-    extName = 'KomikIndoID'
-    extClass = '.KomikIndoID'
-    extVersionCode = 15
-}
-
-apply from: "$rootDir/common.gradle"
