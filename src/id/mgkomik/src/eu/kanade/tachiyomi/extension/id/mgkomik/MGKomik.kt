@@ -1,136 +1,158 @@
 package eu.kanade.tachiyomi.extension.id.mgkomik
 
-import eu.kanade.tachiyomi.multisrc.madara.Madara
-import eu.kanade.tachiyomi.network.GET
-import eu.kanade.tachiyomi.network.interceptor.rateLimit
-import eu.kanade.tachiyomi.source.model.Filter
+import android.util.Log
+import eu.kanade.tachiyomi.source.SourceFactory
 import eu.kanade.tachiyomi.source.model.FilterList
+import eu.kanade.tachiyomi.source.model.MangasPage
+import eu.kanade.tachiyomi.source.model.Page
+import eu.kanade.tachiyomi.source.model.SChapter
+import eu.kanade.tachiyomi.source.model.SManga
+import eu.kanade.tachiyomi.source.online.HttpSource
 import okhttp3.Headers
 import okhttp3.Request
-import org.jsoup.nodes.Document
-import java.text.SimpleDateFormat
-import java.util.Locale
-import kotlin.random.Random
+import okhttp3.Response
+import org.jsoup.Jsoup
 
-class MGKomik : Madara(
-    "MG Komik",
-    "https://id.mgkomik.cc",
-    "id",
-    SimpleDateFormat("dd MMM yy", Locale.ENGLISH), // Sesuai dengan sourceLocale dan datePattern
-) {
-    val tagPrefix = "genres/"
-    val listUrl = "komik/"
-    val stylePage = ""
+class MGKomik : HttpSource() {
 
-    override val useLoadMoreRequest = LoadMoreStrategy.Never
-    override val useNewChapterEndpoint = false
-    override val mangaSubString = "komik"
+    override val name = "MGKomik"
+    override val baseUrl = "https://id.mgkomik.cc"
+    override val lang = "id"
+    override val supportsLatest = true
 
-    // Charset dan random string generator sesuai contoh pertama
-    private fun generateRandomString(length: Int): String {
-        val charset = "HALOGaES.BCDFHIJKMNPQRTUVWXYZ.bcdefghijklmnopqrstuvwxyz0123456789"
-        return (1..length)
-            .map { charset.random() }
-            .joinToString("")
+    companion object {
+        private const val TAG = "MGKomikLog"
     }
 
-    private val randomString = generateRandomString(Random.nextInt(13, 21))
+    override fun headersBuilder(): Headers.Builder = Headers.Builder()
+        .add("User-Agent", "Mozilla/5.0 (Android)")
 
-    override fun headersBuilder(): Headers.Builder {
-        return super.headersBuilder().apply {
-            add("Sec-Fetch-Dest", "document")
-            add("Sec-Fetch-Mode", "navigate")
-            add("Sec-Fetch-Site", "same-origin")
-            add("Upgrade-Insecure-Requests", "1")
-            add("X-Requested-With", randomString) // Used for webview
-        }
+    override fun popularMangaRequest(page: Int): Request {
+        Log.d(TAG, "Requesting popular manga, page=$page")
+        return Request.Builder()
+            .url("$baseUrl/manga/?page=$page")
+            .headers(headers)
+            .build()
     }
 
-    override val client = network.cloudflareClient.newBuilder()
-        .addInterceptor { chain ->
-            val request = chain.request()
-            val headers = request.headers.newBuilder().apply {
-                removeAll("X-Requested-With") // remove for normal requests
-            }.build()
-
-            chain.proceed(request.newBuilder().headers(headers).build())
-        }
-        .rateLimit(9, 2)
-        .build()
-
-    // ======================== Popular & Latest ========================
-
-    override fun popularMangaNextPageSelector() = ".wp-pagenavi span.current + a"
-
-    override fun latestUpdatesRequest(page: Int): Request =
-        if (useLoadMoreRequest()) {
-            loadMoreRequest(page, popular = false)
-        } else {
-            GET("$baseUrl/$mangaSubString/${searchPage(page)}", headers)
-        }
-
-    // ============================ Search =============================
-
-    override fun searchRequest(page: Int, query: String, filters: FilterList): Request {
-        filters.forEach { filter ->
-            when (filter) {
-                is GenreContentFilter -> {
-                    val url = filter.toUriPart()
-                    if (url.isNotBlank()) {
-                        return GET(url, headers)
-                    }
-                }
-
-                else -> {}
+    override fun popularMangaParse(response: Response): MangasPage {
+        Log.d(TAG, "Parsing popular manga (url=${response.request.url})")
+        val body = response.body?.string()
+        val document = Jsoup.parse(body)
+        val mangas = document.select(".post-title a").map { element ->
+            SManga.create().apply {
+                title = element.text()
+                setUrlWithoutDomain(element.attr("href"))
+                thumbnail_url = element.parents().select(".img-thumbnail").attr("src")
             }
         }
-        return super.searchRequest(page, query, filters)
+        Log.d(TAG, "Parsed ${mangas.size} popular manga")
+        val hasNextPage = document.select(".nav-previous, .nav-next").isNotEmpty()
+        return MangasPage(mangas, hasNextPage)
     }
 
-    override fun searchMangaSelector() = "${super.searchMangaSelector()}, .page-listing-item .page-item-detail"
+    override fun latestUpdatesRequest(page: Int): Request {
+        Log.d(TAG, "Requesting latest updates, page=$page")
+        return Request.Builder()
+            .url("$baseUrl/manga/?page=$page&order=update")
+            .headers(headers)
+            .build()
+    }
 
-    override fun searchMangaNextPageSelector() = "a.page.larger"
+    override fun latestUpdatesParse(response: Response): MangasPage {
+        Log.d(TAG, "Parsing latest updates (url=${response.request.url})")
+        return popularMangaParse(response)
+    }
 
-    override val chapterUrlSuffix = ""
+    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
+        Log.d(TAG, "Searching manga: query=\"$query\", page=$page")
+        return Request.Builder()
+            .url("$baseUrl/?s=$query&page=$page")
+            .headers(headers)
+            .build()
+    }
 
-    // ============================ Filters ============================
+    override fun searchMangaParse(response: Response): MangasPage {
+        Log.d(TAG, "Parsing search results (url=${response.request.url})")
+        return popularMangaParse(response)
+    }
 
-    override fun getFilterList(): FilterList {
-        launchIO { fetchGenres() }
+    override fun mangaDetailsRequest(manga: SManga): Request {
+        Log.d(TAG, "Requesting manga details: url=${manga.url}")
+        return Request.Builder()
+            .url(baseUrl + manga.url)
+            .headers(headers)
+            .build()
+    }
 
-        val filters = super.getFilterList().list.toMutableList()
-
-        filters += if (genresList.isNotEmpty()) {
-            listOf(
-                Filter.Separator(),
-                GenreContentFilter(
-                    title = intl["genre_filter_title"],
-                    options = genresList.map { it.name to it.id },
-                ),
-            )
-        } else {
-            listOf(
-                Filter.Separator(),
-                Filter.Header(intl["genre_missing_warning"]),
-            )
+    override fun mangaDetailsParse(response: Response): SManga {
+        Log.d(TAG, "Parsing manga details (url=${response.request.url})")
+        val document = Jsoup.parse(response.body?.string())
+        val manga = SManga.create().apply {
+            title = document.selectFirst(".post-title")?.text() ?: ""
+            author = document.selectFirst(".author-content")?.text()
+            artist = author
+            genre = document.select(".genres-content a").joinToString { it.text() }
+            description = document.selectFirst(".summary__content")?.text()
+            status = SManga.ONGOING
+            thumbnail_url = document.selectFirst(".summary_image img")?.attr("src")
         }
-
-        return FilterList(filters)
+        Log.d(TAG, "Manga details: title=${manga.title}, author=${manga.author}")
+        return manga
     }
 
-    private class GenreContentFilter(title: String, options: List<Pair<String, String>>) : UriPartFilter(
-        title,
-        options.toTypedArray(),
-    )
+    override fun chapterListRequest(manga: SManga): Request {
+        Log.d(TAG, "Requesting chapter list: url=${manga.url}")
+        return Request.Builder()
+            .url(baseUrl + manga.url)
+            .headers(headers)
+            .build()
+    }
 
-    override fun genresRequest() = GET("$baseUrl/$mangaSubString", headers)
+    override fun chapterListParse(response: Response): List<SChapter> {
+        Log.d(TAG, "Parsing chapter list (url=${response.request.url})")
+        val document = Jsoup.parse(response.body?.string())
+        val chapters = document.select(".wp-manga-chapter a").map { el ->
+            SChapter.create().apply {
+                setUrlWithoutDomain(el.attr("href"))
+                name = el.text()
+            }
+        }.reversed()
+        Log.d(TAG, "Parsed ${chapters.size} chapters")
+        return chapters
+    }
 
-    override fun parseGenres(document: Document): List<Genre> {
-        val genres = mutableListOf<Genre>()
-        genres += Genre("All", "")
-        genres += document.select(".row.genres li a").map { a ->
-            Genre(a.text(), a.absUrl("href"))
+    override fun pageListRequest(chapter: SChapter): Request {
+        Log.d(TAG, "Requesting page list: url=${chapter.url}")
+        return Request.Builder()
+            .url(baseUrl + chapter.url)
+            .headers(headers)
+            .build()
+    }
+
+    override fun pageListParse(response: Response): List<Page> {
+        Log.d(TAG, "Parsing page list (url=${response.request.url})")
+        val document = Jsoup.parse(response.body?.string())
+        val pages = document.select(".reading-content img").mapIndexed { i, el ->
+            Page(i, "", el.attr("data-src") ?: el.attr("src"))
         }
-        return genres
+        Log.d(TAG, "Parsed ${pages.size} pages")
+        return pages
     }
+
+    override fun imageRequest(page: Page): Request {
+        Log.d(TAG, "Requesting image: url=${page.imageUrl}")
+        return Request.Builder()
+            .url(page.imageUrl!!)
+            .headers(headers)
+            .build()
+    }
+    
+    override fun imageUrlParse(response: Response): String {
+        return response.request.url.toString()
+    }
+}
+
+class MGKomikFactory : SourceFactory {
+    override fun createSources() = listOf(MGKomik())
 }
