@@ -18665,10 +18665,10 @@
   {
     "name": "Tachiyomi: MG Komik",
     "pkg": "eu.kanade.tachiyomi.extension.id.mgkomik",
-    "apk": "tachiyomi-id.mgkomik-v1.4.59.apk",
+    "apk": "tachiyomi-id.mgkomik-v1.4.60.apk",
     "lang": "id",
-    "code": 59,
-    "version": "1.4.59",
+    "code": 60,
+    "version": "1.4.60",
     "nsfw": 0,
     "sources": [
       {
