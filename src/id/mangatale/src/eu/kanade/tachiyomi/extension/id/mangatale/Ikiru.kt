@@ -1,206 +1,295 @@
 package eu.kanade.tachiyomi.extension.id.mangatale
 
-import android.util.Log
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.source.model.FilterList
+import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
-import eu.kanade.tachiyomi.source.online.ParsedHttpSource
+import eu.kanade.tachiyomi.source.online.HttpSource
 import okhttp3.FormBody
 import okhttp3.Request
+import okhttp3.Response
+import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
 
-class Ikiru : ParsedHttpSource() {
+class Ikiru : HttpSource() {
     override val name = "Ikiru"
     override val baseUrl = "https://id.ikiru.wtf"
     override val lang = "id"
     override val supportsLatest = true
     override val id = 1532456597012176985
-    
+
     override val client = network.cloudflareClient
 
     override fun headersBuilder() = super.headersBuilder()
         .add("Referer", baseUrl)
-        .add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+        .add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
+        .add("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
+        .add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
 
-    // Fix popular manga request - use GET instead of POST
     override fun popularMangaRequest(page: Int): Request {
-        Log.d("IkiruId", "Requesting popular manga page: $page")
-        return GET("$baseUrl/popular/page/$page", headers)
+        val body = FormBody.Builder()
+            .add("orderby", "popular")
+            .add("page", page.toString())
+            .build()
+        return POST("$baseUrl/ajax-call?action=advanced_search", headers, body)
     }
 
-    // Fix latest updates request
+    override fun popularMangaParse(response: Response): MangasPage {
+        return parseMangaResponse(response)
+    }
+
     override fun latestUpdatesRequest(page: Int): Request {
-        Log.d("IkiruId", "Requesting latest updates page: $page")
-        return GET("$baseUrl/latest/page/$page", headers)
+        val body = FormBody.Builder()
+            .add("orderby", "updated")
+            .add("page", page.toString())
+            .build()
+        return POST("$baseUrl/ajax-call?action=advanced_search", headers, body)
     }
 
-    // Fix search request
+    override fun latestUpdatesParse(response: Response): MangasPage {
+        return parseMangaResponse(response)
+    }
+
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
-        Log.d("IkiruId", "Searching manga: query='$query', page=$page")
-        return GET("$baseUrl/search?q=$query&page=$page", headers)
+        var type = ""
+        var status = ""
+        var genres = ""
+    
+        filters.forEach { filter ->
+            when (filter) {
+                is TypeFilter -> type = filter.toUriPart()
+                is StatusFilter -> status = filter.toUriPart()
+                is GenreFilterList -> {
+                    genres = filter.state.filter { it.state }.joinToString(",") { it.id }
+                }
+                else -> {}
+            }
+        }
+    
+        val formBody = FormBody.Builder()
+            .add("page", page.toString())
+            .add("query", query)
+            .add("the_type", type)
+            .add("the_status", status)
+            .add("the_genre", genres)
+            .add("orderby", "popular") // default sort
+    
+        return POST("$baseUrl/ajax-call?action=advanced_search", headers, formBody.build())
     }
 
-    // Update selectors to match the website structure
-    override fun popularMangaSelector() = "div.manga-item, div.grid-item, article.manga"
-    override fun latestUpdatesSelector() = popularMangaSelector()
-    override fun searchMangaSelector() = popularMangaSelector()
-
-    override fun popularMangaFromElement(element: Element): SManga = mangaFromElement(element)
-    override fun latestUpdatesFromElement(element: Element): SManga = mangaFromElement(element)
-    override fun searchMangaFromElement(element: Element): SManga = mangaFromElement(element)
-
-    private fun mangaFromElement(element: Element): SManga {
-        val manga = SManga.create()
-        
-        // Try multiple ways to find the manga link
-        val linkElement = element.selectFirst("a[href]") ?: element
-        manga.url = linkElement.attr("href").let { href ->
-            if (href.startsWith("http")) href else baseUrl + href.removePrefix("/")
-        }
-        
-        // Try multiple ways to find the title
-        manga.title = element.selectFirst("h3, h2, h1, .title, .manga-title")?.text()?.trim()
-            ?: element.selectFirst("a")?.attr("title")?.trim()
-            ?: element.selectFirst("img")?.attr("alt")?.trim()
-            ?: "Tanpa Judul"
-        
-        // Try multiple ways to find the thumbnail
-        manga.thumbnail_url = element.selectFirst("img")?.let { img ->
-            val src = img.attr("data-src").ifBlank { 
-                img.attr("data-lazy-src").ifBlank { 
-                    img.attr("src") 
-                }
-            }
-            when {
-                src.startsWith("http") -> src
-                src.startsWith("/") -> baseUrl + src
-                src.isNotBlank() -> "$baseUrl/$src"
-                else -> null
-            }
-        }
-        
-        Log.d("IkiruId", "Parsed manga: title='${manga.title}', url='${manga.url}'")
-        return manga
+    override fun searchMangaParse(response: Response): MangasPage {
+        return parseMangaResponse(response)
     }
 
-    override fun mangaDetailsParse(document: Document): SManga {
-        val manga = SManga.create()
+    private fun parseMangaResponse(response: Response): MangasPage {
+        val raw = response.body!!.use { it.string() }
+        if (raw.contains("Just a moment") || raw.contains("Cloudflare")) {
+            throw Exception("Diblokir Cloudflare - Silakan coba lagi nanti")
+        }
         
-        // Try multiple selectors for title
-        manga.title = document.selectFirst("h1.entry-title, h1.manga-title, h1")?.text()?.trim()
-            ?: document.title()
+        val document = Jsoup.parse(raw)
+        val mangas = mutableListOf<SManga>()
         
-        // Try multiple selectors for thumbnail
-        manga.thumbnail_url = document.selectFirst("div.thumb img, .manga-cover img, .cover img, img.wp-post-image")?.let { img ->
-            val src = img.attr("data-src").ifBlank { 
-                img.attr("data-lazy-src").ifBlank { 
-                    img.attr("src") 
+        // Cek struktur hasil yang berbeda
+        val items = document.select("div.flex.rounded-lg.overflow-hidden, div.group-data-\\[mode\\=horizontal\\]\\:hidden")
+        
+        if (items.isEmpty()) {
+            // Alternatif: Mode horizontal
+            document.select("div.flex.rounded-lg.overflow-hidden").forEach { item ->
+                parseMangaItem(item)?.let { mangas.add(it) }
+            }
+            
+            // Alternatif: Mode vertikal
+            if (mangas.isEmpty()) {
+                document.select("div.group-data-\\[mode\\=horizontal\\]\\:hidden").forEach { item ->
+                    parseMangaItem(item)?.let { mangas.add(it) }
                 }
             }
-            when {
-                src.startsWith("http") -> src
-                src.startsWith("/") -> baseUrl + src
-                src.isNotBlank() -> "$baseUrl/$src"
-                else -> null
+        } else {
+            items.forEach { item ->
+                parseMangaItem(item)?.let { mangas.add(it) }
             }
         }
         
-        // Try multiple selectors for description
-        manga.description = document.selectFirst("div.entry-content, .summary, .description, [itemprop=description]")
-            ?.text()?.trim()
-        
-        // Try multiple selectors for genre
-        manga.genre = document.select("a[href*=genre], .genre a, .genres a")
-            .joinToString { it.text().trim() }
-        
-        // Try to determine status
-        val statusText = document.selectFirst(".status, .manga-status")?.text()?.lowercase()
-        manga.status = when {
-            statusText?.contains("ongoing") == true -> SManga.ONGOING
-            statusText?.contains("completed") == true -> SManga.COMPLETED
-            statusText?.contains("hiatus") == true -> SManga.ON_HIATUS
-            else -> SManga.UNKNOWN
+        // Alternatif terakhir: Cari semua elemen dengan gambar manga
+        if (mangas.isEmpty()) {
+            document.select("img.wp-post-image").forEach { img ->
+                val parent = img.parents().firstOrNull { it.hasAttr("href") && it.attr("href").contains("/manga/") }
+                parent?.let { link ->
+                    val title = img.attr("alt").takeIf { it.isNotBlank() } ?: "Unknown"
+                    mangas.add(SManga.create().apply {
+                        val href = link.attr("href")
+url = href.removePrefix(baseUrl).ifBlank { href }
+                        this.title = title
+                        thumbnail_url = img.absUrl("src")
+                    })
+                }
+            }
         }
         
-        return manga
+        val hasNextPage = mangas.size >= 18
+        return MangasPage(mangas.distinctBy { it.url }, hasNextPage)
+    }
+    
+    private fun parseMangaItem(item: Element): SManga? {
+        return try {
+            val link = item.selectFirst("a[href^='/manga/']") ?: return null
+    
+            val img = item.selectFirst("img.wp-post-image, img")?.absUrl("src")
+    
+            // Ambil dari <h1 class="text-[15px] ..."> atau fallback ke alt img
+            val titleElement = item.selectFirst("h1.text-\\[15px\\], h1")
+            val titleText = titleElement?.text()?.takeIf { it.isNotBlank() }
+                ?: item.selectFirst("img")?.attr("alt")
+                ?: "Tanpa Judul"
+    
+            SManga.create().apply {
+                val href = link.attr("href")
+url = href.removePrefix(baseUrl).ifBlank { href }
+                title = titleText
+                thumbnail_url = img ?: ""
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    override fun mangaDetailsRequest(manga: SManga): Request {
+        return GET(baseUrl + manga.url, headers)
+    }
+
+    override fun mangaDetailsParse(response: Response): SManga {
+        val document = Jsoup.parse(response.body!!.use { it.string() })
+    
+        val statusText = document.selectFirst("div.post-status span")?.text().orEmpty().lowercase()
+    
+        return SManga.create().apply {
+            title = document.selectFirst("div.post-title h1")?.text().orEmpty()
+            author = document.select("div.author-content a").firstOrNull()?.text().orEmpty()
+            genre = document.select("div.genres-content a").joinToString(", ") { it.text() }
+    
+            description = document
+                .selectFirst("div.description-summary div.summary__content")
+                ?.text()
+                ?.ifBlank { "Tidak ada deskripsi" }
+                ?: "Tidak ada deskripsi"
+    
+            status = when {
+                "ongoing" in statusText -> SManga.ONGOING
+                "completed" in statusText -> SManga.COMPLETED
+                else -> SManga.UNKNOWN
+            }
+    
+            thumbnail_url = document.selectFirst("div.summary_image img")?.absUrl("src") ?: ""
+        }
     }
 
     override fun chapterListRequest(manga: SManga): Request {
-        val url = if (manga.url.startsWith("http")) manga.url else baseUrl + manga.url
-        Log.d("IkiruId", "Requesting chapter list → $url")
-        return GET(url, headers)
+        val slug = manga.url
+            .removePrefix("/manga/")
+            .removePrefix("manga/")
+            .removeSuffix("/")
+        return GET("$baseUrl/ajax-call?action=chapter_list&slug=$slug", headers)
     }
 
-    // Update chapter selectors
-    override fun chapterListSelector() = "div.chapter-list a, .chapter-item a, li.chapter a, .episodelist a"
+    override fun chapterListParse(response: Response): List<SChapter> {
+        val document: Document = Jsoup.parse(response.body!!.use { it.string() })
+        return document.select("a[href*=/chapter-]").map { element ->
+            val chapterName = element.text().ifBlank { "Chapter Tidak Bernama" }
+            val dateText = element.selectFirst("span")?.text()?.trim() ?: ""
+            val parsedDate = parseChapterDate(dateText)
 
-    override fun chapterFromElement(element: Element): SChapter {
-        val chapter = SChapter.create()
-        chapter.url = element.attr("href").let { href ->
-            if (href.startsWith("http")) href else baseUrl + href.removePrefix("/")
-        }
-        
-        // Try multiple ways to get chapter name
-        chapter.name = element.selectFirst(".chapter-title, .chapter-name")?.text()?.trim()
-            ?: element.text().trim()
-            ?: element.attr("title").trim()
-            ?: "Chapter"
-        
-        // Try to get date
-        val dateText = element.selectFirst(".chapter-date, .date")?.text()?.trim()
-        if (!dateText.isNullOrBlank()) {
-            try {
-                // You might need to implement date parsing based on the site's format
-                // chapter.date_upload = parseDate(dateText)
-            } catch (e: Exception) {
-                Log.e("IkiruId", "Error parsing date: $dateText", e)
+            SChapter.create().apply {
+                val href = element.attr("href")
+url = href.removePrefix(baseUrl).ifBlank { href }
+                name = chapterName
+                date_upload = parsedDate
             }
-        }
-        
-        Log.d("IkiruId", "Parsed chapter: name='${chapter.name}', url='${chapter.url}'")
-        return chapter
+        }.reversed()
     }
 
-    override fun pageListParse(document: Document): List<Page> {
-        // Try multiple selectors for images
-        val images = document.select("div.reader-area img, .chapter-content img, .entry-content img, #chapter-images img")
+    private fun parseChapterDate(dateString: String): Long {
+        if (dateString.isEmpty()) return 0L
+        val dateFormat = SimpleDateFormat("MMMM d, yyyy", Locale("id"))
+        val relativeFormat = SimpleDateFormat("yyyy-MM-dd", Locale("id"))
+        val now = Calendar.getInstance()
+
+        return when {
+            dateString.contains("baru saja") || dateString.contains("just now") -> now.timeInMillis
+            dateString.contains("menit") -> {
+                val minutes = Regex("""(\d+)""").find(dateString)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                now.add(Calendar.MINUTE, -minutes)
+                now.timeInMillis
+            }
+            dateString.contains("jam") -> {
+                val hours = Regex("""(\d+)""").find(dateString)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                now.add(Calendar.HOUR, -hours)
+                now.timeInMillis
+            }
+            dateString.contains("hari") || dateString.contains("days") -> {
+                val days = Regex("""(\d+)""").find(dateString)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                now.add(Calendar.DATE, -days)
+                now.timeInMillis
+            }
+            dateString.contains("minggu") || dateString.contains("weeks") -> {
+                val weeks = Regex("""(\d+)""").find(dateString)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                now.add(Calendar.WEEK_OF_YEAR, -weeks)
+                now.timeInMillis
+            }
+            dateString.contains("bulan") || dateString.contains("months") -> {
+                val months = Regex("""(\d+)""").find(dateString)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                now.add(Calendar.MONTH, -months)
+                now.timeInMillis
+            }
+            else -> try {
+                dateFormat.parse(dateString)?.time ?: relativeFormat.parse(dateString)?.time ?: 0L
+            } catch (_: Exception) {
+                0L
+            }
+        }
+    }
+
+    override fun pageListRequest(chapter: SChapter): Request {
+        return GET(baseUrl + chapter.url, headers)
+    }
+
+    override fun pageListParse(response: Response): List<Page> {
+        val document: Document = Jsoup.parse(response.body!!.use { it.string() })
+        val pages = mutableListOf<Page>()
         
-        val pages = images.mapIndexedNotNull { index, img ->
-            val imgUrl = img.attr("data-src").ifBlank { 
-                img.attr("data-lazy-src").ifBlank { 
-                    img.attr("src") 
-                }
-            }
+        // Selektor utama untuk gambar chapter
+        document.select("div.reading-content img").forEachIndexed { index, img ->
+            val url = img.absUrl("src").takeIf { it.isNotBlank() } 
+                ?: img.absUrl("data-src") 
+                ?: ""
             
-            val fullUrl = when {
-                imgUrl.startsWith("http") -> imgUrl
-                imgUrl.startsWith("/") -> baseUrl + imgUrl
-                imgUrl.isNotBlank() -> "$baseUrl/$imgUrl"
-                else -> null
+            if (url.isNotBlank()) {
+                pages.add(Page(index, imageUrl = url))
             }
-            
-            if (fullUrl != null) {
-                Log.d("IkiruId", "Parsed page[$index] = $fullUrl")
-                Page(index, "", fullUrl)
-            } else {
-                Log.w("IkiruId", "Skipping empty image at index $index")
-                null
+        }
+        
+        // Alternatif jika tidak ditemukan gambar
+        if (pages.isEmpty()) {
+            document.select("img[src*='/wp-content/'], img[src*='/images/']").forEachIndexed { index, img ->
+                pages.add(Page(index, imageUrl = img.absUrl("src")))
             }
         }
         
         return pages
     }
 
-    override fun imageUrlParse(document: Document): String = ""
+    override fun imageUrlParse(response: Response): String {
+        throw UnsupportedOperationException("Not used")
+    }
 
-    override fun getFilterList(): FilterList = FilterList()
-
-    // Update pagination selectors
-    override fun popularMangaNextPageSelector(): String? = "a.next, .next-page, .pagination a[rel=next]"
-    override fun latestUpdatesNextPageSelector(): String? = popularMangaNextPageSelector()
-    override fun searchMangaNextPageSelector(): String? = popularMangaNextPageSelector()
+    override fun getFilterList(): FilterList {
+        return getFilterListInternal()
+    }
 }
