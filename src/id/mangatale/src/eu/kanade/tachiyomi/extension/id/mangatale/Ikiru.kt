@@ -140,7 +140,10 @@ class Ikiru : HttpSource() {
             return emptyList()
         }
         
-        val mangaId = findMangaId(document, raw) ?: throw Exception("Manga ID tidak ditemukan")
+        val mangaId = findMangaId(document, raw)
+    ?: throw Exception("Manga ID tidak ditemukan")
+
+        println("DEBUG: mangaId ditemukan = $mangaId")
         
         val ajaxResponse = client.newCall(
             GET("$baseUrl/ajax-call?action=chapter_selects&manga_id=$mangaId", headers)
@@ -164,26 +167,31 @@ class Ikiru : HttpSource() {
     }
     
     private fun findMangaId(document: Document, body: String): String? {
-        // 1. Try from hx-get attributes
+        // 1. Cari dari atribut hx-get
         document.select("[hx-get]").forEach {
             Regex("""manga_id=(\d+)""").find(it.attr("hx-get"))?.let { match ->
                 return match.groupValues[1]
             }
         }
-        
-        // 2. Try from image storage paths
+    
+        // 2. Cari dari JS fetch seperti: manga_id=731207&chapter_id=731211
+        Regex("""manga_id=(\d+)&chapter_id=\d+""").find(body)?.let {
+            return it.groupValues[1]
+        }
+    
+        // 3. Cari dari image path storage
         document.select("img[src*='/storage/']").firstOrNull()?.attr("src")?.let { src ->
             Regex("""/(\d+)/[^/]+\.(jpg|png|webp)""").find(src)?.let { match ->
                 return match.groupValues[1]
             }
         }
-        
-        // 3. Look for hidden manga IDs in data attributes
+    
+        // 4. Cari dari data attribute
         document.select("[data-manga-id]").firstOrNull()?.attr("data-manga-id")?.let {
             return it
         }
-        
-        // 4. Search in scripts using multiple patterns
+    
+        // 5. Cari dari isi <script> (beberapa pola umum)
         val scriptPatterns = listOf(
             """manga_id['"]?\s*[:=]\s*['"]?(\d+)""",
             """data-manga-id=['"](\d+)['"]""",
@@ -191,18 +199,18 @@ class Ikiru : HttpSource() {
             """manga_id\s*=\s*['"]?(\d+)""",
             """"manga_id":\s*(\d+)"""
         )
-        
+    
         scriptPatterns.forEach { pattern ->
             Regex(pattern).find(body)?.let { match ->
                 return match.groupValues[1]
             }
         }
-        
-        // 5. Last resort: Extract from URL path
+    
+        // 6. Cari dari URL
         Regex("""/manga/[^/]+/(\d+)""").find(document.location())?.let {
             return it.groupValues[1]
         }
-        
+    
         return null
     }
 
