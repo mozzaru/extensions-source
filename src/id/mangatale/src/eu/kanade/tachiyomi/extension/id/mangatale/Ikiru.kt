@@ -149,33 +149,38 @@ class Ikiru : HttpSource() {
         }
     }
 
-    override fun chapterListRequest(manga: SManga): Request {
-        return GET(baseUrl + manga.url, headers)
-    }
+    override fun chapterListRequest(manga: SManga): Request = GET(baseUrl + manga.url, headers)
 
     override fun chapterListParse(response: Response): List<SChapter> {
-        val document = Jsoup.parse(response.body!!.string())
-        val body = document.html()
+        val raw = response.body!!.string()
+        if (raw.contains("Cloudflare")) throw Exception("Diblokir Cloudflare")
 
-        val mangaId =
-            Regex("""manga_id[=:]\s*"?(\d+)""").find(body)?.groupValues?.get(1)
-                ?: throw Exception("Gagal menemukan manga_id")
+        val document = Jsoup.parse(raw)
+
+        // Cek dulu apakah tidak ada chapter
+        if (document.select("div:contains(0 bab), div:contains(Tidak ada bab)").isNotEmpty()) {
+            return emptyList()
+        }
+
+        val mangaId = findMangaId(document, raw) ?: throw Exception("Gagal menemukan manga_id")
 
         val ajaxUrl = "$baseUrl/ajax-call?action=chapter_selects&manga_id=$mangaId"
         val ajaxRes = client.newCall(GET(ajaxUrl, headers)).execute()
         val ajaxBody = ajaxRes.body!!.string()
-        val ajaxDoc = Jsoup.parse(ajaxBody)
+        if (ajaxBody.contains("Cloudflare")) throw Exception("Diblokir Cloudflare (AJAX)")
 
+        val ajaxDoc = Jsoup.parse(ajaxBody)
         return ajaxDoc
             .select("a[href]")
-            .mapNotNull { a ->
-                val href = a.attr("href")
-                if ("/chapter-" !in href) return@mapNotNull null
-
-                SChapter.create().apply {
-                    url = href.removePrefix(baseUrl)
-                    name = a.text().trim()
-                    date_upload = 0L
+            .mapNotNull { element ->
+                element.attr("href").takeIf { it.contains("/chapter") }?.let { href ->
+                    SChapter.create().apply {
+                        url = href.removePrefix(baseUrl)
+                        name = element.selectFirst(".text-sm, .truncate")?.text()?.trim() ?: "Chapter"
+                        date_upload = element.selectFirst("time")?.text()?.let {
+                            parseChapterDate(it)
+                        } ?: 0L
+                    }
                 }
             }.reversed()
     }
@@ -225,6 +230,11 @@ class Ikiru : HttpSource() {
         }
 
         // 6. Cari dari URL
+        Regex("""/manga/[^/]+/(\d+)""").find(document.location())?.let {
+            return it.groupValues[1]
+        }
+
+        // 7. Fallback dari URL seperti `/manga/title-name/731207`
         Regex("""/manga/[^/]+/(\d+)""").find(document.location())?.let {
             return it.groupValues[1]
         }
