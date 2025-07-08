@@ -153,33 +153,23 @@ class Ikiru : HttpSource() {
 
     override fun chapterListParse(response: Response): List<SChapter> {
         val document = Jsoup.parse(response.body!!.string())
-        val body = document.html()
-
-        val mangaId = findMangaId(document, body) ?: throw Exception("Manga ID tidak ditemukan")
-        val chapterId = findChapterId(document, body) ?: throw Exception("Chapter ID tidak ditemukan")
-
         val chapters = mutableListOf<SChapter>()
-
-        listOf("head", "footer").forEach { loc ->
-            val ajaxUrl = "$baseUrl/ajax-call?action=chapter_selects&manga_id=$mangaId&chapter_id=$chapterId&loc=$loc"
-            val ajaxRes = client.newCall(GET(ajaxUrl, headers)).execute()
-            val ajaxBody = ajaxRes.body!!.string()
-            val ajaxDoc = Jsoup.parse(ajaxBody)
-
-            ajaxDoc.select("a[href]").forEach { a ->
-                val href = a.attr("href")
-                if (!href.contains("/chapter-")) return@forEach
-
-                val chapter =
+    
+        document.select("a[href*=/chapter-]").forEach { a ->
+            val name = a.text().trim()
+            val href = a.absUrl("href")
+    
+            if (name.isNotBlank() && href.contains("/chapter-")) {
+                chapters.add(
                     SChapter.create().apply {
                         url = href.removePrefix(baseUrl)
-                        name = a.text().trim()
-                        date_upload = 0L // atau parsing jika ada <time>
+                        this.name = name
+                        date_upload = 0L
                     }
-                chapters.add(chapter)
+                )
             }
         }
-
+    
         return chapters.distinctBy { it.url }.reversed()
     }
 
@@ -227,31 +217,6 @@ class Ikiru : HttpSource() {
         // Dari URL (opsional)
         Regex("""/manga/[^/]+/(\d+)""").find(document.location())?.let {
             return it.groupValues[1]
-        }
-    
-        return null
-    }
-    
-    private fun findChapterId(document: Document, body: String): String? {
-        // 1. Cari dari atribut hx-get
-        document.select("[hx-get]").forEach {
-            val url = it.attr("hx-get")
-            Regex("""chapter_id=(\d+)""").find(url)?.let { match ->
-                return match.groupValues[1]
-            }
-        }
-    
-        // Tambahan fallback lainnya tetap
-        val patterns = listOf(
-            """chapter_id[=:]\s*"?(\d+)""",
-            """"chapter_id":\s*(\d+)""",
-            """chapter_id\s*=\s*['"]?(\d+)"""
-        )
-    
-        patterns.forEach { pattern ->
-            Regex(pattern).find(body)?.let {
-                return it.groupValues[1]
-            }
         }
     
         return null
