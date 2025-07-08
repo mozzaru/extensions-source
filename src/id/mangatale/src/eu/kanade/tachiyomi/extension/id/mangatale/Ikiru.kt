@@ -184,14 +184,15 @@ class Ikiru : HttpSource() {
     }
 
     private fun findMangaId(document: Document, body: String): String? {
-        // Dari atribut hx-get
+        // 1. Cari dari atribut hx-get
         document.select("[hx-get]").forEach {
-            Regex("""manga_id=(\d+)""").find(it.attr("hx-get"))?.let { match ->
+            val url = it.attr("hx-get")
+            Regex("""manga_id=(\d+)""").find(url)?.let { match ->
                 return match.groupValues[1]
             }
         }
     
-        // Dari isi body (JS fetch)
+        // Tambahan fallback lainnya tetap
         Regex("""manga_id=(\d+)&chapter_id=\d+""").find(body)?.let {
             return it.groupValues[1]
         }
@@ -232,13 +233,22 @@ class Ikiru : HttpSource() {
     }
     
     private fun findChapterId(document: Document, body: String): String? {
-        val chapterPatterns = listOf(
+        // 1. Cari dari atribut hx-get
+        document.select("[hx-get]").forEach {
+            val url = it.attr("hx-get")
+            Regex("""chapter_id=(\d+)""").find(url)?.let { match ->
+                return match.groupValues[1]
+            }
+        }
+    
+        // Tambahan fallback lainnya tetap
+        val patterns = listOf(
             """chapter_id[=:]\s*"?(\d+)""",
             """"chapter_id":\s*(\d+)""",
-            """chapter_id\s*=\s*['"]?(\d+)""",
+            """chapter_id\s*=\s*['"]?(\d+)"""
         )
     
-        chapterPatterns.forEach { pattern ->
+        patterns.forEach { pattern ->
             Regex(pattern).find(body)?.let {
                 return it.groupValues[1]
             }
