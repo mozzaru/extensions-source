@@ -12,6 +12,7 @@ import okhttp3.FormBody
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.Jsoup
+import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -64,7 +65,7 @@ class Ikiru : HttpSource() {
     override fun searchMangaParse(response: Response): MangasPage = parseMangaResponse(response)
 
     private fun parseMangaResponse(response: Response): MangasPage {
-        val raw = response.body!!.use { it.string() }
+        val raw = response.body!!.string()
         if (raw.contains("Just a moment") || raw.contains("Cloudflare")) {
             throw Exception("Diblokir Cloudflare - Silakan coba lagi nanti")
         }
@@ -72,58 +73,28 @@ class Ikiru : HttpSource() {
         val document = Jsoup.parse(raw)
         val mangas = mutableListOf<SManga>()
 
-        fun parseMangaItem(item: Element): SManga? {
-            return try {
-                val link = item.selectFirst("a[href^='/manga/']") ?: return null
+        document.select("div.flex.rounded-lg.overflow-hidden, div.group-data-\\[mode\\=horizontal\\]\\:hidden").forEach { item ->
+            item.selectFirst("a[href^='/manga/']")?.let { link ->
                 val img = item.selectFirst("img.wp-post-image, img")?.absUrl("src")
-
-                val titleElement = item.selectFirst("h1.text-\\[15px\\], a.text-base, div.text-base")
-                val titleText = titleElement?.text()?.trim() ?: item.selectFirst("img")?.attr("alt") ?: "Tanpa Judul"
-
-                SManga.create().apply {
-                    val href = link.attr("href")
-                    url = href.removePrefix(baseUrl).ifBlank { href }
-                    title = titleText
+                val titleElement = item.selectFirst("h1, h2, h3, div.text-base")
+                val title = titleElement?.text()?.trim() ?: item.selectFirst("img")?.attr("alt") ?: "Tanpa Judul"
+                
+                mangas.add(SManga.create().apply {
+                    url = link.attr("href").removePrefix(baseUrl)
+                    this.title = title
                     thumbnail_url = img ?: ""
-                }
-            } catch (e: Exception) {
-                null
-            }
-        }
-
-        val items = document.select("div.flex.rounded-lg.overflow-hidden, div.group-data-\\[mode\\=horizontal\\]\\:hidden")
-
-        if (items.isEmpty()) {
-            document.select("div.flex.rounded-lg.overflow-hidden").forEach { item ->
-                parseMangaItem(item)?.let { mangas.add(it) }
-            }
-        }
-
-        if (mangas.isEmpty()) {
-            document.select("div.group-data-\\[mode\\=horizontal\\]\\:hidden").forEach { item ->
-                parseMangaItem(item)?.let { mangas.add(it) }
-            }
-        } else {
-            items.forEach { item ->
-                parseMangaItem(item)?.let { mangas.add(it) }
+                })
             }
         }
 
         if (mangas.isEmpty()) {
             document.select("img.wp-post-image").forEach { img ->
-                val parent = img.parents().firstOrNull {
-                    it.hasAttr("href") && it.attr("href").contains("/manga/")
-                }
-                parent?.let { link ->
-                    val title = img.attr("alt").takeIf { it.isNotBlank() } ?: "Unknown"
-                    mangas.add(
-                        SManga.create().apply {
-                            val href = link.attr("href")
-                            url = href.removePrefix(baseUrl).ifBlank { href }
-                            this.title = title
-                            thumbnail_url = img.absUrl("src")
-                        },
-                    )
+                img.parents().firstOrNull { it.attr("href")?.contains("/manga/") == true }?.let { link ->
+                    mangas.add(SManga.create().apply {
+                        url = link.attr("href").removePrefix(baseUrl)
+                        title = img.attr("alt").ifBlank { "Unknown" }
+                        thumbnail_url = img.absUrl("src")
+                    })
                 }
             }
         }
@@ -136,69 +107,73 @@ class Ikiru : HttpSource() {
 
     override fun mangaDetailsParse(response: Response): SManga {
         val document = Jsoup.parse(response.body!!.string())
+    
         return SManga.create().apply {
             title = document.selectFirst("h1[itemprop=name]")?.text() ?: "Judul tidak ditemukan"
             thumbnail_url = document.selectFirst("div[itemprop=image] img")?.absUrl("src") ?: ""
             description = document.selectFirst("div[itemprop=description]")?.text()?.trim() ?: "Tidak ada deskripsi."
-            status = SManga.UNKNOWN
             author = "Tidak diketahui"
-
+    
             val infoBlocks = document.select("div.space-y-2 > div.flex")
             val type = infoBlocks.find { it.selectFirst("h4")?.text()?.contains("Type") == true }
                 ?.selectFirst("p")?.text()
             genre = type
+    
+            status = when {
+                document.select("button:contains(Completed)").isNotEmpty() -> SManga.COMPLETED
+                document.select("button:contains(Ongoing)").isNotEmpty() -> SManga.ONGOING
+                else -> SManga.UNKNOWN
+            }
         }
     }
 
     override fun chapterListRequest(manga: SManga): Request = GET(baseUrl + manga.url, headers)
 
     override fun chapterListParse(response: Response): List<SChapter> {
-    val document = Jsoup.parse(response.body!!.string())
-    
-        // Ekstraksi manga_id dengan handle &amp;
-        val mangaId = document.selectFirst("[hx-get*='manga_id=']")?.attr("hx-get")
-            ?.replace("&amp;", "&")
-            ?.let { 
-                Regex("manga_id=(\\d+)").find(it)?.groupValues?.get(1) 
-            } ?: throw Exception("Manga ID not found in page")
-    
-        val chapters = mutableListOf<SChapter>()
-        var page = 1
-        while (true) {
-            val ajaxResponse = try {
-                // Gunakan endpoint yang benar: chapter_selects
-                client.newCall(
-                    GET("$baseUrl/ajax-call?action=chapter_selects&manga_id=$mangaId&page=$page", headers),
-                ).execute()
-            } catch (e: Exception) {
-                break
-            }
-    
-            val ajaxBody = ajaxResponse.use { it.body?.string() }
-            if (ajaxBody.isNullOrEmpty()) {
-                break
-            }
-    
-            val ajaxDocument = Jsoup.parse(ajaxBody)
-            val pageChapters = ajaxDocument.select("a[href*='/chapter/'], a[href*='?chapter=']").mapNotNull { element ->
-                val href = element.attr("href")
-                if (href.isBlank()) return@mapNotNull null
-    
+        val raw = response.body!!.string()
+        if (raw.contains("Cloudflare")) throw Exception("Diblokir Cloudflare")
+        
+        val document = Jsoup.parse(raw)
+        val mangaId = findMangaId(document, raw) ?: throw Exception("Manga ID tidak ditemukan")
+        
+        val ajaxResponse = client.newCall(
+            GET("$baseUrl/ajax-call?action=chapter_selects&manga_id=$mangaId", headers)
+        ).execute()
+        
+        val ajaxBody = ajaxResponse.body!!.string()
+        if (ajaxBody.contains("Cloudflare")) throw Exception("Diblokir Cloudflare pada AJAX")
+        
+        val ajaxDoc = Jsoup.parse(ajaxBody)
+        return ajaxDoc.select("a[href]").mapNotNull { element ->
+            element.attr("href").takeIf { it.contains("/chapter/") }?.let { href ->
                 SChapter.create().apply {
-                    url = href.removePrefix(baseUrl).ifBlank { href }
-                    name = element.selectFirst(".truncate, .chapter-title, .text-base")?.text()?.trim()
-                        ?: element.ownText().trim()
-                    date_upload = element.selectFirst("time, .chapter-date")?.text()?.let {
+                    url = href.removePrefix(baseUrl)
+                    name = element.selectFirst(".text-sm, .truncate")?.text()?.trim() ?: "Chapter"
+                    date_upload = element.selectFirst("time")?.text()?.let {
                         parseChapterDate(it)
                     } ?: 0L
                 }
             }
+        }.reversed()
+    }
     
-            if (pageChapters.isEmpty()) break
-            chapters.addAll(pageChapters)
-            page++
+    private fun findMangaId(document: Document, body: String): String? {
+        // 1. Coba dari atribut hx-get
+        document.select("[hx-get]").forEach {
+            Regex("manga_id=(\\d+)").find(it.attr("hx-get"))?.let { match ->
+                return match.groupValues[1]
+            }
         }
-        return chapters.reversed()
+        
+        // 2. Coba dari URL gambar
+        document.select("img[src*='/storage/']").firstOrNull()?.attr("src")?.let { src ->
+            Regex("/(\\d+)/").find(src)?.let { match ->
+                return match.groupValues[1]
+            }
+        }
+        
+        // 3. Cari di dalam script
+        return Regex("manga_id['\"]?\\s*[:=]\\s*['\"]?(\\d+)").find(body)?.groupValues?.get(1)
     }
 
     private fun parseChapterDate(dateString: String): Long {
@@ -207,28 +182,28 @@ class Ikiru : HttpSource() {
         val now = Calendar.getInstance()
 
         return when {
-            dateString.contains("baru saja") || dateString.contains("just now") -> now.timeInMillis
-            dateString.contains("menit") || dateString.contains("minutes ago") -> {
+            dateString.contains("baru saja") -> now.timeInMillis
+            dateString.contains("menit") -> {
                 val minutes = Regex("(\\d+)").find(dateString)?.groupValues?.get(1)?.toIntOrNull() ?: 0
                 now.add(Calendar.MINUTE, -minutes)
                 now.timeInMillis
             }
-            dateString.contains("jam") || dateString.contains("hours ago") -> {
+            dateString.contains("jam") -> {
                 val hours = Regex("(\\d+)").find(dateString)?.groupValues?.get(1)?.toIntOrNull() ?: 0
                 now.add(Calendar.HOUR, -hours)
                 now.timeInMillis
             }
-            dateString.contains("hari") || dateString.contains("days") -> {
+            dateString.contains("hari") -> {
                 val days = Regex("(\\d+)").find(dateString)?.groupValues?.get(1)?.toIntOrNull() ?: 0
                 now.add(Calendar.DATE, -days)
                 now.timeInMillis
             }
-            dateString.contains("minggu") || dateString.contains("weeks") -> {
+            dateString.contains("minggu") -> {
                 val weeks = Regex("(\\d+)").find(dateString)?.groupValues?.get(1)?.toIntOrNull() ?: 0
                 now.add(Calendar.WEEK_OF_YEAR, -weeks)
                 now.timeInMillis
             }
-            dateString.contains("bulan") || dateString.contains("months") -> {
+            dateString.contains("bulan") -> {
                 val months = Regex("(\\d+)").find(dateString)?.groupValues?.get(1)?.toIntOrNull() ?: 0
                 now.add(Calendar.MONTH, -months)
                 now.timeInMillis
@@ -245,11 +220,13 @@ class Ikiru : HttpSource() {
 
     override fun pageListParse(response: Response): List<Page> {
         val document = Jsoup.parse(response.body!!.string())
-        val images = document.select("section.mx-auto section img[src], div.reading-content img, img[src*='/wp-content/']")
-
-        return images.mapIndexedNotNull { index, img ->
-            val imageUrl = img.absUrl("src").ifEmpty { img.absUrl("data-src") }
-            if (imageUrl.isNotBlank()) Page(index, imageUrl = imageUrl) else null
+        return document.select("""
+            section.mx-auto img, 
+            section.w-full img, 
+            div.reading-content img,
+            img[src*='/wp-content/uploads/']
+        """.trimIndent()).mapIndexed { index, img ->
+            Page(index, "", img.absUrl("src").ifBlank { img.absUrl("data-src") })
         }
     }
 
