@@ -154,10 +154,9 @@ class Ikiru : HttpSource() {
 
     override fun chapterListParse(response: Response): List<SChapter> {
         val document = Jsoup.parse(response.body!!.string())
-        val mangaId = document.body().className().substringAfter("postid-").substringBefore(" ").ifBlank {
-            document.selectFirst("#chapter-list")?.attr("hx-get")?.substringAfter("manga_id=")?.substringBefore("&#")
-        } ?: return emptyList()
-
+        val mangaId = document.selectFirst("#chapter-list")?.attr("hx-get")?.substringAfter("manga_id=")?.substringBefore("&") 
+            ?: return emptyList()
+        
         val chapters = mutableListOf<SChapter>()
         var page = 1
         while (true) {
@@ -168,33 +167,30 @@ class Ikiru : HttpSource() {
             } catch (e: Exception) {
                 break
             }
-
+    
             val ajaxBody = ajaxResponse.use { it.body?.string() }
             if (ajaxBody.isNullOrEmpty()) {
                 break
             }
-
+    
             val ajaxDocument = Jsoup.parse(ajaxBody)
-            // Updated selector to be more flexible
-            val pageChapters = ajaxDocument.select("a[href*=/manga/][href*=/chapter/], a[href*=/ch-], a[href*=/bab]").mapNotNull { element ->
+            val pageChapters = ajaxDocument.select("a[href*=/chapter/]").mapNotNull { element ->
                 val href = element.attr("href")
                 if (href.isBlank()) return@mapNotNull null
-
+    
                 SChapter.create().apply {
                     url = href.removePrefix(baseUrl).ifBlank { href }
-                    name = element.select(".truncate").text().ifBlank { element.text() }
-                    date_upload = element.parent()?.selectFirst("time, .text-xs, span[class*=text-gray]")?.text()?.let {
+                    name = element.selectFirst(".truncate, .chapter-title")?.text()?.trim()
+                        ?: element.ownText().trim()
+                    date_upload = element.selectFirst("time, .chapter-date")?.text()?.let {
                         parseChapterDate(it)
                     } ?: 0L
                 }
             }
-
-            if (pageChapters.isNotEmpty()) {
-                chapters.addAll(pageChapters)
-                page++
-            } else {
-                break
-            }
+    
+            if (pageChapters.isEmpty()) break
+            chapters.addAll(pageChapters)
+            page++
         }
         return chapters.reversed()
     }
@@ -206,12 +202,12 @@ class Ikiru : HttpSource() {
 
         return when {
             dateString.contains("baru saja") || dateString.contains("just now") -> now.timeInMillis
-            dateString.contains("menit") || dateString.contains("minute") -> {
+            dateString.contains("menit") || dateString.contains("minutes ago") -> {
                 val minutes = Regex("(\\d+)").find(dateString)?.groupValues?.get(1)?.toIntOrNull() ?: 0
                 now.add(Calendar.MINUTE, -minutes)
                 now.timeInMillis
             }
-            dateString.contains("jam") || dateString.contains("hour") -> {
+            dateString.contains("jam") || dateString.contains("hours ago") -> {
                 val hours = Regex("(\\d+)").find(dateString)?.groupValues?.get(1)?.toIntOrNull() ?: 0
                 now.add(Calendar.HOUR, -hours)
                 now.timeInMillis
