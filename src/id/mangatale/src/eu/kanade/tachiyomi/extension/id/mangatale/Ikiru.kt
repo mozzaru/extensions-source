@@ -128,6 +128,40 @@ class Ikiru : HttpSource() {
     }
 
     override fun chapterListRequest(manga: SManga): Request = GET(baseUrl + manga.url, headers)
+
+    override fun chapterListParse(response: Response): List<SChapter> {
+        val raw = response.body!!.string()
+        if (raw.contains("Cloudflare")) throw Exception("Diblokir Cloudflare")
+        
+        val document = Jsoup.parse(raw)
+        
+        // First check for "no chapters" message
+        if (document.select("div:contains(0 bab), div:contains(Tidak ada bab)").isNotEmpty()) {
+            return emptyList()
+        }
+        
+        val mangaId = findMangaId(document, raw) ?: throw Exception("Manga ID tidak ditemukan")
+        
+        val ajaxResponse = client.newCall(
+            GET("$baseUrl/ajax-call?action=chapter_selects&manga_id=$mangaId", headers)
+        ).execute()
+        
+        val ajaxBody = ajaxResponse.body!!.string()
+        if (ajaxBody.contains("Cloudflare")) throw Exception("Diblokir Cloudflare pada AJAX")
+        
+        val ajaxDoc = Jsoup.parse(ajaxBody)
+        return ajaxDoc.select("a[href]").mapNotNull { element ->
+            element.attr("href").takeIf { it.contains("/chapter/") }?.let { href ->
+                SChapter.create().apply {
+                    url = href.removePrefix(baseUrl)
+                    name = element.selectFirst(".text-sm, .truncate")?.text()?.trim() ?: "Chapter"
+                    date_upload = element.selectFirst("time")?.text()?.let {
+                        parseChapterDate(it)
+                    } ?: 0L
+                }
+            }
+        }.reversed()
+    }
     
     private fun findMangaId(document: Document, body: String): String? {
         // 1. Try from hx-get attributes
@@ -170,43 +204,6 @@ class Ikiru : HttpSource() {
         }
         
         return null
-    }
-
-    override fun chapterListParse(response: Response): List<SChapter> {
-        val raw = response.body!!.string()
-        if (raw.contains("Cloudflare")) throw Exception("Diblokir Cloudflare")
-        
-        val document = Jsoup.parse(raw)
-        val mangaId = findMangaId(document, raw)
-        
-        // Handle manga with no chapters
-        if (mangaId == null) {
-            val chapterCount = document.selectFirst("div:contains(0 bab), div:contains(Tidak ada bab)") != null
-            if (chapterCount) {
-                return emptyList()
-            }
-            throw Exception("Manga ID tidak ditemukan")
-        }
-    
-        val ajaxResponse = client.newCall(
-            GET("$baseUrl/ajax-call?action=chapter_selects&manga_id=$mangaId", headers)
-        ).execute()
-        
-        val ajaxBody = ajaxResponse.body!!.string()
-        if (ajaxBody.contains("Cloudflare")) throw Exception("Diblokir Cloudflare pada AJAX")
-        
-        val ajaxDoc = Jsoup.parse(ajaxBody)
-        return ajaxDoc.select("a[href]").mapNotNull { element ->
-            element.attr("href").takeIf { it.contains("/chapter/") }?.let { href ->
-                SChapter.create().apply {
-                    url = href.removePrefix(baseUrl)
-                    name = element.selectFirst(".text-sm, .truncate")?.text()?.trim() ?: "Chapter"
-                    date_upload = element.selectFirst("time")?.text()?.let {
-                        parseChapterDate(it)
-                    } ?: 0L
-                }
-            }
-        }.reversed()
     }
 
     private fun parseChapterDate(dateString: String): Long {
