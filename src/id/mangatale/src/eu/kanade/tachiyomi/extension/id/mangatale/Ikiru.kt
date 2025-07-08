@@ -76,31 +76,35 @@ class Ikiru : HttpSource() {
         document.select("div.flex.rounded-lg.overflow-hidden, div.group-data-\\[mode\\=horizontal\\]\\:hidden").forEach { item ->
             item.selectFirst("a[href^='/manga/']")?.let { link ->
                 val img = item.selectFirst("img.wp-post-image, img")?.absUrl("src")
-                val titleElement = item.selectFirst("h1, h2, h3, div.text-base")
-                val title = titleElement?.text()?.trim() ?: item.selectFirst("img")?.attr("alt") ?: "Tanpa Judul"
+                val mangaId = Regex("""/storage/\d+/\d+/(\d+)/""").find(img.orEmpty())?.groupValues?.get(1)
+                val titleText = item.selectFirst("h1, h2, h3, div.text-base")?.text()?.trim()
+                    ?: item.selectFirst("img")?.attr("alt") ?: "Tanpa Judul"
                 
-                mangas.add(SManga.create().apply {
-                    val mangaId = Regex("""/storage/\d+/\d+/(\d+)/""").find(img ?: "")?.groupValues?.get(1)
-url = "/manga_id/$mangaId"
-                    this.title = title
-                    thumbnail_url = img ?: ""
-                })
-            }
-        }
-
-        if (mangas.isEmpty()) {
-            document.select("img.wp-post-image").forEach { img ->
-                img.parents().firstOrNull { it.attr("href")?.contains("/manga/") == true }?.let { link ->
+                if (!mangaId.isNullOrEmpty()) {
                     mangas.add(SManga.create().apply {
-                        val mangaId = Regex("""/storage/\d+/\d+/(\d+)/""").find(img ?: "")?.groupValues?.get(1)
-url = "/manga_id/$mangaId"
-                        title = img.attr("alt").ifBlank { "Unknown" }
-                        thumbnail_url = img.absUrl("src")
+                        url = "/manga_id/${mangaId!!}"
+                        title = titleText
+                        thumbnail_url = img ?: ""
                     })
                 }
             }
         }
 
+        if (mangas.isEmpty()) {
+            document.select("img.wp-post-image").forEach { img ->
+                val mangaId = Regex("""/storage/\d+/\d+/(\d+)/""").find(img.absUrl("src"))?.groupValues?.get(1)
+                if (mangaId != null) {
+                    img.parents().firstOrNull { it.tagName() == "a" && it.hasAttr("href") }?.let { link ->
+                        mangas.add(SManga.create().apply {
+                            url = "/manga_id/${mangaId!!}"
+                            title = img.attr("alt").ifBlank { "Unknown" }
+                            thumbnail_url = img.absUrl("src")
+                        })
+                    }
+                }
+            }
+        }
+        
         val hasNextPage = mangas.size >= 18
         return MangasPage(mangas.distinctBy { it.url }, hasNextPage)
     }

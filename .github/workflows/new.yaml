@@ -4,7 +4,11 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - '**'
+      - ikiru
+
+      
+    paths:
+      - 'src/**'
 
 jobs:
   build-extension:
