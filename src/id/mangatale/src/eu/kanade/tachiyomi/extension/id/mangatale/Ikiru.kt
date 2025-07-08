@@ -128,16 +128,65 @@ class Ikiru : HttpSource() {
     }
 
     override fun chapterListRequest(manga: SManga): Request = GET(baseUrl + manga.url, headers)
+    
+    private fun findMangaId(document: Document, body: String): String? {
+        // 1. Try from hx-get attributes
+        document.select("[hx-get]").forEach {
+            Regex("""manga_id=(\d+)""").find(it.attr("hx-get"))?.let { match ->
+                return match.groupValues[1]
+            }
+        }
+        
+        // 2. Try from image storage paths
+        document.select("img[src*='/storage/']").firstOrNull()?.attr("src")?.let { src ->
+            Regex("""/(\d+)/[^/]+\.(jpg|png|webp)""").find(src)?.let { match ->
+                return match.groupValues[1]
+            }
+        }
+        
+        // 3. Look for hidden manga IDs in data attributes
+        document.select("[data-manga-id]").firstOrNull()?.attr("data-manga-id")?.let {
+            return it
+        }
+        
+        // 4. Search in scripts using multiple patterns
+        val scriptPatterns = listOf(
+            """manga_id['"]?\s*[:=]\s*['"]?(\d+)""",
+            """data-manga-id=['"](\d+)['"]""",
+            """ajax-call\?.*manga_id=(\d+)""",
+            """manga_id\s*=\s*['"]?(\d+)""",
+            """"manga_id":\s*(\d+)"""
+        )
+        
+        scriptPatterns.forEach { pattern ->
+            Regex(pattern).find(body)?.let { match ->
+                return match.groupValues[1]
+            }
+        }
+        
+        // 5. Last resort: Extract from URL path
+        Regex("""/manga/[^/]+/(\d+)""").find(document.location())?.let {
+            return it.groupValues[1]
+        }
+        
+        return null
+    }
 
     override fun chapterListParse(response: Response): List<SChapter> {
         val raw = response.body!!.string()
         if (raw.contains("Cloudflare")) throw Exception("Diblokir Cloudflare")
-    
+        
         val document = Jsoup.parse(raw)
         val mangaId = findMangaId(document, raw)
-    
-        // Return empty list if no manga ID found (0 chapters case)
-        if (mangaId == null) return emptyList()
+        
+        // Handle manga with no chapters
+        if (mangaId == null) {
+            val chapterCount = document.selectFirst("div:contains(0 bab), div:contains(Tidak ada bab)") != null
+            if (chapterCount) {
+                return emptyList()
+            }
+            throw Exception("Manga ID tidak ditemukan")
+        }
     
         val ajaxResponse = client.newCall(
             GET("$baseUrl/ajax-call?action=chapter_selects&manga_id=$mangaId", headers)
@@ -158,37 +207,6 @@ class Ikiru : HttpSource() {
                 }
             }
         }.reversed()
-    }
-    
-    private fun findMangaId(document: Document, body: String): String? {
-        // 1. Try from hx-get attributes
-        document.select("[hx-get]").forEach {
-            Regex("""manga_id=(\d+)""").find(it.attr("hx-get"))?.let { match ->
-                return match.groupValues[1]
-            }
-        }
-        
-        // 2. Try from image storage paths
-        document.select("img[src*='/storage/']").firstOrNull()?.attr("src")?.let { src ->
-            Regex("""/(\d+)/[^/]+\.(jpg|png|webp)""").find(src)?.let { match ->
-                return match.groupValues[1]
-            }
-        }
-        
-        // 3. Search in scripts using multiple patterns
-        val patterns = listOf(
-            """manga_id['"]?\s*[:=]\s*['"]?(\d+)""",
-            """data-manga-id=['"](\d+)['"]""",
-            """ajax-call\?.*manga_id=(\d+)"""
-        )
-        
-        patterns.forEach { pattern ->
-            Regex(pattern).find(body)?.let { match ->
-                return match.groupValues[1]
-            }
-        }
-        
-        return null
     }
 
     private fun parseChapterDate(dateString: String): Long {
