@@ -132,10 +132,13 @@ class Ikiru : HttpSource() {
     override fun chapterListParse(response: Response): List<SChapter> {
         val raw = response.body!!.string()
         if (raw.contains("Cloudflare")) throw Exception("Diblokir Cloudflare")
-        
+    
         val document = Jsoup.parse(raw)
-        val mangaId = findMangaId(document, raw) ?: throw Exception("Manga ID tidak ditemukan")
-        
+        val mangaId = findMangaId(document, raw)
+    
+        // Return empty list if no manga ID found (0 chapters case)
+        if (mangaId == null) return emptyList()
+    
         val ajaxResponse = client.newCall(
             GET("$baseUrl/ajax-call?action=chapter_selects&manga_id=$mangaId", headers)
         ).execute()
@@ -158,22 +161,34 @@ class Ikiru : HttpSource() {
     }
     
     private fun findMangaId(document: Document, body: String): String? {
-        // 1. Coba dari atribut hx-get
+        // 1. Try from hx-get attributes
         document.select("[hx-get]").forEach {
-            Regex("manga_id=(\\d+)").find(it.attr("hx-get"))?.let { match ->
+            Regex("""manga_id=(\d+)""").find(it.attr("hx-get"))?.let { match ->
                 return match.groupValues[1]
             }
         }
         
-        // 2. Coba dari URL gambar
+        // 2. Try from image storage paths
         document.select("img[src*='/storage/']").firstOrNull()?.attr("src")?.let { src ->
-            Regex("/(\\d+)/").find(src)?.let { match ->
+            Regex("""/(\d+)/[^/]+\.(jpg|png|webp)""").find(src)?.let { match ->
                 return match.groupValues[1]
             }
         }
         
-        // 3. Cari di dalam script
-        return Regex("manga_id['\"]?\\s*[:=]\\s*['\"]?(\\d+)").find(body)?.groupValues?.get(1)
+        // 3. Search in scripts using multiple patterns
+        val patterns = listOf(
+            """manga_id['"]?\s*[:=]\s*['"]?(\d+)""",
+            """data-manga-id=['"](\d+)['"]""",
+            """ajax-call\?.*manga_id=(\d+)"""
+        )
+        
+        patterns.forEach { pattern ->
+            Regex(pattern).find(body)?.let { match ->
+                return match.groupValues[1]
+            }
+        }
+        
+        return null
     }
 
     private fun parseChapterDate(dateString: String): Long {
