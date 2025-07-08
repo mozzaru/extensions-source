@@ -154,8 +154,12 @@ class Ikiru : HttpSource() {
 
     override fun chapterListParse(response: Response): List<SChapter> {
         val document = Jsoup.parse(response.body!!.string())
-        val mangaId = document.selectFirst("#chapter-list")?.attr("hx-get")?.substringAfter("manga_id=")?.substringBefore("&") 
-            ?: return emptyList()
+        
+        // Extract manga ID using more robust regex
+        val mangaId = document.selectFirst("#chapter-list, [hx-get*='manga_id=']")?.attr("hx-get")
+            ?.let { 
+                Regex("manga_id=([0-9]+)").find(it)?.groupValues?.get(1)
+            } ?: throw Exception("Manga ID not found in page")
         
         val chapters = mutableListOf<SChapter>()
         var page = 1
@@ -174,13 +178,13 @@ class Ikiru : HttpSource() {
             }
     
             val ajaxDocument = Jsoup.parse(ajaxBody)
-            val pageChapters = ajaxDocument.select("a[href*=/chapter/]").mapNotNull { element ->
+            val pageChapters = ajaxDocument.select("a[href*='/chapter/'], a[href*='?chapter=']").mapNotNull { element ->
                 val href = element.attr("href")
                 if (href.isBlank()) return@mapNotNull null
     
                 SChapter.create().apply {
                     url = href.removePrefix(baseUrl).ifBlank { href }
-                    name = element.selectFirst(".truncate, .chapter-title")?.text()?.trim()
+                    name = element.selectFirst(".truncate, .chapter-title, .text-base")?.text()?.trim()
                         ?: element.ownText().trim()
                     date_upload = element.selectFirst("time, .chapter-date")?.text()?.let {
                         parseChapterDate(it)
@@ -239,18 +243,11 @@ class Ikiru : HttpSource() {
 
     override fun pageListParse(response: Response): List<Page> {
         val document = Jsoup.parse(response.body!!.string())
-        val images = document.select("section.mx-auto section img[src]")
+        val images = document.select("section.mx-auto section img[src], div.reading-content img, img[src*='/wp-content/']")
 
-        if (images.isNotEmpty()) {
-            return images.mapIndexed { index, img ->
-                val imageUrl = img.absUrl("src").ifEmpty { img.absUrl("data-src") }
-                Page(index, imageUrl = imageUrl)
-            }
-        }
-
-        return document.select("div.reading-content img, img[src*='/wp-content/']").mapIndexed { index, img ->
+        return images.mapIndexedNotNull { index, img ->
             val imageUrl = img.absUrl("src").ifEmpty { img.absUrl("data-src") }
-            Page(index, imageUrl = imageUrl)
+            if (imageUrl.isNotBlank()) Page(index, imageUrl = imageUrl) else null
         }
     }
 
