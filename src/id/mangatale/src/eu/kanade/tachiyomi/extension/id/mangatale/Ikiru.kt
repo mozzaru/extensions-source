@@ -150,7 +150,6 @@ class Ikiru : HttpSource() {
     }
 
     override fun chapterListRequest(manga: SManga): Request {
-        // Langsung ambil dari halaman chapter terakhir (agar ada chapter_id & manga_id)
         return GET(baseUrl + manga.url, headers)
     }
 
@@ -158,12 +157,11 @@ class Ikiru : HttpSource() {
         val document = Jsoup.parse(response.body!!.string())
         val body = document.html()
 
-        val mangaId = Regex("""manga_id[=:]\s*"?(\d+)""").find(body)?.groupValues?.get(1)
-        val chapterId = Regex("""chapter_id[=:]\s*"?(\d+)""").find(body)?.groupValues?.get(1)
+        val mangaId =
+            Regex("""manga_id[=:]\s*"?(\d+)""").find(body)?.groupValues?.get(1)
+                ?: throw Exception("Gagal menemukan manga_id")
 
-        if (mangaId == null || chapterId == null) throw Exception("Gagal menemukan manga_id / chapter_id")
-
-        val ajaxUrl = "$baseUrl/ajax-call?action=chapter_selects&loc=head&manga_id=$mangaId&chapter_id=$chapterId"
+        val ajaxUrl = "$baseUrl/ajax-call?action=chapter_selects&manga_id=$mangaId"
         val ajaxRes = client.newCall(GET(ajaxUrl, headers)).execute()
         val ajaxBody = ajaxRes.body!!.string()
         val ajaxDoc = Jsoup.parse(ajaxBody)
@@ -177,7 +175,7 @@ class Ikiru : HttpSource() {
                 SChapter.create().apply {
                     url = href.removePrefix(baseUrl)
                     name = a.text().trim()
-                    date_upload = 0L // atau parsing jika ada tanggal
+                    date_upload = 0L
                 }
             }.reversed()
     }
