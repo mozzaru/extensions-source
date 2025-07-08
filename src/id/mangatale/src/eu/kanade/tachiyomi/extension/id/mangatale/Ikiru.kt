@@ -153,20 +153,30 @@ class Ikiru : HttpSource() {
 
     override fun chapterListParse(response: Response): List<SChapter> {
         val document = Jsoup.parse(response.body!!.string())
+        val body = document.html()
+    
+        val mangaId = findMangaId(document, body) ?: throw Exception("Manga ID tidak ditemukan")
+        val chapterId = findChapterId(document, body) ?: throw Exception("Chapter ID tidak ditemukan")
+    
         val chapters = mutableListOf<SChapter>()
     
-        document.select("a[href*=/chapter-]").forEach { a ->
-            val name = a.text().trim()
-            val href = a.absUrl("href")
+        listOf("head", "footer").forEach { loc ->
+            val ajaxUrl = "$baseUrl/ajax-call?action=chapter_selects&manga_id=$mangaId&chapter_id=$chapterId&loc=$loc"
+            val ajaxRes = client.newCall(GET(ajaxUrl, headers)).execute()
+            val ajaxBody = ajaxRes.body!!.string()
+            val ajaxDoc = Jsoup.parse(ajaxBody)
     
-            if (name.isNotBlank() && href.contains("/chapter-")) {
-                chapters.add(
+            ajaxDoc.select("a[href]").forEach { a ->
+                val href = a.attr("href")
+                if (!href.contains("/chapter-")) return@forEach
+    
+                val chapter =
                     SChapter.create().apply {
                         url = href.removePrefix(baseUrl)
-                        this.name = name
+                        name = a.text().trim()
                         date_upload = 0L
                     }
-                )
+                chapters.add(chapter)
             }
         }
     
@@ -174,49 +184,31 @@ class Ikiru : HttpSource() {
     }
 
     private fun findMangaId(document: Document, body: String): String? {
-        // 1. Cari dari atribut hx-get
+        // 1. Coba langsung dari URL ajax-call
+        Regex("""manga_id=(\d+)""").find(body)?.let { return it.groupValues[1] }
+    
+        // 2. Fallback dari hx-get
         document.select("[hx-get]").forEach {
-            val url = it.attr("hx-get")
-            Regex("""manga_id=(\d+)""").find(url)?.let { match ->
+            Regex("""manga_id=(\d+)""").find(it.attr("hx-get"))?.let { match ->
                 return match.groupValues[1]
             }
         }
     
-        // Tambahan fallback lainnya tetap
-        Regex("""manga_id=(\d+)&chapter_id=\d+""").find(body)?.let {
-            return it.groupValues[1]
-        }
-    
-        // Dari src gambar
-        document.select("img[src*='/storage/']").firstOrNull()?.attr("src")?.let { src ->
-            Regex("""/(\d+)/[^/]+\.(jpg|png|webp)""").find(src)?.let { match ->
-                return match.groupValues[1]
-            }
-        }
-    
-        // Dari data attribute
+        // 3. Fallback dari data attribute
         document.select("[data-manga-id]").firstOrNull()?.attr("data-manga-id")?.let {
             return it
         }
     
-        // Dari script umum
-        val scriptPatterns = listOf(
-            """manga_id['"]?\s*[:=]\s*['"]?(\d+)""",
-            """data-manga-id=['"](\d+)['"]""",
-            """ajax-call\?.*manga_id=(\d+)""",
-            """manga_id\s*=\s*['"]?(\d+)""",
-            """"manga_id":\s*(\d+)"""
-        )
+        return null
+    }
     
-        scriptPatterns.forEach { pattern ->
-            Regex(pattern).find(body)?.let { match ->
-                return match.groupValues[1]
-            }
-        }
+    private fun findChapterId(document: Document, body: String): String? {
+        // 1. Cari dari URL ajax-call
+        Regex("""chapter_id=(\d+)""").find(body)?.let { return it.groupValues[1] }
     
-        // Dari URL (opsional)
-        Regex("""/manga/[^/]+/(\d+)""").find(document.location())?.let {
-            return it.groupValues[1]
+        // 2. Fallback dari href tombol chapter
+        document.select("a[href*=/chapter-]").firstOrNull()?.attr("href")?.let { href ->
+            Regex("""chapter-\d+\.(\d+)""").find(href)?.let { return it.groupValues[1] }
         }
     
         return null
