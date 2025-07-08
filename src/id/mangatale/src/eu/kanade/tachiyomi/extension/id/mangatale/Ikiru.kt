@@ -153,20 +153,22 @@ class Ikiru : HttpSource() {
     override fun chapterListRequest(manga: SManga): Request = GET(baseUrl + manga.url, headers)
 
     override fun chapterListParse(response: Response): List<SChapter> {
-        val document = Jsoup.parse(response.body!!.string())
-        
-        // Extract manga ID using more robust regex
-        val mangaId = document.selectFirst("#chapter-list, [hx-get*='manga_id=']")?.attr("hx-get")
+    val document = Jsoup.parse(response.body!!.string())
+    
+        // Ekstraksi manga_id dengan handle &amp;
+        val mangaId = document.selectFirst("[hx-get*='manga_id=']")?.attr("hx-get")
+            ?.replace("&amp;", "&")
             ?.let { 
-                Regex("manga_id=([0-9]+)").find(it)?.groupValues?.get(1)
+                Regex("manga_id=(\\d+)").find(it)?.groupValues?.get(1) 
             } ?: throw Exception("Manga ID not found in page")
-        
+    
         val chapters = mutableListOf<SChapter>()
         var page = 1
         while (true) {
             val ajaxResponse = try {
+                // Gunakan endpoint yang benar: chapter_selects
                 client.newCall(
-                    GET("$baseUrl/ajax-call?action=chapter_list&manga_id=$mangaId&page=$page", headers),
+                    GET("$baseUrl/ajax-call?action=chapter_selects&manga_id=$mangaId&page=$page", headers),
                 ).execute()
             } catch (e: Exception) {
                 break
