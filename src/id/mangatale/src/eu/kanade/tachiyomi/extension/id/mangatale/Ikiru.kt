@@ -198,55 +198,29 @@ class Ikiru : HttpSource() {
     
             ajaxDoc.select("a[href*=/chapter-], button[onclick*='location.href']").forEach { el ->
                 val href = el.attr("href").ifEmpty {
+                    // untuk button: onclick="location.href='/chapter-12.123456'"
                     Regex("""['"](/chapter-[^'"]+)['"]""").find(el.attr("onclick"))?.groupValues?.get(1).orEmpty()
                 }
     
                 if (href.isBlank() || !href.contains("/chapter-")) return@forEach
-    
                 val name = el.text().trim()
-    
-                val dateStr = el
-                    .selectFirst(".chapter-time, .timestamp, time, p")
-                    ?.text()?.trim()
-                    ?: el.parent()?.selectFirst(".chapter-time, .timestamp, time, p")
-                        ?.text()?.trim().orEmpty()
-    
-                val chapter = SChapter.create().apply {
-                    url = href.removePrefix(baseUrl)
-                    this.name = name
-                    date_upload = if (dateStr.isNotBlank()) parseChapterDate(dateStr) else 0L
-                }
-    
-                chapters.add(chapter)
+                val dateStr = el.nextElementSibling()?.text()?.trim().orEmpty()
+                
+                chapters.add(
+                    SChapter.create().apply {
+                        url = href.removePrefix(baseUrl)
+                        this.name = name
+                        date_upload = parseChapterDate(dateStr)
+                    }
+                )
             }
         }
     
-        val sortedChapters = chapters
+        return chapters
             .distinctBy { it.url }
-            .sortedByDescending { extractChapterNumber(it.name) ?: 0f }
-    
-        // 🔍 Deteksi chapter hilang
-        val chapterNumbers = sortedChapters.mapNotNull { extractChapterNumber(it.name) }.sortedDescending()
-        for (i in 0 until chapterNumbers.size - 1) {
-            val curr = chapterNumbers[i]
-            val next = chapterNumbers[i + 1]
-            val gap = curr - next
-            if (gap > 1f) {
-                val missing = (next.toInt() + 1)..(curr.toInt() - 1)
-                missing.forEach {
-                    println("Chapter hilang: $it")
-                }
+            .sortedByDescending {
+                Regex("""\d+(\.\d+)?""").find(it.name)?.value?.toFloatOrNull() ?: 0f
             }
-        }
-    
-        return sortedChapters
-    }
-    
-    private fun extractChapterNumber(name: String): Float? {
-        return Regex("""\d+(\.\d+)?""")
-            .find(name)
-            ?.value
-            ?.toFloatOrNull()
     }
 
     private fun findMangaId(document: Document, body: String): String? {
@@ -283,47 +257,47 @@ class Ikiru : HttpSource() {
     private fun parseChapterDate(dateString: String): Long {
         val lc = dateString.lowercase(Locale.ENGLISH).trim()
     
-        val now = Calendar.getInstance()
-    
         return when {
-            lc.contains("just now") || lc.contains("baru saja") -> now.timeInMillis
+            lc.contains("just now") || lc.contains("baru saja") -> Calendar.getInstance().timeInMillis
     
             lc.contains("min") || lc.contains("menit") -> {
                 val minutes = Regex("""(\d+)""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                now.apply { add(Calendar.MINUTE, -minutes) }.timeInMillis
+                Calendar.getInstance().apply {
+                    add(Calendar.MINUTE, -minutes)
+                }.timeInMillis
             }
     
             lc.contains("hour") || lc.contains("jam") -> {
                 val hours = Regex("""(\d+)""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                now.apply { add(Calendar.HOUR, -hours) }.timeInMillis
+                Calendar.getInstance().apply {
+                    add(Calendar.HOUR, -hours)
+                }.timeInMillis
             }
     
             lc.contains("day") || lc.contains("hari") -> {
                 val days = Regex("""(\d+)""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                now.apply { add(Calendar.DATE, -days) }.timeInMillis
+                Calendar.getInstance().apply {
+                    add(Calendar.DATE, -days)
+                }.timeInMillis
             }
     
             lc.contains("week") || lc.contains("minggu") -> {
                 val weeks = Regex("""(\d+)""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                now.apply { add(Calendar.WEEK_OF_YEAR, -weeks) }.timeInMillis
+                Calendar.getInstance().apply {
+                    add(Calendar.WEEK_OF_YEAR, -weeks)
+                }.timeInMillis
             }
     
             lc.contains("month") || lc.contains("bulan") -> {
                 val months = Regex("""(\d+)""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                now.apply { add(Calendar.MONTH, -months) }.timeInMillis
-            }
-    
-            lc.matches(Regex("""\d{2}/\d{2}/\d{2}""")) -> {
-                // Format Ikiru: dd/MM/yy (contoh: 02/07/25)
-                try {
-                    SimpleDateFormat("dd/MM/yy", Locale.US).parse(lc)?.time ?: 0L
-                } catch (_: Exception) {
-                    0L
-                }
+                Calendar.getInstance().apply {
+                    add(Calendar.MONTH, -months)
+                }.timeInMillis
             }
     
             else -> {
                 try {
+                    // Misal: "July 1, 2024"
                     SimpleDateFormat("MMMM d, yyyy", Locale.ENGLISH).parse(dateString)?.time ?: 0L
                 } catch (_: Exception) {
                     0L
