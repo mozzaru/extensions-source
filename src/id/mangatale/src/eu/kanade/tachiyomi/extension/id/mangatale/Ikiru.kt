@@ -12,7 +12,6 @@ import okhttp3.FormBody
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.Jsoup
-import org.jsoup.nodes.Element
 import org.jsoup.nodes.Document
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -185,83 +184,71 @@ class Ikiru : HttpSource() {
     override fun chapterListParse(response: Response): List<SChapter> {
         val document = Jsoup.parse(response.body!!.string())
         val body = document.html()
-        
-        // Perbaikan regex untuk manga_id
-        val mangaId = findMangaId(document, body) ?: run {
-            Regex("""/manga/([^/]+)""").find(response.request.url.toString())?.groupValues?.get(1)
-        } ?: throw Exception("Manga ID tidak ditemukan")
     
-        val chapterId = findChapterId(document, body) ?: run {
-            document.select("a[href*=/chapter-]").firstOrNull()?.attr("href")
-                ?.let { 
-                    Regex("""chapter-\d+\.(\d+)""").find(it)?.groupValues?.get(1)
-                    ?: Regex("""chapter-(\d+)""").find(it)?.groupValues?.get(1)
-                }
-        } ?: throw Exception("Chapter ID tidak ditemukan")
+        val mangaId = findMangaId(document, body) ?: throw Exception("Manga ID tidak ditemukan")
+        val chapterId = findChapterId(document, body) ?: throw Exception("Chapter ID tidak ditemukan")
     
         val chapters = mutableListOf<SChapter>()
-        
-        fun parseChaptersFromElement(el: Element) {
-            val href = el.attr("href").ifEmpty {
-                Regex("""['"](/chapter-[^'"]+)['"]""").find(el.attr("onclick"))?.groupValues?.get(1).orEmpty()
-            }
-            if (href.isBlank() || !href.contains("/chapter-")) return
-            
-            val name = el.selectFirst(".chapter-name, .chapter-title")?.text() 
-                ?: el.ownText().trim()
-            
-            // Perbaikan selektor tanggal
-            val dateStr = el.parents().select(".chapter-date, time, .relative-date").text()
-                .takeIf { it.isNotBlank() }
-                ?: el.parent()?.select(".chapter-time, .timestamp, p")?.text()
-                ?: el.nextElementSibling()?.text()
-                ?: ""
-            
-            chapters.add(
-                SChapter.create().apply {
+    
+        listOf("head", "footer").forEach { loc ->
+            val ajaxUrl = "$baseUrl/ajax-call?action=chapter_selects&manga_id=$mangaId&chapter_id=$chapterId&loc=$loc"
+            val ajaxRes = client.newCall(GET(ajaxUrl, headers)).execute()
+            val ajaxBody = ajaxRes.body!!.string()
+            val ajaxDoc = Jsoup.parse(ajaxBody)
+    
+            ajaxDoc.select("a[href*=/chapter-], button[onclick*='location.href']").forEach { el ->
+                val href = el.attr("href").ifEmpty {
+                    Regex("""['"](/chapter-[^'"]+)['"]""").find(el.attr("onclick"))?.groupValues?.get(1).orEmpty()
+                }
+    
+                if (href.isBlank() || !href.contains("/chapter-")) return@forEach
+    
+                val name = el.text().trim()
+    
+                val dateStr = el
+                    .selectFirst(".chapter-time, .timestamp, time, p")
+                    ?.text()?.trim()
+                    ?: el.parent()?.selectFirst(".chapter-time, .timestamp, time, p")
+                        ?.text()?.trim().orEmpty()
+    
+                val chapter = SChapter.create().apply {
                     url = href.removePrefix(baseUrl)
                     this.name = name
-                    date_upload = parseChapterDate(dateStr)
+                    date_upload = if (dateStr.isNotBlank()) parseChapterDate(dateStr) else 0L
                 }
-            )
+    
+                chapters.add(chapter)
+            }
         }
     
-        listOf("head", "main", "footer").forEach { loc ->
-            try {
-                val ajaxUrl = "$baseUrl/ajax-call?action=chapter_selects&manga_id=$mangaId&chapter_id=$chapterId&loc=$loc"
-                val ajaxRes = client.newCall(GET(ajaxUrl, headers)).execute()
-                ajaxRes.use { response -> // Penanganan resource
-                    val ajaxBody = response.body!!.string()
-                    val ajaxDoc = Jsoup.parse(ajaxBody)
-                    
-                    ajaxDoc.select("""
-                        a[href*=/chapter-], 
-                        .chapter-item, 
-                        .chapter-link, 
-                        button[onclick*='location.href']
-                    """.trimIndent()).forEach { parseChaptersFromElement(it) }
-                }
-            } catch (e: Exception) {
-                // Skip error
-            }
-        }
-        
-        if (chapters.isEmpty()) {
-            document.select("""
-                a[href*=/chapter-], 
-                .chapter-item, 
-                .chapter-list a
-            """.trimIndent()).forEach { parseChaptersFromElement(it) }
-        }
-        
-        return chapters
+        val sortedChapters = chapters
             .distinctBy { it.url }
-            .sortedByDescending { chap ->
-                Regex("""chapter-(\d+)""").find(chap.url)?.groupValues?.get(1)?.toFloatOrNull()
-                    ?: 0f
+            .sortedByDescending { extractChapterNumber(it.name) ?: 0f }
+    
+        // 🔍 Deteksi chapter hilang
+        val chapterNumbers = sortedChapters.mapNotNull { extractChapterNumber(it.name) }.sortedDescending()
+        for (i in 0 until chapterNumbers.size - 1) {
+            val curr = chapterNumbers[i]
+            val next = chapterNumbers[i + 1]
+            val gap = curr - next
+            if (gap > 1f) {
+                val missing = (next.toInt() + 1)..(curr.toInt() - 1)
+                missing.forEach {
+                    println("Chapter hilang: $it")
+                }
             }
+        }
+    
+        return sortedChapters
     }
     
+    private fun extractChapterNumber(name: String): Float? {
+        return Regex("""\d+(\.\d+)?""")
+            .find(name)
+            ?.value
+            ?.toFloatOrNull()
+    }
+
     private fun findMangaId(document: Document, body: String): String? {
         // 1. Coba langsung dari URL ajax-call
         Regex("""manga_id=(\d+)""").find(body)?.let { return it.groupValues[1] }
@@ -295,38 +282,49 @@ class Ikiru : HttpSource() {
 
     private fun parseChapterDate(dateString: String): Long {
         val lc = dateString.lowercase(Locale.ENGLISH).trim()
-        
+    
         return when {
-            lc.contains("hari ini") || lc.contains("today") -> Calendar.getInstance().timeInMillis
-            
-            lc.contains("menit") || lc.contains("min") -> {
+            lc.contains("just now") || lc.contains("baru saja") -> Calendar.getInstance().timeInMillis
+    
+            lc.contains("min") || lc.contains("menit") -> {
                 val minutes = Regex("""(\d+)""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                Calendar.getInstance().apply { add(Calendar.MINUTE, -minutes) }.timeInMillis
+                Calendar.getInstance().apply {
+                    add(Calendar.MINUTE, -minutes)
+                }.timeInMillis
             }
-            
-            lc.contains("jam") || lc.contains("hour") -> {
+    
+            lc.contains("hour") || lc.contains("jam") -> {
                 val hours = Regex("""(\d+)""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                Calendar.getInstance().apply { add(Calendar.HOUR, -hours) }.timeInMillis
+                Calendar.getInstance().apply {
+                    add(Calendar.HOUR, -hours)
+                }.timeInMillis
             }
-            
-            // Tambahkan penanganan untuk "X hari yang lalu"
-            lc.contains("hari") || lc.contains("day") || lc.contains("yang lalu") -> {
+    
+            lc.contains("day") || lc.contains("hari") -> {
                 val days = Regex("""(\d+)""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                Calendar.getInstance().apply { add(Calendar.DATE, -days) }.timeInMillis
+                Calendar.getInstance().apply {
+                    add(Calendar.DATE, -days)
+                }.timeInMillis
             }
-            
-            lc.contains("minggu") || lc.contains("week") -> {
+    
+            lc.contains("week") || lc.contains("minggu") -> {
                 val weeks = Regex("""(\d+)""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                Calendar.getInstance().apply { add(Calendar.WEEK_OF_YEAR, -weeks) }.timeInMillis
+                Calendar.getInstance().apply {
+                    add(Calendar.WEEK_OF_YEAR, -weeks)
+                }.timeInMillis
             }
-            
-            Regex("""\d{2}/\d{2}/\d{4}""").matches(lc) -> {
-                SimpleDateFormat("dd/MM/yyyy", Locale.ENGLISH).parse(lc)?.time ?: 0L
+    
+            lc.contains("month") || lc.contains("bulan") -> {
+                val months = Regex("""(\d+)""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                Calendar.getInstance().apply {
+                    add(Calendar.MONTH, -months)
+                }.timeInMillis
             }
-            
+    
             else -> {
                 try {
-                    SimpleDateFormat.getDateInstance().parse(dateString)?.time ?: 0L
+                    // Misal: "July 1, 2024"
+                    SimpleDateFormat("MMMM d, yyyy", Locale.ENGLISH).parse(dateString)?.time ?: 0L
                 } catch (_: Exception) {
                     0L
                 }
@@ -334,19 +332,21 @@ class Ikiru : HttpSource() {
         }
     }
 
+    override fun pageListRequest(chapter: SChapter): Request = GET(baseUrl + chapter.url, headers)
+
     override fun pageListParse(response: Response): List<Page> {
         val document = Jsoup.parse(response.body!!.string())
-        return document.select(
-            """
-            section.mx-auto img, 
-            section.w-full img, 
-            div.reading-content img,
-            img[src*='/wp-content/uploads/'],
-            img[data-src]  // Selektor tambahan
-            """.trimIndent()
-        ).mapIndexed { index, img ->
-            Page(index, "", img.absUrl("src").ifBlank { img.absUrl("data-src") })
-        }
+        return document
+            .select(
+                """
+                section.mx-auto img, 
+                section.w-full img, 
+                div.reading-content img,
+                img[src*='/wp-content/uploads/']
+                """.trimIndent(),
+            ).mapIndexed { index, img ->
+                Page(index, "", img.absUrl("src").ifBlank { img.absUrl("data-src") })
+            }
     }
 
     override fun imageUrlParse(response: Response): String = throw UnsupportedOperationException("Not used")
