@@ -283,47 +283,47 @@ class Ikiru : HttpSource() {
     private fun parseChapterDate(dateString: String): Long {
         val lc = dateString.lowercase(Locale.ENGLISH).trim()
     
+        val now = Calendar.getInstance()
+    
         return when {
-            lc.contains("just now") || lc.contains("baru saja") -> Calendar.getInstance().timeInMillis
+            lc.contains("just now") || lc.contains("baru saja") -> now.timeInMillis
     
             lc.contains("min") || lc.contains("menit") -> {
                 val minutes = Regex("""(\d+)""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                Calendar.getInstance().apply {
-                    add(Calendar.MINUTE, -minutes)
-                }.timeInMillis
+                now.apply { add(Calendar.MINUTE, -minutes) }.timeInMillis
             }
     
             lc.contains("hour") || lc.contains("jam") -> {
                 val hours = Regex("""(\d+)""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                Calendar.getInstance().apply {
-                    add(Calendar.HOUR, -hours)
-                }.timeInMillis
+                now.apply { add(Calendar.HOUR, -hours) }.timeInMillis
             }
     
             lc.contains("day") || lc.contains("hari") -> {
                 val days = Regex("""(\d+)""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                Calendar.getInstance().apply {
-                    add(Calendar.DATE, -days)
-                }.timeInMillis
+                now.apply { add(Calendar.DATE, -days) }.timeInMillis
             }
     
             lc.contains("week") || lc.contains("minggu") -> {
                 val weeks = Regex("""(\d+)""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                Calendar.getInstance().apply {
-                    add(Calendar.WEEK_OF_YEAR, -weeks)
-                }.timeInMillis
+                now.apply { add(Calendar.WEEK_OF_YEAR, -weeks) }.timeInMillis
             }
     
             lc.contains("month") || lc.contains("bulan") -> {
                 val months = Regex("""(\d+)""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                Calendar.getInstance().apply {
-                    add(Calendar.MONTH, -months)
-                }.timeInMillis
+                now.apply { add(Calendar.MONTH, -months) }.timeInMillis
+            }
+    
+            lc.matches(Regex("""\d{2}/\d{2}/\d{2}""")) -> {
+                // Format Ikiru: dd/MM/yy (contoh: 02/07/25)
+                try {
+                    SimpleDateFormat("dd/MM/yy", Locale.US).parse(lc)?.time ?: 0L
+                } catch (_: Exception) {
+                    0L
+                }
             }
     
             else -> {
                 try {
-                    // Misal: "July 1, 2024"
                     SimpleDateFormat("MMMM d, yyyy", Locale.ENGLISH).parse(dateString)?.time ?: 0L
                 } catch (_: Exception) {
                     0L
