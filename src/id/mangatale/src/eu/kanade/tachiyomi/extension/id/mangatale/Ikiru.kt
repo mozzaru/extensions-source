@@ -205,14 +205,14 @@ class Ikiru : HttpSource() {
                     val href = el.attr("href").ifEmpty {
                         Regex("""['"](/chapter-[^'"]+)['"]""").find(el.attr("onclick"))?.groupValues?.get(1).orEmpty()
                     }
-    
+                
                     if (href.isBlank() || !href.contains("/chapter-")) return@forEach
                     val name = el.text().trim()
-    
-                    val dateStr = el.select("time[datetime]").attr("datetime").orEmpty()
+                
+                    val dateStr = el.parent()?.selectFirst("time[datetime]")?.attr("datetime").orEmpty()
                     val uploadTime = parseChapterDate(dateStr)
                     val readableDate = formatRelativeDate(uploadTime)
-    
+                
                     chapters.add(
                         SChapter.create().apply {
                             url = href.removePrefix(baseUrl)
