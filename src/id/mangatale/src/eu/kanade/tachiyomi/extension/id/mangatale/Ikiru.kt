@@ -126,27 +126,53 @@ class Ikiru : HttpSource() {
     override fun mangaDetailsParse(response: Response): SManga {
         val document = Jsoup.parse(response.body!!.string())
     
+        // Ambil alternatif judul (alias) jika ada
+        val altTitle = document.selectFirst("div.block.text-sm.text-text.line-clamp-1")
+            ?.text()?.trim()
+    
+        // Ambil deskripsi lengkap dari [data-show=false] atau fallback
+        val desc = document.select("div[itemprop=description][data-show=false]")
+            .joinToString("\n") { it.text().trim() }
+            .ifBlank {
+                document.select("div[itemprop=description]")
+                    .joinToString("\n") { it.text().trim() }
+            }.ifBlank { "Tidak ada deskripsi." }
+    
         return SManga.create().apply {
             title = document.selectFirst("h1[itemprop=name]")?.text()?.trim().orEmpty()
             thumbnail_url = document.selectFirst("div[itemprop=image] img")?.absUrl("src") ?: ""
-            description = document.select("div[itemprop=description]").joinToString("\n") {
-    it.text().trim()
-}.ifBlank { "Tidak ada deskripsi." }
+    
+            description = buildString {
+                if (!altTitle.isNullOrEmpty()) {
+                    append("Nama Alternatif: $altTitle\n\n")
+                }
+                append(desc)
+            }
     
             // Author
-            author = document.selectFirst("div:has(h4:contains(Author)) > div > p")?.text()
-                ?.takeIf { it.isNotBlank() } ?: "Tidak diketahui"
+            author = document.selectFirst("div:has(h4:contains(Author)) > div > p")
+                ?.text()?.takeIf { it.isNotBlank() }
+                ?: document.selectFirst("[itemprop=author]")?.text()
+                ?: "Tidak diketahui"
     
-            // Genre list
-            genre = document.select("a[href*='/genre/']")
-                .joinToString { it.text().trim() }
+            // Genre + Type (manhwa/manhua/manga)
+            val genres = document.select("a[href*='/genre/']").map { it.text().trim() }.toMutableList()
+    
+            document.selectFirst("div:has(h4:contains(Type)) > div > p")?.text()?.trim()?.let { type ->
+                if (type.isNotEmpty() && !genres.contains(type)) {
+                    genres.add(0, type) // tambahkan type di depan jika belum ada
+                }
+            }
+    
+            genre = genres.joinToString()
     
             // Status
             val rawStatus = document.selectFirst("div:has(h4:contains(Status)) > div > p")
-                ?.text()?.trim()?.lowercase() ?: ""
+                ?.text()?.trim()?.lowercase(Locale.ROOT) ?: ""
+    
             status = when {
-                rawStatus.contains("berlanjut") || rawStatus.contains("ongoing") -> SManga.ONGOING
-                rawStatus.contains("tamat") || rawStatus.contains("selesai") -> SManga.COMPLETED
+                rawStatus.matches(Regex(".*(berlanjut|ongoing).*")) -> SManga.ONGOING
+                rawStatus.matches(Regex(".*(tamat|selesai|completed).*")) -> SManga.COMPLETED
                 rawStatus.contains("hiatus") -> SManga.ON_HIATUS
                 else -> SManga.UNKNOWN
             }
@@ -170,14 +196,19 @@ class Ikiru : HttpSource() {
             val ajaxBody = ajaxRes.body!!.string()
             val ajaxDoc = Jsoup.parse(ajaxBody)
     
-            ajaxDoc.select("a[href*=/chapter-]").forEach { a ->
-                val href = a.attr("href").removePrefix(baseUrl)
-                val name = a.text().trim()
-                val dateStr = a.selectFirst("time")?.text()?.trim().orEmpty()
+            ajaxDoc.select("a[href*=/chapter-], button[onclick*='location.href']").forEach { el ->
+                val href = el.attr("href").ifEmpty {
+                    // untuk button: onclick="location.href='/chapter-12.123456'"
+                    Regex("""['"](/chapter-[^'"]+)['"]""").find(el.attr("onclick"))?.groupValues?.get(1).orEmpty()
+                }
+    
+                if (href.isBlank() || !href.contains("/chapter-")) return@forEach
+                val name = el.text().trim()
+                val dateStr = el.selectFirst("time")?.text()?.trim().orEmpty()
     
                 chapters.add(
                     SChapter.create().apply {
-                        url = href
+                        url = href.removePrefix(baseUrl)
                         this.name = name
                         date_upload = parseChapterDate(dateStr)
                     }
@@ -188,7 +219,6 @@ class Ikiru : HttpSource() {
         return chapters
             .distinctBy { it.url }
             .sortedByDescending {
-                // Ekstrak angka chapter dari nama, default 0f jika gagal
                 Regex("""\d+(\.\d+)?""").find(it.name)?.value?.toFloatOrNull() ?: 0f
             }
     }
@@ -225,44 +255,49 @@ class Ikiru : HttpSource() {
     }
 
     private fun parseChapterDate(dateString: String): Long {
-        val lc = dateString.lowercase(Locale.ENGLISH)
-        val now = Calendar.getInstance()
+        val lc = dateString.lowercase(Locale.ENGLISH).trim()
     
         return when {
-            lc.contains("just now") || lc.contains("baru saja") -> now.timeInMillis
+            lc.contains("just now") || lc.contains("baru saja") -> Calendar.getInstance().timeInMillis
     
             lc.contains("min") || lc.contains("menit") -> {
                 val minutes = Regex("""(\d+)""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                now.add(Calendar.MINUTE, -minutes)
-                now.timeInMillis
+                Calendar.getInstance().apply {
+                    add(Calendar.MINUTE, -minutes)
+                }.timeInMillis
             }
     
             lc.contains("hour") || lc.contains("jam") -> {
                 val hours = Regex("""(\d+)""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                now.add(Calendar.HOUR, -hours)
-                now.timeInMillis
+                Calendar.getInstance().apply {
+                    add(Calendar.HOUR, -hours)
+                }.timeInMillis
             }
     
             lc.contains("day") || lc.contains("hari") -> {
                 val days = Regex("""(\d+)""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                now.add(Calendar.DATE, -days)
-                now.timeInMillis
+                Calendar.getInstance().apply {
+                    add(Calendar.DATE, -days)
+                }.timeInMillis
             }
     
             lc.contains("week") || lc.contains("minggu") -> {
                 val weeks = Regex("""(\d+)""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                now.add(Calendar.WEEK_OF_YEAR, -weeks)
-                now.timeInMillis
+                Calendar.getInstance().apply {
+                    add(Calendar.WEEK_OF_YEAR, -weeks)
+                }.timeInMillis
             }
     
             lc.contains("month") || lc.contains("bulan") -> {
                 val months = Regex("""(\d+)""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                now.add(Calendar.MONTH, -months)
-                now.timeInMillis
+                Calendar.getInstance().apply {
+                    add(Calendar.MONTH, -months)
+                }.timeInMillis
             }
     
             else -> {
                 try {
+                    // Misal: "July 1, 2024"
                     SimpleDateFormat("MMMM d, yyyy", Locale.ENGLISH).parse(dateString)?.time ?: 0L
                 } catch (_: Exception) {
                     0L
