@@ -13,6 +13,7 @@ import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
+import org.jsoup.nodes.Element
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
@@ -204,7 +205,9 @@ class Ikiru : HttpSource() {
     
                 if (href.isBlank() || !href.contains("/chapter-")) return@forEach
                 val name = el.text().trim()
-                val dateStr = el.nextElementSibling()?.text()?.trim().orEmpty()
+                
+                // FIX: Cari tanggal di berbagai tempat yang mungkin
+                val dateStr = findChapterDate(el)
                 
                 chapters.add(
                     SChapter.create().apply {
@@ -253,43 +256,124 @@ class Ikiru : HttpSource() {
     
         return null
     }
+    
+    private fun findChapterDate(element: Element): String {
+        // 1. Cek elemen sibling berikutnya
+        element.nextElementSibling()?.text()?.trim()?.let { dateText ->
+            if (dateText.contains("ago") || dateText.contains("hari") || dateText.contains("jam") || 
+                dateText.contains("menit") || dateText.contains("minggu") || dateText.contains("bulan")) {
+                return dateText
+            }
+        }
+        
+        // 2. Cek parent element untuk mencari tanggal
+        element.parent()?.select("small, .date, .time, span")?.forEach { sibling ->
+            val text = sibling.text().trim()
+            if (text.contains("ago") || text.contains("hari") || text.contains("jam") || 
+                text.contains("menit") || text.contains("minggu") || text.contains("bulan")) {
+                return text
+            }
+        }
+        
+        // 3. Cek dalam elemen itu sendiri
+        element.select("small, .date, .time, span").forEach { child ->
+            val text = child.text().trim()
+            if (text.contains("ago") || text.contains("hari") || text.contains("jam") || 
+                text.contains("menit") || text.contains("minggu") || text.contains("bulan")) {
+                return text
+            }
+        }
+        
+        // 4. Cek attribut data-*
+        listOf("data-date", "data-time", "data-ago", "title").forEach { attr ->
+            element.attr(attr)?.let { value ->
+                if (value.contains("ago") || value.contains("hari") || value.contains("jam") || 
+                    value.contains("menit") || value.contains("minggu") || value.contains("bulan")) {
+                    return value
+                }
+            }
+        }
+        
+        return ""
+    }
 
+    // FIX: Perbaikan parsing tanggal untuk format yang benar
     private fun parseChapterDate(dateString: String): Long {
         val lc = dateString.lowercase(Locale.ENGLISH).trim()
-    
+        
         return when {
             lc.contains("just now") || lc.contains("baru saja") -> Calendar.getInstance().timeInMillis
     
-            lc.contains("min") || lc.contains("menit") -> {
-                val minutes = Regex("""(\d+)""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            // FIX: Perbaikan untuk format "X minutes ago"
+            lc.contains("minute") && lc.contains("ago") -> {
+                val minutes = Regex("""(\d+)\s*minute""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                Calendar.getInstance().apply {
+                    add(Calendar.MINUTE, -minutes)
+                }.timeInMillis
+            }
+            
+            lc.contains("menit") && lc.contains("yang lalu") -> {
+                val minutes = Regex("""(\d+)\s*menit""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
                 Calendar.getInstance().apply {
                     add(Calendar.MINUTE, -minutes)
                 }.timeInMillis
             }
     
-            lc.contains("hour") || lc.contains("jam") -> {
-                val hours = Regex("""(\d+)""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            // FIX: Perbaikan untuk format "X hours ago"
+            lc.contains("hour") && lc.contains("ago") -> {
+                val hours = Regex("""(\d+)\s*hour""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                Calendar.getInstance().apply {
+                    add(Calendar.HOUR, -hours)
+                }.timeInMillis
+            }
+            
+            lc.contains("jam") && lc.contains("yang lalu") -> {
+                val hours = Regex("""(\d+)\s*jam""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
                 Calendar.getInstance().apply {
                     add(Calendar.HOUR, -hours)
                 }.timeInMillis
             }
     
-            lc.contains("day") || lc.contains("hari") -> {
-                val days = Regex("""(\d+)""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            // FIX: Perbaikan untuk format "X days ago"
+            lc.contains("day") && lc.contains("ago") -> {
+                val days = Regex("""(\d+)\s*day""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                Calendar.getInstance().apply {
+                    add(Calendar.DATE, -days)
+                }.timeInMillis
+            }
+            
+            lc.contains("hari") && lc.contains("yang lalu") -> {
+                val days = Regex("""(\d+)\s*hari""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
                 Calendar.getInstance().apply {
                     add(Calendar.DATE, -days)
                 }.timeInMillis
             }
     
-            lc.contains("week") || lc.contains("minggu") -> {
-                val weeks = Regex("""(\d+)""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            // FIX: Perbaikan untuk format "X weeks ago"
+            lc.contains("week") && lc.contains("ago") -> {
+                val weeks = Regex("""(\d+)\s*week""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                Calendar.getInstance().apply {
+                    add(Calendar.WEEK_OF_YEAR, -weeks)
+                }.timeInMillis
+            }
+            
+            lc.contains("minggu") && lc.contains("yang lalu") -> {
+                val weeks = Regex("""(\d+)\s*minggu""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
                 Calendar.getInstance().apply {
                     add(Calendar.WEEK_OF_YEAR, -weeks)
                 }.timeInMillis
             }
     
-            lc.contains("month") || lc.contains("bulan") -> {
-                val months = Regex("""(\d+)""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            // FIX: Perbaikan untuk format "X months ago"
+            lc.contains("month") && lc.contains("ago") -> {
+                val months = Regex("""(\d+)\s*month""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                Calendar.getInstance().apply {
+                    add(Calendar.MONTH, -months)
+                }.timeInMillis
+            }
+            
+            lc.contains("bulan") && lc.contains("yang lalu") -> {
+                val months = Regex("""(\d+)\s*bulan""").find(lc)?.groupValues?.get(1)?.toIntOrNull() ?: 0
                 Calendar.getInstance().apply {
                     add(Calendar.MONTH, -months)
                 }.timeInMillis
@@ -297,8 +381,22 @@ class Ikiru : HttpSource() {
     
             else -> {
                 try {
-                    // Misal: "July 1, 2024"
-                    SimpleDateFormat("MMMM d, yyyy", Locale.ENGLISH).parse(dateString)?.time ?: 0L
+                    // Coba parsing format tanggal standar
+                    when {
+                        // Format: "July 1, 2024"
+                        Regex("""\w+ \d+, \d{4}""").matches(dateString) -> {
+                            SimpleDateFormat("MMMM d, yyyy", Locale.ENGLISH).parse(dateString)?.time ?: 0L
+                        }
+                        // Format: "01/02/2025"
+                        Regex("""\d{2}/\d{2}/\d{4}""").matches(dateString) -> {
+                            SimpleDateFormat("dd/MM/yyyy", Locale.ENGLISH).parse(dateString)?.time ?: 0L
+                        }
+                        // Format: "2025-01-02"
+                        Regex("""\d{4}-\d{2}-\d{2}""").matches(dateString) -> {
+                            SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH).parse(dateString)?.time ?: 0L
+                        }
+                        else -> 0L
+                    }
                 } catch (_: Exception) {
                     0L
                 }
