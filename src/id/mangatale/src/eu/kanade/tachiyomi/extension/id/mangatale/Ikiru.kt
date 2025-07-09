@@ -143,10 +143,10 @@ class Ikiru : HttpSource() {
             thumbnail_url = document.selectFirst("div[itemprop=image] img")?.absUrl("src") ?: ""
     
             description = buildString {
-                if (!altTitle.isNullOrEmpty()) {
-                    append("Nama Alternatif: $altTitle\n\n")
-                }
                 append(desc)
+                if (!altTitle.isNullOrEmpty()) {
+                    append("\n\nNama Alternatif: $altTitle")
+                }
             }
     
             // Author
@@ -204,7 +204,7 @@ class Ikiru : HttpSource() {
     
                 if (href.isBlank() || !href.contains("/chapter-")) return@forEach
                 val name = el.text().trim()
-                val dateStr = el.selectFirst("time")?.text()?.trim().orEmpty()
+                val dateStr = el.parent()?.selectFirst(".chapter-time, .timestamp, time, p")?.text()?.trim().orEmpty()
     
                 chapters.add(
                     SChapter.create().apply {
