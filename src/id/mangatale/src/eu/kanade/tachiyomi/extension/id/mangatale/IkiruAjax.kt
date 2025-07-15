@@ -53,12 +53,11 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
                 val dateStr = dateElement?.text()?.trim() ?: ""
                 
                 val uploadTime = parseChapterDate(dateStr)
-                val formattedDate = formatDateForDisplay(uploadTime)
                 
                 chapters.add(SChapter.create().apply {
                     url = href.removePrefix(baseUrl)
                     this.name = name
-                    this.scanlator = formattedDate
+                    this.scanlator = formatDateForDisplay(uploadTime, dateStr)
                     this.date_upload = uploadTime
                 })
             } catch (e: Exception) {
@@ -82,12 +81,11 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
                 val dateStr = dateElement?.text()?.trim() ?: ""
                 
                 val uploadTime = parseChapterDate(dateStr)
-                val formattedDate = formatDateForDisplay(uploadTime)
                 
                 chapters.add(SChapter.create().apply {
                     url = href.removePrefix(baseUrl)
                     this.name = name
-                    this.scanlator = formattedDate
+                    this.scanlator = formatDateForDisplay(uploadTime, dateStr)
                     this.date_upload = uploadTime
                 })
             } catch (e: Exception) {
@@ -163,7 +161,7 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
         val cleaned = dateString.trim()
         val lowerCase = cleaned.lowercase(Locale.ENGLISH)
         
-        // Handle Indonesian "Hari Ini" (Today)
+        // Handle Indonesian "Hari Ini" (Today) - should return current time
         if (lowerCase.contains("hari ini") || lowerCase.contains("today")) {
             return System.currentTimeMillis()
         }
@@ -243,13 +241,22 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
         return System.currentTimeMillis()
     }
     
-    private fun formatDateForDisplay(timestamp: Long): String {
+    private fun formatDateForDisplay(timestamp: Long, originalDateString: String): String {
         if (timestamp == 0L) return "Unknown"
         
-        val date = Calendar.getInstance().apply { timeInMillis = timestamp }
-        val now = Calendar.getInstance()
+        val lowerOriginal = originalDateString.lowercase(Locale.ENGLISH)
         
-        // Always format as dd/MM/yy (like ikiru.wtf does)
+        // If original was "Hari Ini", show it as "Hari Ini"
+        if (lowerOriginal.contains("hari ini")) {
+            return "Hari Ini"
+        }
+        
+        // If original was "Kemarin", show it as "Kemarin"  
+        if (lowerOriginal.contains("kemarin")) {
+            return "Kemarin"
+        }
+        
+        // For actual dates, format as dd/MM/yy (like ikiru.wtf does)
         return SimpleDateFormat("dd/MM/yy", Locale.ENGLISH).format(Date(timestamp))
     }
     
