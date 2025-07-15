@@ -89,7 +89,7 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             return SChapter.create().apply {
                 url = href.removePrefix(baseUrl)
                 this.name = name
-                this.scanlator = formatDateForDisplay(uploadTime, dateStr)
+                this.scanlator = null
                 this.date_upload = uploadTime
             }
         } catch (e: Exception) {
@@ -115,7 +115,7 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             return SChapter.create().apply {
                 url = href.removePrefix(baseUrl)
                 this.name = name
-                this.scanlator = formatDateForDisplay(uploadTime, dateStr)
+                this.scanlator = null
                 this.date_upload = uploadTime
             }
         } catch (e: Exception) {
@@ -141,7 +141,7 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             return SChapter.create().apply {
                 url = href.removePrefix(baseUrl)
                 this.name = name
-                this.scanlator = formatDateForDisplay(uploadTime, dateStr)
+                this.scanlator = null
                 this.date_upload = uploadTime
             }
         } catch (e: Exception) {
@@ -168,7 +168,7 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             return SChapter.create().apply {
                 url = href.removePrefix(baseUrl)
                 this.name = name
-                this.scanlator = formatDateForDisplay(uploadTime, dateStr)
+                this.scanlator = null
                 this.date_upload = uploadTime
             }
         } catch (e: Exception) {
@@ -352,31 +352,10 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
     
     private fun formatDateForDisplay(timestamp: Long, originalDateString: String): String {
         if (timestamp == 0L) return "Unknown"
-        
+    
         val now = Calendar.getInstance(jakartaTimeZone)
         val date = Calendar.getInstance(jakartaTimeZone).apply { timeInMillis = timestamp }
-        
-        // Use original string for specific cases
-        val lowerOriginal = originalDateString.lowercase(Locale.ENGLISH)
-        when {
-            lowerOriginal.contains("hari ini") -> return "Hari Ini"
-            lowerOriginal.contains("kemarin") -> return "Kemarin"
-            lowerOriginal.contains("baru saja") || lowerOriginal.contains("just now") -> return "Baru Saja"
-            lowerOriginal.matches(Regex(""".*\d+\s+menit.*lalu.*""")) -> {
-                val minutes = Regex("""\d+""").find(lowerOriginal)?.value?.toIntOrNull() ?: 0
-                return "$minutes menit lalu"
-            }
-            lowerOriginal.matches(Regex(""".*\d+\s+jam.*lalu.*""")) -> {
-                val hours = Regex("""\d+""").find(lowerOriginal)?.value?.toIntOrNull() ?: 0
-                return "$hours jam lalu"
-            }
-            lowerOriginal.matches(Regex(""".*\d+\s+hari.*lalu.*""")) -> {
-                val days = Regex("""\d+""").find(lowerOriginal)?.value?.toIntOrNull() ?: 0
-                return "$days hari lalu"
-            }
-        }
-        
-        // Calculate display based on actual timestamp
+    
         return when {
             isSameDay(now, date) -> "Hari Ini"
             isYesterday(now, date) -> "Kemarin"
