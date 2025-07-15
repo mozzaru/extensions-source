@@ -249,18 +249,7 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
         val date = Calendar.getInstance().apply { timeInMillis = timestamp }
         val now = Calendar.getInstance()
         
-        // Check if it's today - show "Hari Ini"
-        if (isSameDay(date, now)) {
-            return "Hari Ini"
-        }
-        
-        // Check if it's yesterday - show "Kemarin"
-        val yesterday = Calendar.getInstance().apply { add(Calendar.DAY_OF_MONTH, -1) }
-        if (isSameDay(date, yesterday)) {
-            return "Kemarin"
-        }
-        
-        // For all other dates, format as dd/MM/yy (exactly like ikiru.wtf)
+        // Always format as dd/MM/yy (like ikiru.wtf does)
         return SimpleDateFormat("dd/MM/yy", Locale.ENGLISH).format(Date(timestamp))
     }
     
