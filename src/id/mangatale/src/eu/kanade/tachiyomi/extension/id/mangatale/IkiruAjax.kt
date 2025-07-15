@@ -5,6 +5,7 @@ import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
+import org.jsoup.nodes.Element
 import eu.kanade.tachiyomi.source.model.SChapter
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -38,23 +39,50 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
     private fun parseChaptersFromAjax(document: Document): List<SChapter> {
         val chapters = mutableListOf<SChapter>()
         
-        document.select("a[href*=/chapter-], button[onclick*='location.href']").forEach { element ->
+        // ikiru.wtf specific structure - look for chapter links and their date elements
+        document.select("a[href*=/chapter-]").forEach { chapterLink ->
             try {
-                val href = element.attr("href").ifEmpty {
-                    Regex("""['"](/chapter-[^'"]+)['"]""").find(element.attr("onclick"))?.groupValues?.get(1).orEmpty()
-                }
-                
+                val href = chapterLink.attr("href")
                 if (href.isBlank() || !href.contains("/chapter-")) return@forEach
                 
-                val name = element.text().trim()
+                val name = chapterLink.text().trim()
                 if (name.isBlank()) return@forEach
                 
-                // Look for date in various parent elements
-                val dateElement = findDateElement(element)
-                val dateStr = dateElement?.attr("datetime") ?: dateElement?.text() ?: ""
+                // Find date element - ikiru.wtf puts date after the chapter link
+                val dateElement = findDateElement(chapterLink)
+                val dateStr = dateElement?.text()?.trim() ?: ""
                 
                 val uploadTime = parseChapterDate(dateStr)
-                val formattedDate = formatDate(uploadTime)
+                val formattedDate = formatDateForDisplay(uploadTime)
+                
+                chapters.add(SChapter.create().apply {
+                    url = href.removePrefix(baseUrl)
+                    this.name = name
+                    this.scanlator = formattedDate
+                    this.date_upload = uploadTime
+                })
+            } catch (e: Exception) {
+                // Skip this chapter if parsing fails
+            }
+        }
+        
+        // Alternative parsing - look for button elements with onclick
+        document.select("button[onclick*='location.href']").forEach { button ->
+            try {
+                val onclick = button.attr("onclick")
+                val hrefMatch = Regex("""location\.href\s*=\s*['"]([^'"]+)['"]""").find(onclick)
+                val href = hrefMatch?.groups?.get(1)?.value ?: return@forEach
+                
+                if (!href.contains("/chapter-")) return@forEach
+                
+                val name = button.text().trim()
+                if (name.isBlank()) return@forEach
+                
+                val dateElement = findDateElement(button)
+                val dateStr = dateElement?.text()?.trim() ?: ""
+                
+                val uploadTime = parseChapterDate(dateStr)
+                val formattedDate = formatDateForDisplay(uploadTime)
                 
                 chapters.add(SChapter.create().apply {
                     url = href.removePrefix(baseUrl)
@@ -70,18 +98,59 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
         return chapters
     }
     
-    private fun findDateElement(element: org.jsoup.nodes.Element): org.jsoup.nodes.Element? {
-        // Try to find date in various parent structures
-        var current = element.parent()
-        repeat(3) { // Check up to 3 levels up
-            current?.let { parent ->
-                parent.selectFirst("time[datetime]")?.let { return it }
-                parent.selectFirst("[data-time]")?.let { return it }
-                parent.selectFirst(".date, .time, .chapter-date")?.let { return it }
+    private fun findDateElement(element: Element): Element? {
+        // Check next sibling elements for date
+        var sibling = element.nextElementSibling()
+        while (sibling != null) {
+            val text = sibling.text().trim()
+            if (isDateText(text)) {
+                return sibling
             }
-            current = current?.parent()
+            sibling = sibling.nextElementSibling()
         }
+        
+        // Check parent and its children
+        val parent = element.parent()
+        parent?.let { p ->
+            p.children().forEach { child ->
+                val text = child.text().trim()
+                if (isDateText(text) && child != element) {
+                    return child
+                }
+            }
+            
+            // Check parent's next siblings
+            var parentSibling = p.nextElementSibling()
+            while (parentSibling != null) {
+                val text = parentSibling.text().trim()
+                if (isDateText(text)) {
+                    return parentSibling
+                }
+                parentSibling = parentSibling.nextElementSibling()
+            }
+        }
+        
         return null
+    }
+    
+    private fun isDateText(text: String): Boolean {
+        if (text.isBlank()) return false
+        
+        val lowerText = text.lowercase(Locale.ENGLISH)
+        
+        // Check for Indonesian date patterns
+        return lowerText.contains("hari ini") ||
+               lowerText.contains("kemarin") ||
+               lowerText.contains("ago") ||
+               lowerText.contains("menit") ||
+               lowerText.contains("jam") ||
+               lowerText.contains("hari") ||
+               lowerText.contains("minggu") ||
+               lowerText.contains("bulan") ||
+               lowerText.contains("tahun") ||
+               text.matches(Regex("""\d{1,2}/\d{1,2}/\d{2,4}""")) ||
+               text.matches(Regex("""\d{1,2}-\d{1,2}-\d{2,4}""")) ||
+               text.matches(Regex("""\d+\s+(minute|hour|day|week|month|year)s?\s+ago"""))
     }
     
     private fun extractChapterNumber(name: String): Float {
@@ -92,59 +161,79 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
         if (dateString.isBlank()) return System.currentTimeMillis()
         
         val cleaned = dateString.trim()
+        val lowerCase = cleaned.lowercase(Locale.ENGLISH)
         
-        // Try ISO formats first
-        listOf(
+        // Handle Indonesian "Hari Ini" (Today)
+        if (lowerCase.contains("hari ini") || lowerCase.contains("today")) {
+            return System.currentTimeMillis()
+        }
+        
+        // Handle Indonesian "Kemarin" (Yesterday)
+        if (lowerCase.contains("kemarin") || lowerCase.contains("yesterday")) {
+            val yesterday = Calendar.getInstance()
+            yesterday.add(Calendar.DAY_OF_MONTH, -1)
+            return yesterday.timeInMillis
+        }
+        
+        // Try date formats - ikiru.wtf uses dd/MM/yy format
+        val dateFormats = listOf(
+            "dd/MM/yy",
+            "dd/MM/yyyy",
+            "dd-MM-yy",
+            "dd-MM-yyyy",
+            "MM/dd/yy",
+            "MM/dd/yyyy",
+            "yyyy-MM-dd",
             "yyyy-MM-dd'T'HH:mm:ssXXX",
             "yyyy-MM-dd'T'HH:mm:ss",
-            "yyyy-MM-dd HH:mm:ss",
-            "yyyy-MM-dd",
-            "dd/MM/yyyy",
-            "dd/MM/yy",
-            "MM/dd/yyyy",
-            "MM/dd/yy"
-        ).forEach { pattern ->
+            "yyyy-MM-dd HH:mm:ss"
+        )
+        
+        for (pattern in dateFormats) {
             try {
-                return SimpleDateFormat(pattern, Locale.ENGLISH).parse(cleaned)?.time ?: 0L
+                val sdf = SimpleDateFormat(pattern, Locale.ENGLISH)
+                val date = sdf.parse(cleaned)
+                if (date != null) {
+                    return date.time
+                }
             } catch (e: Exception) {
-                // Try next format
+                // Continue to next format
             }
         }
         
-        // Try relative time parsing
-        val lowerCase = cleaned.lowercase(Locale.ENGLISH)
+        // Handle relative time formats
         val now = Calendar.getInstance()
         
         when {
             lowerCase.contains("just now") || lowerCase.contains("baru saja") -> {
                 return now.timeInMillis
             }
-            lowerCase.contains("min") || lowerCase.contains("menit") -> {
+            lowerCase.contains("menit") || lowerCase.contains("minute") -> {
                 val minutes = Regex("""\d+""").find(lowerCase)?.value?.toIntOrNull() ?: 0
                 now.add(Calendar.MINUTE, -minutes)
                 return now.timeInMillis
             }
-            lowerCase.contains("hour") || lowerCase.contains("jam") -> {
+            lowerCase.contains("jam") || lowerCase.contains("hour") -> {
                 val hours = Regex("""\d+""").find(lowerCase)?.value?.toIntOrNull() ?: 0
                 now.add(Calendar.HOUR_OF_DAY, -hours)
                 return now.timeInMillis
             }
-            lowerCase.contains("day") || lowerCase.contains("hari") -> {
+            lowerCase.contains("hari") && !lowerCase.contains("hari ini") -> {
                 val days = Regex("""\d+""").find(lowerCase)?.value?.toIntOrNull() ?: 0
                 now.add(Calendar.DAY_OF_MONTH, -days)
                 return now.timeInMillis
             }
-            lowerCase.contains("week") || lowerCase.contains("minggu") -> {
+            lowerCase.contains("minggu") || lowerCase.contains("week") -> {
                 val weeks = Regex("""\d+""").find(lowerCase)?.value?.toIntOrNull() ?: 0
                 now.add(Calendar.WEEK_OF_YEAR, -weeks)
                 return now.timeInMillis
             }
-            lowerCase.contains("month") || lowerCase.contains("bulan") -> {
+            lowerCase.contains("bulan") || lowerCase.contains("month") -> {
                 val months = Regex("""\d+""").find(lowerCase)?.value?.toIntOrNull() ?: 0
                 now.add(Calendar.MONTH, -months)
                 return now.timeInMillis
             }
-            lowerCase.contains("year") || lowerCase.contains("tahun") -> {
+            lowerCase.contains("tahun") || lowerCase.contains("year") -> {
                 val years = Regex("""\d+""").find(lowerCase)?.value?.toIntOrNull() ?: 0
                 now.add(Calendar.YEAR, -years)
                 return now.timeInMillis
@@ -154,20 +243,29 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
         return System.currentTimeMillis()
     }
     
-    private fun formatDate(timestamp: Long): String {
+    private fun formatDateForDisplay(timestamp: Long): String {
         if (timestamp == 0L) return "Unknown"
         
         val date = Calendar.getInstance().apply { timeInMillis = timestamp }
         val now = Calendar.getInstance()
         
-        val diffInMillis = now.timeInMillis - timestamp
-        val diffInDays = diffInMillis / (24 * 60 * 60 * 1000)
-        
-        return when {
-            diffInDays == 0L -> "Hari Ini"
-            diffInDays == 1L -> "Kemarin"
-            diffInDays < 7 -> "${diffInDays} hari lalu"
-            else -> SimpleDateFormat("dd/MM/yy", Locale.ENGLISH).format(Date(timestamp))
+        // Check if it's today - show "Hari Ini"
+        if (isSameDay(date, now)) {
+            return "Hari Ini"
         }
+        
+        // Check if it's yesterday - show "Kemarin"
+        val yesterday = Calendar.getInstance().apply { add(Calendar.DAY_OF_MONTH, -1) }
+        if (isSameDay(date, yesterday)) {
+            return "Kemarin"
+        }
+        
+        // For all other dates, format as dd/MM/yy (exactly like ikiru.wtf)
+        return SimpleDateFormat("dd/MM/yy", Locale.ENGLISH).format(Date(timestamp))
+    }
+    
+    private fun isSameDay(cal1: Calendar, cal2: Calendar): Boolean {
+        return cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR) &&
+               cal1.get(Calendar.DAY_OF_YEAR) == cal2.get(Calendar.DAY_OF_YEAR)
     }
 }
