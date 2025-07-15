@@ -15,20 +15,31 @@ import java.util.TimeZone
 
 class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, private val headers: okhttp3.Headers) {
     
+    private val jakartaTimeZone = TimeZone.getTimeZone("Asia/Jakarta")
+    
     fun getChapterList(mangaId: String, chapterId: String): List<SChapter> {
         val chapters = mutableListOf<SChapter>()
         
         listOf("head", "footer").forEach { loc ->
             val ajaxUrl = "$baseUrl/ajax-call?action=chapter_selects&manga_id=$mangaId&chapter_id=$chapterId&loc=$loc"
             try {
-                val response = client.newCall(Request.Builder().url(ajaxUrl).headers(headers).build()).execute()
+                val request = Request.Builder()
+                    .url(ajaxUrl)
+                    .headers(headers)
+                    .build()
+                    
+                val response = client.newCall(request).execute()
                 if (response.isSuccessful) {
-                    val ajaxDoc = Jsoup.parse(response.body!!.string())
-                    chapters.addAll(parseChaptersFromAjax(ajaxDoc))
+                    val responseBody = response.body?.string()
+                    if (!responseBody.isNullOrBlank()) {
+                        val ajaxDoc = Jsoup.parse(responseBody)
+                        chapters.addAll(parseChaptersFromAjax(ajaxDoc))
+                    }
                 }
                 response.close()
             } catch (e: Exception) {
-                // Continue to next location if one fails
+                // Log error but continue to next location
+                println("Error fetching chapters from $loc: ${e.message}")
             }
         }
         
@@ -40,94 +51,177 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
     private fun parseChaptersFromAjax(document: Document): List<SChapter> {
         val chapters = mutableListOf<SChapter>()
         
-        // ikiru.wtf specific structure - look for chapter links and their date elements
+        // Method 1: Look for direct chapter links with ikiru.wtf structure
         document.select("a[href*=/chapter-]").forEach { chapterLink ->
-            try {
-                val href = chapterLink.attr("href")
-                if (href.isBlank() || !href.contains("/chapter-")) return@forEach
-                
-                val name = chapterLink.text().trim()
-                if (name.isBlank()) return@forEach
-                
-                // Find date element - ikiru.wtf puts date after the chapter link
-                val dateElement = findDateElement(chapterLink)
-                val dateStr = dateElement?.text()?.trim() ?: ""
-                
-                val uploadTime = parseChapterDate(dateStr)
-                
-                chapters.add(SChapter.create().apply {
-                    url = href.removePrefix(baseUrl)
-                    this.name = name
-                    this.scanlator = formatDateForDisplay(uploadTime, dateStr)
-                    this.date_upload = uploadTime
-                })
-            } catch (e: Exception) {
-                // Skip this chapter if parsing fails
-            }
+            parseChapterFromLink(chapterLink)?.let { chapters.add(it) }
         }
         
-        // Alternative parsing - look for button elements with onclick
-        document.select("button[onclick*='location.href']").forEach { button ->
-            try {
-                val onclick = button.attr("onclick")
-                val hrefMatch = Regex("""location\.href\s*=\s*['"]([^'"]+)['"]""").find(onclick)
-                val href = hrefMatch?.groups?.get(1)?.value ?: return@forEach
-                
-                if (!href.contains("/chapter-")) return@forEach
-                
-                val name = button.text().trim()
-                if (name.isBlank()) return@forEach
-                
-                val dateElement = findDateElement(button)
-                val dateStr = dateElement?.text()?.trim() ?: ""
-                
-                val uploadTime = parseChapterDate(dateStr)
-                
-                chapters.add(SChapter.create().apply {
-                    url = href.removePrefix(baseUrl)
-                    this.name = name
-                    this.scanlator = formatDateForDisplay(uploadTime, dateStr)
-                    this.date_upload = uploadTime
-                })
-            } catch (e: Exception) {
-                // Skip this chapter if parsing fails
-            }
+        // Method 2: Look for chapter entries in list format (common in ikiru.wtf)
+        document.select("div.chapter-item, .chapter-list-item, .chapter-entry").forEach { chapterDiv ->
+            parseChapterFromDiv(chapterDiv)?.let { chapters.add(it) }
+        }
+        
+        // Method 3: Look for button elements with onclick navigation
+        document.select("button[onclick*='location.href'], button[onclick*='window.location']").forEach { button ->
+            parseChapterFromButton(button)?.let { chapters.add(it) }
+        }
+        
+        // Method 4: Look for table rows (alternative layout)
+        document.select("tr").forEach { row ->
+            parseChapterFromTableRow(row)?.let { chapters.add(it) }
         }
         
         return chapters
     }
     
+    private fun parseChapterFromLink(chapterLink: Element): SChapter? {
+        try {
+            val href = chapterLink.attr("href")
+            if (href.isBlank() || !href.contains("/chapter-")) return null
+            
+            val name = cleanChapterName(chapterLink.text())
+            if (name.isBlank()) return null
+            
+            val dateElement = findDateElement(chapterLink)
+            val dateStr = dateElement?.text()?.trim() ?: ""
+            val uploadTime = parseChapterDate(dateStr)
+            
+            return SChapter.create().apply {
+                url = href.removePrefix(baseUrl)
+                this.name = name
+                this.scanlator = formatDateForDisplay(uploadTime, dateStr)
+                this.date_upload = uploadTime
+            }
+        } catch (e: Exception) {
+            return null
+        }
+    }
+    
+    private fun parseChapterFromDiv(chapterDiv: Element): SChapter? {
+        try {
+            val chapterLink = chapterDiv.select("a[href*=/chapter-]").firstOrNull() ?: return null
+            val href = chapterLink.attr("href")
+            if (href.isBlank()) return null
+            
+            val name = cleanChapterName(chapterLink.text())
+            if (name.isBlank()) return null
+            
+            // Look for date in the same div or nearby elements
+            val dateElement = chapterDiv.select(".chapter-date, .date, .time, .upload-date").firstOrNull()
+                ?: findDateElement(chapterDiv)
+            val dateStr = dateElement?.text()?.trim() ?: ""
+            val uploadTime = parseChapterDate(dateStr)
+            
+            return SChapter.create().apply {
+                url = href.removePrefix(baseUrl)
+                this.name = name
+                this.scanlator = formatDateForDisplay(uploadTime, dateStr)
+                this.date_upload = uploadTime
+            }
+        } catch (e: Exception) {
+            return null
+        }
+    }
+    
+    private fun parseChapterFromButton(button: Element): SChapter? {
+        try {
+            val onclick = button.attr("onclick")
+            val hrefMatch = Regex("""(?:location\.href|window\.location(?:\.href)?)\s*=\s*['"]([^'"]+)['"]""").find(onclick)
+            val href = hrefMatch?.groups?.get(1)?.value ?: return null
+            
+            if (!href.contains("/chapter-")) return null
+            
+            val name = cleanChapterName(button.text())
+            if (name.isBlank()) return null
+            
+            val dateElement = findDateElement(button)
+            val dateStr = dateElement?.text()?.trim() ?: ""
+            val uploadTime = parseChapterDate(dateStr)
+            
+            return SChapter.create().apply {
+                url = href.removePrefix(baseUrl)
+                this.name = name
+                this.scanlator = formatDateForDisplay(uploadTime, dateStr)
+                this.date_upload = uploadTime
+            }
+        } catch (e: Exception) {
+            return null
+        }
+    }
+    
+    private fun parseChapterFromTableRow(row: Element): SChapter? {
+        try {
+            val chapterLink = row.select("a[href*=/chapter-]").firstOrNull() ?: return null
+            val href = chapterLink.attr("href")
+            if (href.isBlank()) return null
+            
+            val name = cleanChapterName(chapterLink.text())
+            if (name.isBlank()) return null
+            
+            // In table rows, date is often in a separate cell
+            val dateCell = row.select("td").find { cell ->
+                isDateText(cell.text())
+            }
+            val dateStr = dateCell?.text()?.trim() ?: ""
+            val uploadTime = parseChapterDate(dateStr)
+            
+            return SChapter.create().apply {
+                url = href.removePrefix(baseUrl)
+                this.name = name
+                this.scanlator = formatDateForDisplay(uploadTime, dateStr)
+                this.date_upload = uploadTime
+            }
+        } catch (e: Exception) {
+            return null
+        }
+    }
+    
+    private fun cleanChapterName(name: String): String {
+        return name.trim()
+            .replace(Regex("""^\s*chapter\s*""", RegexOption.IGNORE_CASE), "Chapter ")
+            .replace(Regex("""\s+"""), " ")
+    }
+    
     private fun findDateElement(element: Element): Element? {
-        // Check next sibling elements for date
+        // Check immediate siblings first
         var sibling = element.nextElementSibling()
         while (sibling != null) {
-            val text = sibling.text().trim()
-            if (isDateText(text)) {
+            if (isDateText(sibling.text())) {
                 return sibling
             }
             sibling = sibling.nextElementSibling()
         }
         
-        // Check parent and its children
-        val parent = element.parent()
-        parent?.let { p ->
-            p.children().forEach { child ->
-                val text = child.text().trim()
-                if (isDateText(text) && child != element) {
+        sibling = element.previousElementSibling()
+        while (sibling != null) {
+            if (isDateText(sibling.text())) {
+                return sibling
+            }
+            sibling = sibling.previousElementSibling()
+        }
+        
+        // Check parent's other children
+        element.parent()?.let { parent ->
+            parent.children().forEach { child ->
+                if (child != element && isDateText(child.text())) {
                     return child
                 }
             }
             
-            // Check parent's next siblings
-            var parentSibling = p.nextElementSibling()
+            // Check parent's siblings
+            var parentSibling = parent.nextElementSibling()
             while (parentSibling != null) {
-                val text = parentSibling.text().trim()
-                if (isDateText(text)) {
+                if (isDateText(parentSibling.text())) {
                     return parentSibling
                 }
                 parentSibling = parentSibling.nextElementSibling()
             }
         }
+        
+        // Check descendants with date-related classes
+        element.parent()?.select(".date, .time, .upload-date, .chapter-date, .published")?.firstOrNull { dateEl ->
+            isDateText(dateEl.text())
+        }?.let { return it }
         
         return null
     }
@@ -135,175 +229,160 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
     private fun isDateText(text: String): Boolean {
         if (text.isBlank()) return false
         
-        val lowerText = text.lowercase(Locale.ENGLISH)
+        val cleanText = text.trim()
+        val lowerText = cleanText.lowercase(Locale.ENGLISH)
         
         // Check for Indonesian date patterns
         return lowerText.contains("hari ini") ||
                lowerText.contains("kemarin") ||
-               lowerText.contains("ago") ||
-               lowerText.contains("menit") ||
-               lowerText.contains("jam") ||
-               lowerText.contains("hari") ||
-               lowerText.contains("minggu") ||
-               lowerText.contains("bulan") ||
-               lowerText.contains("tahun") ||
-               text.matches(Regex("""\d{1,2}/\d{1,2}/\d{2,4}""")) ||
-               text.matches(Regex("""\d{1,2}-\d{1,2}-\d{2,4}""")) ||
-               text.matches(Regex("""\d+\s+(minute|hour|day|week|month|year)s?\s+ago"""))
+               lowerText.contains("baru saja") ||
+               lowerText.contains("just now") ||
+               lowerText.matches(Regex(""".*\d+\s+(menit|jam|hari|minggu|bulan|tahun)(\s+yang)?\s+lalu.*""")) ||
+               lowerText.matches(Regex(""".*\d+\s+(minute|hour|day|week|month|year)s?\s+ago.*""")) ||
+               cleanText.matches(Regex("""\d{1,2}[/-]\d{1,2}[/-]\d{2,4}""")) ||
+               cleanText.matches(Regex("""\d{4}-\d{2}-\d{2}""")) ||
+               cleanText.matches(Regex("""\d{1,2}:\d{2}(:\d{2})?"""))
     }
     
     private fun extractChapterNumber(name: String): Float {
-        return Regex("""\d+(\.\d+)?""").find(name)?.value?.toFloatOrNull() ?: 0f
+        val numberMatch = Regex("""chapter\s*(\d+(?:\.\d+)?)|(\d+(?:\.\d+)?)""", RegexOption.IGNORE_CASE).find(name)
+        return numberMatch?.let { 
+            it.groups[1]?.value?.toFloatOrNull() ?: it.groups[2]?.value?.toFloatOrNull() 
+        } ?: 0f
     }
     
     private fun parseChapterDate(dateString: String): Long {
         if (dateString.isBlank()) {
-            // Return a default timestamp that's not today - maybe a week ago
-            val defaultTime = Calendar.getInstance(TimeZone.getTimeZone("Asia/Jakarta"))
-            defaultTime.add(Calendar.DAY_OF_MONTH, -7)
-            return defaultTime.timeInMillis
+            return getDefaultTimestamp()
         }
         
         val cleaned = dateString.trim()
         val lowerCase = cleaned.lowercase(Locale.ENGLISH)
-        val jakartaTime = TimeZone.getTimeZone("Asia/Jakarta")
+        val now = Calendar.getInstance(jakartaTimeZone)
 
-        // First try to extract absolute date from string
-        val absoluteDatePattern = Regex("""\d{1,2}[/-]\d{1,2}[/-]\d{2,4}""")
-        val match = absoluteDatePattern.find(cleaned)
-        if (match != null) {
-            val datePart = match.value
-            val dateFormats = listOf(
-                "dd/MM/yy",
-                "dd/MM/yyyy",
-                "dd-MM-yy",
-                "dd-MM-yyyy",
-                "MM/dd/yy",
-                "MM/dd/yyyy",
-                "yyyy-MM-dd"
-            )
-            for (pattern in dateFormats) {
-                try {
-                    val sdf = SimpleDateFormat(pattern, Locale.ENGLISH)
-                    sdf.timeZone = jakartaTime
-                    val date = sdf.parse(datePart)
-                    if (date != null) {
-                        return date.time
-                    }
-                } catch (e: Exception) {
-                    // Continue to next format
-                }
-            }
+        // Try to parse absolute date first
+        val absoluteDate = parseAbsoluteDate(cleaned)
+        if (absoluteDate != null) {
+            return absoluteDate.time
         }
 
-        // Handle relative terms with Jakarta timezone
-        val now = Calendar.getInstance(jakartaTime)
-        
+        // Handle relative terms
         when {
-            // Today
             lowerCase.contains("hari ini") || lowerCase.contains("today") -> {
                 return now.timeInMillis
             }
-            // Yesterday
             lowerCase.contains("kemarin") || lowerCase.contains("yesterday") -> {
                 now.add(Calendar.DAY_OF_MONTH, -1)
                 return now.timeInMillis
             }
-            // Minutes ago
-            lowerCase.contains("menit") || lowerCase.contains("minute") -> {
+            lowerCase.contains("baru saja") || lowerCase.contains("just now") -> {
+                return now.timeInMillis
+            }
+            lowerCase.matches(Regex(""".*\d+\s+menit.*lalu.*""")) || 
+            lowerCase.matches(Regex(""".*\d+\s+minute.*ago.*""")) -> {
                 val minutes = Regex("""\d+""").find(lowerCase)?.value?.toIntOrNull() ?: 0
                 now.add(Calendar.MINUTE, -minutes)
                 return now.timeInMillis
             }
-            // Hours ago
-            lowerCase.contains("jam") || lowerCase.contains("hour") -> {
+            lowerCase.matches(Regex(""".*\d+\s+jam.*lalu.*""")) || 
+            lowerCase.matches(Regex(""".*\d+\s+hour.*ago.*""")) -> {
                 val hours = Regex("""\d+""").find(lowerCase)?.value?.toIntOrNull() ?: 0
                 now.add(Calendar.HOUR_OF_DAY, -hours)
                 return now.timeInMillis
             }
-            // Days ago (exclude "hari ini")
-            lowerCase.contains("hari") && !lowerCase.contains("hari ini") -> {
+            lowerCase.matches(Regex(""".*\d+\s+hari.*lalu.*""")) || 
+            lowerCase.matches(Regex(""".*\d+\s+day.*ago.*""")) -> {
                 val days = Regex("""\d+""").find(lowerCase)?.value?.toIntOrNull() ?: 0
                 now.add(Calendar.DAY_OF_MONTH, -days)
                 return now.timeInMillis
             }
-            // Weeks ago
-            lowerCase.contains("minggu") || lowerCase.contains("week") -> {
+            lowerCase.matches(Regex(""".*\d+\s+minggu.*lalu.*""")) || 
+            lowerCase.matches(Regex(""".*\d+\s+week.*ago.*""")) -> {
                 val weeks = Regex("""\d+""").find(lowerCase)?.value?.toIntOrNull() ?: 0
                 now.add(Calendar.WEEK_OF_YEAR, -weeks)
                 return now.timeInMillis
             }
-            // Months ago
-            lowerCase.contains("bulan") || lowerCase.contains("month") -> {
+            lowerCase.matches(Regex(""".*\d+\s+bulan.*lalu.*""")) || 
+            lowerCase.matches(Regex(""".*\d+\s+month.*ago.*""")) -> {
                 val months = Regex("""\d+""").find(lowerCase)?.value?.toIntOrNull() ?: 0
                 now.add(Calendar.MONTH, -months)
                 return now.timeInMillis
             }
-            // Years ago
-            lowerCase.contains("tahun") || lowerCase.contains("year") -> {
+            lowerCase.matches(Regex(""".*\d+\s+tahun.*lalu.*""")) || 
+            lowerCase.matches(Regex(""".*\d+\s+year.*ago.*""")) -> {
                 val years = Regex("""\d+""").find(lowerCase)?.value?.toIntOrNull() ?: 0
                 now.add(Calendar.YEAR, -years)
                 return now.timeInMillis
             }
-            // Just now
-            lowerCase.contains("just now") || lowerCase.contains("baru saja") -> {
-                return now.timeInMillis
+        }
+        
+        return getDefaultTimestamp()
+    }
+    
+    private fun parseAbsoluteDate(dateString: String): Date? {
+        val patterns = listOf(
+            "dd/MM/yy" to Regex("""\d{1,2}/\d{1,2}/\d{2}"""),
+            "dd/MM/yyyy" to Regex("""\d{1,2}/\d{1,2}/\d{4}"""),
+            "dd-MM-yy" to Regex("""\d{1,2}-\d{1,2}-\d{2}"""),
+            "dd-MM-yyyy" to Regex("""\d{1,2}-\d{1,2}-\d{4}"""),
+            "yyyy-MM-dd" to Regex("""\d{4}-\d{2}-\d{2}""")
+        )
+        
+        for ((pattern, regex) in patterns) {
+            val match = regex.find(dateString)
+            if (match != null) {
+                try {
+                    val sdf = SimpleDateFormat(pattern, Locale.ENGLISH)
+                    sdf.timeZone = jakartaTimeZone
+                    return sdf.parse(match.value)
+                } catch (e: Exception) {
+                    continue
+                }
             }
         }
         
-        // If no date pattern matches, return a default timestamp (not current time)
-        // This prevents everything from showing as "Hari Ini"
-        val defaultTime = Calendar.getInstance(jakartaTime)
-        defaultTime.add(Calendar.DAY_OF_MONTH, -7) // Default to a week ago
+        return null
+    }
+    
+    private fun getDefaultTimestamp(): Long {
+        val defaultTime = Calendar.getInstance(jakartaTimeZone)
+        defaultTime.add(Calendar.DAY_OF_MONTH, -7)
         return defaultTime.timeInMillis
     }
     
     private fun formatDateForDisplay(timestamp: Long, originalDateString: String): String {
         if (timestamp == 0L) return "Unknown"
         
-        val jakartaTime = TimeZone.getTimeZone("Asia/Jakarta")
-        val now = Calendar.getInstance(jakartaTime)
-        val date = Calendar.getInstance(jakartaTime).apply { timeInMillis = timestamp }
+        val now = Calendar.getInstance(jakartaTimeZone)
+        val date = Calendar.getInstance(jakartaTimeZone).apply { timeInMillis = timestamp }
         
-        // Only use original string for explicit relative terms
+        // Use original string for specific cases
         val lowerOriginal = originalDateString.lowercase(Locale.ENGLISH)
         when {
-            lowerOriginal.contains("hari ini") && !lowerOriginal.contains("ago") -> return "Hari Ini"
-            lowerOriginal.contains("kemarin") && !lowerOriginal.contains("ago") -> return "Kemarin"
-            lowerOriginal.contains("just now") || lowerOriginal.contains("baru saja") -> return "Baru Saja"
-        }
-        
-        // Handle relative time expressions
-        when {
-            lowerOriginal.contains("menit") || lowerOriginal.contains("minute") -> {
+            lowerOriginal.contains("hari ini") -> return "Hari Ini"
+            lowerOriginal.contains("kemarin") -> return "Kemarin"
+            lowerOriginal.contains("baru saja") || lowerOriginal.contains("just now") -> return "Baru Saja"
+            lowerOriginal.matches(Regex(""".*\d+\s+menit.*lalu.*""")) -> {
                 val minutes = Regex("""\d+""").find(lowerOriginal)?.value?.toIntOrNull() ?: 0
-                return "$minutes menit yang lalu"
+                return "$minutes menit lalu"
             }
-            lowerOriginal.contains("jam") || lowerOriginal.contains("hour") -> {
+            lowerOriginal.matches(Regex(""".*\d+\s+jam.*lalu.*""")) -> {
                 val hours = Regex("""\d+""").find(lowerOriginal)?.value?.toIntOrNull() ?: 0
-                return "$hours jam yang lalu"
+                return "$hours jam lalu"
             }
-            lowerOriginal.contains("hari") && !lowerOriginal.contains("hari ini") -> {
+            lowerOriginal.matches(Regex(""".*\d+\s+hari.*lalu.*""")) -> {
                 val days = Regex("""\d+""").find(lowerOriginal)?.value?.toIntOrNull() ?: 0
-                return "$days hari yang lalu"
-            }
-            lowerOriginal.contains("minggu") || lowerOriginal.contains("week") -> {
-                val weeks = Regex("""\d+""").find(lowerOriginal)?.value?.toIntOrNull() ?: 0
-                return "$weeks minggu yang lalu"
-            }
-            lowerOriginal.contains("bulan") || lowerOriginal.contains("month") -> {
-                val months = Regex("""\d+""").find(lowerOriginal)?.value?.toIntOrNull() ?: 0
-                return "$months bulan yang lalu"
+                return "$days hari lalu"
             }
         }
         
-        // Calculate relative dates based on actual timestamp
+        // Calculate display based on actual timestamp
         return when {
             isSameDay(now, date) -> "Hari Ini"
             isYesterday(now, date) -> "Kemarin"
             else -> {
                 val sdf = SimpleDateFormat("dd/MM/yy", Locale.ENGLISH)
-                sdf.timeZone = jakartaTime
+                sdf.timeZone = jakartaTimeZone
                 sdf.format(Date(timestamp))
             }
         }
