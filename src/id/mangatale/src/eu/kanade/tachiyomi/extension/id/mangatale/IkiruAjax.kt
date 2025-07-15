@@ -157,7 +157,12 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
     }
     
     private fun parseChapterDate(dateString: String): Long {
-        if (dateString.isBlank()) return System.currentTimeMillis()
+        if (dateString.isBlank()) {
+            // Return a default timestamp that's not today - maybe a week ago
+            val defaultTime = Calendar.getInstance(TimeZone.getTimeZone("Asia/Jakarta"))
+            defaultTime.add(Calendar.DAY_OF_MONTH, -7)
+            return defaultTime.timeInMillis
+        }
         
         val cleaned = dateString.trim()
         val lowerCase = cleaned.lowercase(Locale.ENGLISH)
@@ -246,7 +251,11 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             }
         }
         
-        return System.currentTimeMillis()
+        // If no date pattern matches, return a default timestamp (not current time)
+        // This prevents everything from showing as "Hari Ini"
+        val defaultTime = Calendar.getInstance(jakartaTime)
+        defaultTime.add(Calendar.DAY_OF_MONTH, -7) // Default to a week ago
+        return defaultTime.timeInMillis
     }
     
     private fun formatDateForDisplay(timestamp: Long, originalDateString: String): String {
@@ -256,11 +265,36 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
         val now = Calendar.getInstance(jakartaTime)
         val date = Calendar.getInstance(jakartaTime).apply { timeInMillis = timestamp }
         
-        // Use original string for relative terms if available
+        // Only use original string for explicit relative terms
         val lowerOriginal = originalDateString.lowercase(Locale.ENGLISH)
         when {
-            lowerOriginal.contains("hari ini") -> return "Hari Ini"
-            lowerOriginal.contains("kemarin") -> return "Kemarin"
+            lowerOriginal.contains("hari ini") && !lowerOriginal.contains("ago") -> return "Hari Ini"
+            lowerOriginal.contains("kemarin") && !lowerOriginal.contains("ago") -> return "Kemarin"
+            lowerOriginal.contains("just now") || lowerOriginal.contains("baru saja") -> return "Baru Saja"
+        }
+        
+        // Handle relative time expressions
+        when {
+            lowerOriginal.contains("menit") || lowerOriginal.contains("minute") -> {
+                val minutes = Regex("""\d+""").find(lowerOriginal)?.value?.toIntOrNull() ?: 0
+                return "$minutes menit yang lalu"
+            }
+            lowerOriginal.contains("jam") || lowerOriginal.contains("hour") -> {
+                val hours = Regex("""\d+""").find(lowerOriginal)?.value?.toIntOrNull() ?: 0
+                return "$hours jam yang lalu"
+            }
+            lowerOriginal.contains("hari") && !lowerOriginal.contains("hari ini") -> {
+                val days = Regex("""\d+""").find(lowerOriginal)?.value?.toIntOrNull() ?: 0
+                return "$days hari yang lalu"
+            }
+            lowerOriginal.contains("minggu") || lowerOriginal.contains("week") -> {
+                val weeks = Regex("""\d+""").find(lowerOriginal)?.value?.toIntOrNull() ?: 0
+                return "$weeks minggu yang lalu"
+            }
+            lowerOriginal.contains("bulan") || lowerOriginal.contains("month") -> {
+                val months = Regex("""\d+""").find(lowerOriginal)?.value?.toIntOrNull() ?: 0
+                return "$months bulan yang lalu"
+            }
         }
         
         // Calculate relative dates based on actual timestamp
