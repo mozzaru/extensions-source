@@ -11,6 +11,7 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
 class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, private val headers: okhttp3.Headers) {
     
@@ -160,80 +161,87 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
         
         val cleaned = dateString.trim()
         val lowerCase = cleaned.lowercase(Locale.ENGLISH)
-        
-        // Handle Indonesian "Hari Ini" (Today) - should return current time
-        if (lowerCase.contains("hari ini") || lowerCase.contains("today")) {
-            return System.currentTimeMillis()
-        }
-        
-        // Handle Indonesian "Kemarin" (Yesterday)
-        if (lowerCase.contains("kemarin") || lowerCase.contains("yesterday")) {
-            val yesterday = Calendar.getInstance()
-            yesterday.add(Calendar.DAY_OF_MONTH, -1)
-            return yesterday.timeInMillis
-        }
-        
-        // Try date formats - ikiru.wtf uses dd/MM/yy format
-        val dateFormats = listOf(
-            "dd/MM/yy",
-            "dd/MM/yyyy",
-            "dd-MM-yy",
-            "dd-MM-yyyy",
-            "MM/dd/yy",
-            "MM/dd/yyyy",
-            "yyyy-MM-dd",
-            "yyyy-MM-dd'T'HH:mm:ssXXX",
-            "yyyy-MM-dd'T'HH:mm:ss",
-            "yyyy-MM-dd HH:mm:ss"
-        )
-        
-        for (pattern in dateFormats) {
-            try {
-                val sdf = SimpleDateFormat(pattern, Locale.ENGLISH)
-                val date = sdf.parse(cleaned)
-                if (date != null) {
-                    return date.time
+        val jakartaTime = TimeZone.getTimeZone("Asia/Jakarta")
+
+        // First try to extract absolute date from string
+        val absoluteDatePattern = Regex("""\d{1,2}[/-]\d{1,2}[/-]\d{2,4}""")
+        val match = absoluteDatePattern.find(cleaned)
+        if (match != null) {
+            val datePart = match.value
+            val dateFormats = listOf(
+                "dd/MM/yy",
+                "dd/MM/yyyy",
+                "dd-MM-yy",
+                "dd-MM-yyyy",
+                "MM/dd/yy",
+                "MM/dd/yyyy",
+                "yyyy-MM-dd"
+            )
+            for (pattern in dateFormats) {
+                try {
+                    val sdf = SimpleDateFormat(pattern, Locale.ENGLISH)
+                    sdf.timeZone = jakartaTime
+                    val date = sdf.parse(datePart)
+                    if (date != null) {
+                        return date.time
+                    }
+                } catch (e: Exception) {
+                    // Continue to next format
                 }
-            } catch (e: Exception) {
-                // Continue to next format
             }
         }
-        
-        // Handle relative time formats
-        val now = Calendar.getInstance()
+
+        // Handle relative terms with Jakarta timezone
+        val now = Calendar.getInstance(jakartaTime)
         
         when {
-            lowerCase.contains("just now") || lowerCase.contains("baru saja") -> {
+            // Today
+            lowerCase.contains("hari ini") || lowerCase.contains("today") -> {
                 return now.timeInMillis
             }
+            // Yesterday
+            lowerCase.contains("kemarin") || lowerCase.contains("yesterday") -> {
+                now.add(Calendar.DAY_OF_MONTH, -1)
+                return now.timeInMillis
+            }
+            // Minutes ago
             lowerCase.contains("menit") || lowerCase.contains("minute") -> {
                 val minutes = Regex("""\d+""").find(lowerCase)?.value?.toIntOrNull() ?: 0
                 now.add(Calendar.MINUTE, -minutes)
                 return now.timeInMillis
             }
+            // Hours ago
             lowerCase.contains("jam") || lowerCase.contains("hour") -> {
                 val hours = Regex("""\d+""").find(lowerCase)?.value?.toIntOrNull() ?: 0
                 now.add(Calendar.HOUR_OF_DAY, -hours)
                 return now.timeInMillis
             }
+            // Days ago (exclude "hari ini")
             lowerCase.contains("hari") && !lowerCase.contains("hari ini") -> {
                 val days = Regex("""\d+""").find(lowerCase)?.value?.toIntOrNull() ?: 0
                 now.add(Calendar.DAY_OF_MONTH, -days)
                 return now.timeInMillis
             }
+            // Weeks ago
             lowerCase.contains("minggu") || lowerCase.contains("week") -> {
                 val weeks = Regex("""\d+""").find(lowerCase)?.value?.toIntOrNull() ?: 0
                 now.add(Calendar.WEEK_OF_YEAR, -weeks)
                 return now.timeInMillis
             }
+            // Months ago
             lowerCase.contains("bulan") || lowerCase.contains("month") -> {
                 val months = Regex("""\d+""").find(lowerCase)?.value?.toIntOrNull() ?: 0
                 now.add(Calendar.MONTH, -months)
                 return now.timeInMillis
             }
+            // Years ago
             lowerCase.contains("tahun") || lowerCase.contains("year") -> {
                 val years = Regex("""\d+""").find(lowerCase)?.value?.toIntOrNull() ?: 0
                 now.add(Calendar.YEAR, -years)
+                return now.timeInMillis
+            }
+            // Just now
+            lowerCase.contains("just now") || lowerCase.contains("baru saja") -> {
                 return now.timeInMillis
             }
         }
@@ -244,24 +252,39 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
     private fun formatDateForDisplay(timestamp: Long, originalDateString: String): String {
         if (timestamp == 0L) return "Unknown"
         
+        val jakartaTime = TimeZone.getTimeZone("Asia/Jakarta")
+        val now = Calendar.getInstance(jakartaTime)
+        val date = Calendar.getInstance(jakartaTime).apply { timeInMillis = timestamp }
+        
+        // Use original string for relative terms if available
         val lowerOriginal = originalDateString.lowercase(Locale.ENGLISH)
-        
-        // If original was "Hari Ini", show it as "Hari Ini"
-        if (lowerOriginal.contains("hari ini")) {
-            return "Hari Ini"
+        when {
+            lowerOriginal.contains("hari ini") -> return "Hari Ini"
+            lowerOriginal.contains("kemarin") -> return "Kemarin"
         }
         
-        // If original was "Kemarin", show it as "Kemarin"  
-        if (lowerOriginal.contains("kemarin")) {
-            return "Kemarin"
+        // Calculate relative dates based on actual timestamp
+        return when {
+            isSameDay(now, date) -> "Hari Ini"
+            isYesterday(now, date) -> "Kemarin"
+            else -> {
+                val sdf = SimpleDateFormat("dd/MM/yy", Locale.ENGLISH)
+                sdf.timeZone = jakartaTime
+                sdf.format(Date(timestamp))
+            }
         }
-        
-        // For actual dates, format as dd/MM/yy (like ikiru.wtf does)
-        return SimpleDateFormat("dd/MM/yy", Locale.ENGLISH).format(Date(timestamp))
     }
     
     private fun isSameDay(cal1: Calendar, cal2: Calendar): Boolean {
         return cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR) &&
                cal1.get(Calendar.DAY_OF_YEAR) == cal2.get(Calendar.DAY_OF_YEAR)
+    }
+    
+    private fun isYesterday(now: Calendar, date: Calendar): Boolean {
+        val yesterday = Calendar.getInstance(now.timeZone).apply {
+            timeInMillis = now.timeInMillis
+            add(Calendar.DAY_OF_MONTH, -1)
+        }
+        return isSameDay(yesterday, date)
     }
 }
