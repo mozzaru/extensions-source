@@ -8,3 +8,7 @@ ext {
 }
 
 apply from: "$rootDir/common.gradle"
+
+dependencies {
+    implementation("com.squareup.duktape:duktape-android:1.4.0")
+}
