@@ -112,35 +112,39 @@ class Ikiru : HttpSource() {
     // Common manga parsing - FIXED
     private fun parseMangaResponse(response: Response): MangasPage {
         val raw = response.body!!.string()
-
+    
         if (IkiruUtils.checkCloudflareBlock(raw)) {
             throw Exception("Diblokir Cloudflare - Silakan coba lagi nanti")
         }
-
+    
         val document = Jsoup.parse(raw)
         val mangas = mutableListOf<SManga>()
-
-        // Enhanced selectors with proper escaping
+    
+        // Updated selectors to match both manga/manqa patterns
         document.select("""
             div.manga-item, 
+            div.manqa-item,
             div.flex.rounded-lg.overflow-hidden, 
-            div.group-data-\\[mode\\=horizontal\\]:hidden,
             div.grid > div,
             div.relative.flex.flex-col,
             div.manga-list-item,
+            div.manqa-list-item,
             div[class*="manga"],
+            div[class*="manqa"],
             div[class*="card"],
             article,
             div.group:has(a[href*='/manga/']),
-            div.overflow-hidden:has(a[href*='/manga/'])
+            div.group:has(a[href*='/manqa/']),
+            div.overflow-hidden:has(a[href*='/manga/']),
+            div.overflow-hidden:has(a[href*='/manqa/'])
         """.trimIndent()).forEach { item ->
-            item.selectFirst("a[href*='/manga/']")?.let { link ->
+            item.selectFirst("a[href*='/manga/'], a[href*='/manqa/']")?.let { link ->
                 val href = link.attr("href")
                 if (!IkiruUtils.isValidMangaUrl(href)) return@forEach
-
+    
                 val title = extractTitleFromItem(item, link)
                 val thumbnailUrl = IkiruUtils.extractThumbnailUrl(item)
-
+                
                 if (title.isNotBlank()) {
                     mangas.add(SManga.create().apply {
                         url = href.removePrefix(baseUrl)
@@ -150,22 +154,25 @@ class Ikiru : HttpSource() {
                 }
             }
         }
-
-        // Fallback 1: Grid layouts
+    
+        // Fallback for grid layouts
         if (mangas.isEmpty() || mangas.size < 10) {
             document.select("div.grid, div[class*='grid']").forEach { grid ->
                 grid.select("""
                     div:has(> a[href*='/manga/']),
+                    div:has(> a[href*='/manqa/']),
                     div:has(> div > a[href*='/manga/']),
-                    div:has(a[href*='/manga/'])
+                    div:has(> div > a[href*='/manqa/']),
+                    div:has(a[href*='/manga/']),
+                    div:has(a[href*='/manqa/'])
                 """.trimIndent()).forEach { item ->
-                    val link = item.selectFirst("a[href*='/manga/']") ?: return@forEach
+                    val link = item.selectFirst("a[href*='/manga/'], a[href*='/manqa/']") ?: return@forEach
                     val href = link.attr("href")
                     if (!IkiruUtils.isValidMangaUrl(href)) return@forEach
-
+    
                     val title = extractTitleFromItem(item, link)
                     val thumbnailUrl = IkiruUtils.extractThumbnailUrl(item)
-
+    
                     if (title.isNotBlank() && mangas.none { it.url == href.removePrefix(baseUrl) }) {
                         mangas.add(SManga.create().apply {
                             url = href.removePrefix(baseUrl)
@@ -176,23 +183,26 @@ class Ikiru : HttpSource() {
                 }
             }
         }
-
-        // Fallback 2: Flexbox containers
+    
+        // Fallback for flex containers
         if (mangas.isEmpty() || mangas.size < 10) {
             document.select("div.flex, div[class*='flex']").forEach { flexContainer ->
                 flexContainer.select("""
                     div:has(> a[href*='/manga/']),
+                    div:has(> a[href*='/manqa/']),
                     div:has(> div > a[href*='/manga/']),
-                    a[href*='/manga/']:has(img)
+                    div:has(> div > a[href*='/manqa/']),
+                    a[href*='/manga/']:has(img),
+                    a[href*='/manqa/']:has(img)
                 """.trimIndent()).forEach { item ->
-                    val link = if (item.tagName() == "a") item else item.selectFirst("a[href*='/manga/']")
+                    val link = if (item.tagName() == "a") item else item.selectFirst("a[href*='/manga/'], a[href*='/manqa/']")
                     link?.let { lnk ->
                         val href = lnk.attr("href")
                         if (!IkiruUtils.isValidMangaUrl(href)) return@forEach
-
+    
                         val title = extractTitleFromItem(item, lnk)
                         val thumbnailUrl = IkiruUtils.extractThumbnailUrl(item)
-
+    
                         if (title.isNotBlank() && mangas.none { it.url == href.removePrefix(baseUrl) }) {
                             mangas.add(SManga.create().apply {
                                 url = href.removePrefix(baseUrl)
@@ -204,16 +214,16 @@ class Ikiru : HttpSource() {
                 }
             }
         }
-
-        // Fallback 3: Direct manga links
+    
+        // Fallback for direct links
         if (mangas.isEmpty() || mangas.size < 10) {
-            document.select("a[href*='/manga/']:has(img)").forEach { link ->
+            document.select("a[href*='/manga/']:has(img), a[href*='/manqa/']:has(img)").forEach { link ->
                 val href = link.attr("href")
                 if (!IkiruUtils.isValidMangaUrl(href)) return@forEach
-
+    
                 val title = extractTitleFromItem(link, link)
                 val thumbnailUrl = IkiruUtils.extractThumbnailUrl(link)
-
+    
                 if (title.isNotBlank() && mangas.none { it.url == href.removePrefix(baseUrl) }) {
                     mangas.add(SManga.create().apply {
                         url = href.removePrefix(baseUrl)
