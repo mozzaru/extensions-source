@@ -120,17 +120,19 @@ class Ikiru : HttpSource() {
         val document = Jsoup.parse(raw)
         val mangas = mutableListOf<SManga>()
 
-        // Parse manga items - Enhanced selectors for modern website structure
+        // Enhanced selectors with proper escaping
         document.select("""
             div.manga-item, 
             div.flex.rounded-lg.overflow-hidden, 
-            div.group-data-\\[mode\\=horizontal\\]\\:hidden,
+            div.group-data-\\[mode\\=horizontal\\]:hidden,
             div.grid > div,
             div.relative.flex.flex-col,
             div.manga-list-item,
             div[class*="manga"],
             div[class*="card"],
-            article
+            article,
+            div.group:has(a[href*='/manga/']),
+            div.overflow-hidden:has(a[href*='/manga/'])
         """.trimIndent()).forEach { item ->
             item.selectFirst("a[href*='/manga/']")?.let { link ->
                 val href = link.attr("href")
@@ -138,7 +140,7 @@ class Ikiru : HttpSource() {
 
                 val title = extractTitleFromItem(item, link)
                 val thumbnailUrl = IkiruUtils.extractThumbnailUrl(item)
-                
+
                 if (title.isNotBlank()) {
                     mangas.add(SManga.create().apply {
                         url = href.removePrefix(baseUrl)
@@ -149,7 +151,7 @@ class Ikiru : HttpSource() {
             }
         }
 
-        // Fallback parsing for grid layouts
+        // Fallback 1: Grid layouts
         if (mangas.isEmpty() || mangas.size < 10) {
             document.select("div.grid, div[class*='grid']").forEach { grid ->
                 grid.select("""
@@ -171,6 +173,53 @@ class Ikiru : HttpSource() {
                             thumbnail_url = thumbnailUrl
                         })
                     }
+                }
+            }
+        }
+
+        // Fallback 2: Flexbox containers
+        if (mangas.isEmpty() || mangas.size < 10) {
+            document.select("div.flex, div[class*='flex']").forEach { flexContainer ->
+                flexContainer.select("""
+                    div:has(> a[href*='/manga/']),
+                    div:has(> div > a[href*='/manga/']),
+                    a[href*='/manga/']:has(img)
+                """.trimIndent()).forEach { item ->
+                    val link = if (item.tagName() == "a") item else item.selectFirst("a[href*='/manga/']")
+                    link?.let { lnk ->
+                        val href = lnk.attr("href")
+                        if (!IkiruUtils.isValidMangaUrl(href)) return@forEach
+
+                        val title = extractTitleFromItem(item, lnk)
+                        val thumbnailUrl = IkiruUtils.extractThumbnailUrl(item)
+
+                        if (title.isNotBlank() && mangas.none { it.url == href.removePrefix(baseUrl) }) {
+                            mangas.add(SManga.create().apply {
+                                url = href.removePrefix(baseUrl)
+                                this.title = IkiruUtils.sanitizeTitle(title)
+                                thumbnail_url = thumbnailUrl
+                            })
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback 3: Direct manga links
+        if (mangas.isEmpty() || mangas.size < 10) {
+            document.select("a[href*='/manga/']:has(img)").forEach { link ->
+                val href = link.attr("href")
+                if (!IkiruUtils.isValidMangaUrl(href)) return@forEach
+
+                val title = extractTitleFromItem(link, link)
+                val thumbnailUrl = IkiruUtils.extractThumbnailUrl(link)
+
+                if (title.isNotBlank() && mangas.none { it.url == href.removePrefix(baseUrl) }) {
+                    mangas.add(SManga.create().apply {
+                        url = href.removePrefix(baseUrl)
+                        this.title = IkiruUtils.sanitizeTitle(title)
+                        thumbnail_url = thumbnailUrl
+                    })
                 }
             }
         }
