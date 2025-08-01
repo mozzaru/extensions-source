@@ -120,31 +120,28 @@ class Ikiru : HttpSource() {
         val document = Jsoup.parse(raw)
         val mangas = mutableListOf<SManga>()
     
-        // Updated selectors to match both manga/manqa patterns
-        document.select("""
-            div.manga-item, 
-            div.manqa-item,
-            div.flex.rounded-lg.overflow-hidden, 
-            div.grid > div,
-            div.relative.flex.flex-col,
-            div.manga-list-item,
-            div.manqa-list-item,
-            div[class*="manga"],
-            div[class*="manqa"],
-            div[class*="card"],
+        // Universal manga detection - handles multiple layout types
+        val mangaContainers = document.select("""
+            [class*='item'], 
+            [class*='card'], 
+            [class*='box'], 
+            [class*='manga'], 
+            [class*='manqa'], 
+            [class*='comic'],
             article,
-            div.group:has(a[href*='/manga/']),
-            div.group:has(a[href*='/manqa/']),
-            div.overflow-hidden:has(a[href*='/manga/']),
-            div.overflow-hidden:has(a[href*='/manqa/'])
-        """.trimIndent()).forEach { item ->
-            item.selectFirst("a[href*='/manga/'], a[href*='/manqa/']")?.let { link ->
+            section,
+            div.grid > div,
+            div.flex > div
+        """.trimIndent())
+    
+        mangaContainers.forEach { container ->
+            container.selectFirst("a[href*='/manga/'], a[href*='/manqa/'], a[href*='/komik/']")?.let { link ->
                 val href = link.attr("href")
                 if (!IkiruUtils.isValidMangaUrl(href)) return@forEach
     
-                val title = extractTitleFromItem(item, link)
-                val thumbnailUrl = IkiruUtils.extractThumbnailUrl(item)
-                
+                val title = extractTitleFromItem(container, link)
+                val thumbnailUrl = IkiruUtils.extractThumbnailUrl(container)
+    
                 if (title.isNotBlank()) {
                     mangas.add(SManga.create().apply {
                         url = href.removePrefix(baseUrl)
@@ -155,69 +152,9 @@ class Ikiru : HttpSource() {
             }
         }
     
-        // Fallback for grid layouts
-        if (mangas.isEmpty() || mangas.size < 10) {
-            document.select("div.grid, div[class*='grid']").forEach { grid ->
-                grid.select("""
-                    div:has(> a[href*='/manga/']),
-                    div:has(> a[href*='/manqa/']),
-                    div:has(> div > a[href*='/manga/']),
-                    div:has(> div > a[href*='/manqa/']),
-                    div:has(a[href*='/manga/']),
-                    div:has(a[href*='/manqa/'])
-                """.trimIndent()).forEach { item ->
-                    val link = item.selectFirst("a[href*='/manga/'], a[href*='/manqa/']") ?: return@forEach
-                    val href = link.attr("href")
-                    if (!IkiruUtils.isValidMangaUrl(href)) return@forEach
-    
-                    val title = extractTitleFromItem(item, link)
-                    val thumbnailUrl = IkiruUtils.extractThumbnailUrl(item)
-    
-                    if (title.isNotBlank() && mangas.none { it.url == href.removePrefix(baseUrl) }) {
-                        mangas.add(SManga.create().apply {
-                            url = href.removePrefix(baseUrl)
-                            this.title = IkiruUtils.sanitizeTitle(title)
-                            thumbnail_url = thumbnailUrl
-                        })
-                    }
-                }
-            }
-        }
-    
-        // Fallback for flex containers
-        if (mangas.isEmpty() || mangas.size < 10) {
-            document.select("div.flex, div[class*='flex']").forEach { flexContainer ->
-                flexContainer.select("""
-                    div:has(> a[href*='/manga/']),
-                    div:has(> a[href*='/manqa/']),
-                    div:has(> div > a[href*='/manga/']),
-                    div:has(> div > a[href*='/manqa/']),
-                    a[href*='/manga/']:has(img),
-                    a[href*='/manqa/']:has(img)
-                """.trimIndent()).forEach { item ->
-                    val link = if (item.tagName() == "a") item else item.selectFirst("a[href*='/manga/'], a[href*='/manqa/']")
-                    link?.let { lnk ->
-                        val href = lnk.attr("href")
-                        if (!IkiruUtils.isValidMangaUrl(href)) return@forEach
-    
-                        val title = extractTitleFromItem(item, lnk)
-                        val thumbnailUrl = IkiruUtils.extractThumbnailUrl(item)
-    
-                        if (title.isNotBlank() && mangas.none { it.url == href.removePrefix(baseUrl) }) {
-                            mangas.add(SManga.create().apply {
-                                url = href.removePrefix(baseUrl)
-                                this.title = IkiruUtils.sanitizeTitle(title)
-                                thumbnail_url = thumbnailUrl
-                            })
-                        }
-                    }
-                }
-            }
-        }
-    
-        // Fallback for direct links
-        if (mangas.isEmpty() || mangas.size < 10) {
-            document.select("a[href*='/manga/']:has(img), a[href*='/manqa/']:has(img)").forEach { link ->
+        // Direct link fallback
+        if (mangas.isEmpty()) {
+            document.select("a[href*='/manga/'], a[href*='/manqa/'], a[href*='/komik/']").forEach { link ->
                 val href = link.attr("href")
                 if (!IkiruUtils.isValidMangaUrl(href)) return@forEach
     
@@ -233,28 +170,46 @@ class Ikiru : HttpSource() {
                 }
             }
         }
-
+    
+        // Image-based fallback
+        if (mangas.isEmpty()) {
+            document.select("img[src*='/covers/'], img[src*='/thumb/'], img[src*='/uploads/']").forEach { img ->
+                img.parents().firstOrNull { it.tagName() == "a" }?.let { link ->
+                    val href = link.attr("href")
+                    if (!IkiruUtils.isValidMangaUrl(href)) return@forEach
+    
+                    val title = extractTitleFromItem(link, link)
+                    val thumbnailUrl = img.absUrl("src") ?: img.absUrl("data-src")
+    
+                    if (title.isNotBlank() && mangas.none { it.url == href.removePrefix(baseUrl) }) {
+                        mangas.add(SManga.create().apply {
+                            url = href.removePrefix(baseUrl)
+                            this.title = IkiruUtils.sanitizeTitle(title)
+                            thumbnail_url = thumbnailUrl
+                        })
+                    }
+                }
+            }
+        }
+    
         val hasNextPage = determineHasNextPage(document, mangas.size)
-
+    
         return MangasPage(mangas.distinctBy { it.url }, hasNextPage)
     }
 
-    private fun extractTitleFromItem(item: org.jsoup.nodes.Element, link: org.jsoup.nodes.Element): String {
-        return item.selectFirst("""
-            h1, h2, h3, h4, h5, h6,
-            div.text-base, 
-            div.title, 
-            span.font-semibold,
-            .manga-title,
-            .font-bold,
-            .text-lg,
-            .text-xl,
-            div[class*="title"],
-            span[class*="title"]
-        """.trimIndent())?.text()?.trim()
-            ?: link.attr("title").trim()
-            ?: link.selectFirst("img")?.attr("alt")?.trim()
-            ?: ""
+    private fun extractTitleFromItem(item: Element, link: Element): String {
+        // Try various title locations
+        return listOf(
+            item.selectFirst("h1, h2, h3, h4, h5, h6"),
+            item.selectFirst("[class*='title']"),
+            item.selectFirst("[class*='name']"),
+            item.selectFirst(".text-lg, .text-xl, .text-2xl"),
+            link.attr("title"),
+            link.selectFirst("img")?.attr("alt"),
+            link.text().takeIf { it.isNotBlank() }
+        ).firstNotNullOfOrNull { 
+            it?.text()?.trim() ?: (it as? Attribute)?.value?.trim()
+        } ?: ""
     }
 
     private fun determineHasNextPage(document: org.jsoup.nodes.Document, mangaCount: Int): Boolean {

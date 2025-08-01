@@ -156,10 +156,12 @@ object IkiruUtils {
 
     fun isValidMangaUrl(url: String): Boolean {
         return url.isNotBlank() && 
-               url.contains("/manga/") && 
+               (url.contains("/manga/") || 
+                url.contains("/manqa/") || 
+                url.contains("/komik/")) && 
                !url.contains("javascript:") &&
-               !url.contains("#") && // Avoid anchor links
-               !url.endsWith("/") // Avoid directory listings
+               !url.contains("#") &&
+               !url.endsWith("/#")
     }
 
     fun extractImageUrl(element: Element): String {
