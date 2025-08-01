@@ -14,101 +14,78 @@ import java.util.Locale
 import java.util.TimeZone
 
 class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, private val headers: okhttp3.Headers) {
-
-    private val jakartaTimeZone = TimeZone.getTimeZone("UTC")
-
+    
+    private val jakartaTimeZone = TimeZone.getTimeZone("Asia/Jakarta")
+    
     fun getChapterList(mangaId: String, chapterId: String): List<SChapter> {
         val chapters = mutableListOf<SChapter>()
-
-        val ajaxUrl = "$baseUrl/ajax-call?action=chapter_selects&manga_id=$mangaId&chapter_id=$chapterId&all=1"
-        try {
-            val request = Request.Builder()
-                .url(ajaxUrl)
-                .headers(headers)
-                .build()
-
-            val response = client.newCall(request).execute()
-            if (response.isSuccessful) {
-                val responseBody = response.body?.string()
-                if (!responseBody.isNullOrBlank()) {
-                    val ajaxDoc = Jsoup.parse(responseBody)
-                    chapters.addAll(parseChaptersFromAjax(ajaxDoc))
-                }
-            }
-            response.close()
-        } catch (e: Exception) {
-            // Log error
-            println("Error fetching chapters: ${e.message}")
-        }
-
-        if (chapters.isEmpty()) {
-            listOf("head", "footer").forEach { loc ->
-                val locAjaxUrl = "$baseUrl/ajax-call?action=chapter_selects&manga_id=$mangaId&chapter_id=$chapterId&loc=$loc"
-                try {
-                    val request = Request.Builder()
-                        .url(locAjaxUrl)
-                        .headers(headers)
-                        .build()
-                        
-                    val response = client.newCall(request).execute()
-                    if (response.isSuccessful) {
-                        val responseBody = response.body?.string()
-                        if (!responseBody.isNullOrBlank()) {
-                            val ajaxDoc = Jsoup.parse(responseBody)
-                            chapters.addAll(parseChaptersFromAjax(ajaxDoc))
-                        }
+        
+        listOf("head", "footer").forEach { loc ->
+            val ajaxUrl = "$baseUrl/ajax-call?action=chapter_selects&manga_id=$mangaId&chapter_id=$chapterId&loc=$loc"
+            try {
+                val request = Request.Builder()
+                    .url(ajaxUrl)
+                    .headers(headers)
+                    .build()
+                    
+                val response = client.newCall(request).execute()
+                if (response.isSuccessful) {
+                    val responseBody = response.body?.string()
+                    if (!responseBody.isNullOrBlank()) {
+                        val ajaxDoc = Jsoup.parse(responseBody)
+                        chapters.addAll(parseChaptersFromAjax(ajaxDoc))
                     }
-                    response.close()
-                } catch (e: Exception) {
-                    // Log error but continue to next location
-                    println("Error fetching chapters from $loc: ${e.message}")
                 }
+                response.close()
+            } catch (e: Exception) {
+                // Log error but continue to next location
+                println("Error fetching chapters from $loc: ${e.message}")
             }
         }
-
+        
         return chapters
             .distinctBy { it.url }
             .sortedByDescending { extractChapterNumber(it.name) }
     }
-
+    
     private fun parseChaptersFromAjax(document: Document): List<SChapter> {
         val chapters = mutableListOf<SChapter>()
-
+        
         // Method 1: Look for direct chapter links with ikiru.wtf structure
         document.select("a[href*=/chapter-]").forEach { chapterLink ->
             parseChapterFromLink(chapterLink)?.let { chapters.add(it) }
         }
-
+        
         // Method 2: Look for chapter entries in list format (common in ikiru.wtf)
         document.select("div.chapter-item, .chapter-list-item, .chapter-entry").forEach { chapterDiv ->
             parseChapterFromDiv(chapterDiv)?.let { chapters.add(it) }
         }
-
+        
         // Method 3: Look for button elements with onclick navigation
         document.select("button[onclick*='location.href'], button[onclick*='window.location']").forEach { button ->
             parseChapterFromButton(button)?.let { chapters.add(it) }
         }
-
+        
         // Method 4: Look for table rows (alternative layout)
         document.select("tr").forEach { row ->
             parseChapterFromTableRow(row)?.let { chapters.add(it) }
         }
-
+        
         return chapters
     }
-
+    
     private fun parseChapterFromLink(chapterLink: Element): SChapter? {
         try {
             val href = chapterLink.attr("href")
             if (href.isBlank() || !href.contains("/chapter-")) return null
-
+            
             val name = cleanChapterName(chapterLink.text())
             if (name.isBlank()) return null
-
+            
             val dateElement = findDateElement(chapterLink)
             val dateStr = dateElement?.text()?.trim() ?: ""
             val uploadTime = parseChapterDate(dateStr)
-
+            
             return SChapter.create().apply {
                 url = href.removePrefix(baseUrl)
                 this.name = name
@@ -119,22 +96,22 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             return null
         }
     }
-
+    
     private fun parseChapterFromDiv(chapterDiv: Element): SChapter? {
         try {
             val chapterLink = chapterDiv.select("a[href*=/chapter-]").firstOrNull() ?: return null
             val href = chapterLink.attr("href")
             if (href.isBlank()) return null
-
+            
             val name = cleanChapterName(chapterLink.text())
             if (name.isBlank()) return null
-
+            
             // Look for date in the same div or nearby elements
             val dateElement = chapterDiv.select(".chapter-date, .date, .time, .upload-date").firstOrNull()
                 ?: findDateElement(chapterDiv)
             val dateStr = dateElement?.text()?.trim() ?: ""
             val uploadTime = parseChapterDate(dateStr)
-
+            
             return SChapter.create().apply {
                 url = href.removePrefix(baseUrl)
                 this.name = name
@@ -145,22 +122,22 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             return null
         }
     }
-
+    
     private fun parseChapterFromButton(button: Element): SChapter? {
         try {
             val onclick = button.attr("onclick")
             val hrefMatch = Regex("""(?:location\.href|window\.location(?:\.href)?)\s*=\s*['"]([^'"]+)['"]""").find(onclick)
             val href = hrefMatch?.groups?.get(1)?.value ?: return null
-
+            
             if (!href.contains("/chapter-")) return null
-
+            
             val name = cleanChapterName(button.text())
             if (name.isBlank()) return null
-
+            
             val dateElement = findDateElement(button)
             val dateStr = dateElement?.text()?.trim() ?: ""
             val uploadTime = parseChapterDate(dateStr)
-
+            
             return SChapter.create().apply {
                 url = href.removePrefix(baseUrl)
                 this.name = name
@@ -171,23 +148,23 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             return null
         }
     }
-
+    
     private fun parseChapterFromTableRow(row: Element): SChapter? {
         try {
             val chapterLink = row.select("a[href*=/chapter-]").firstOrNull() ?: return null
             val href = chapterLink.attr("href")
             if (href.isBlank()) return null
-
+            
             val name = cleanChapterName(chapterLink.text())
             if (name.isBlank()) return null
-
+            
             // In table rows, date is often in a separate cell
             val dateCell = row.select("td").find { cell ->
                 isDateText(cell.text())
             }
             val dateStr = dateCell?.text()?.trim() ?: ""
             val uploadTime = parseChapterDate(dateStr)
-
+            
             return SChapter.create().apply {
                 url = href.removePrefix(baseUrl)
                 this.name = name
@@ -198,13 +175,13 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             return null
         }
     }
-
+    
     private fun cleanChapterName(name: String): String {
         return name.trim()
             .replace(Regex("""^\s*chapter\s*""", RegexOption.IGNORE_CASE), "Chapter ")
             .replace(Regex("""\s+"""), " ")
     }
-
+    
     private fun findDateElement(element: Element): Element? {
         // Check immediate siblings first
         var sibling = element.nextElementSibling()
@@ -214,7 +191,7 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             }
             sibling = sibling.nextElementSibling()
         }
-
+        
         sibling = element.previousElementSibling()
         while (sibling != null) {
             if (isDateText(sibling.text())) {
@@ -222,7 +199,7 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             }
             sibling = sibling.previousElementSibling()
         }
-
+        
         // Check parent's other children
         element.parent()?.let { parent ->
             parent.children().forEach { child ->
@@ -230,7 +207,7 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
                     return child
                 }
             }
-
+            
             // Check parent's siblings
             var parentSibling = parent.nextElementSibling()
             while (parentSibling != null) {
@@ -240,21 +217,21 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
                 parentSibling = parentSibling.nextElementSibling()
             }
         }
-
+        
         // Check descendants with date-related classes
         element.parent()?.select(".date, .time, .upload-date, .chapter-date, .published")?.firstOrNull { dateEl ->
             isDateText(dateEl.text())
         }?.let { return it }
-
+        
         return null
     }
-
+    
     private fun isDateText(text: String): Boolean {
         if (text.isBlank()) return false
-
+        
         val cleanText = text.trim()
         val lowerText = cleanText.lowercase(Locale.ENGLISH)
-
+        
         // Check for Indonesian date patterns
         return lowerText.contains("hari ini") ||
                lowerText.contains("kemarin") ||
@@ -266,19 +243,19 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
                cleanText.matches(Regex("""\d{4}-\d{2}-\d{2}""")) ||
                cleanText.matches(Regex("""\d{1,2}:\d{2}(:\d{2})?"""))
     }
-
+    
     private fun extractChapterNumber(name: String): Float {
         val numberMatch = Regex("""chapter\s*(\d+(?:\.\d+)?)|(\d+(?:\.\d+)?)""", RegexOption.IGNORE_CASE).find(name)
         return numberMatch?.let { 
             it.groups[1]?.value?.toFloatOrNull() ?: it.groups[2]?.value?.toFloatOrNull() 
         } ?: 0f
     }
-
+    
     private fun parseChapterDate(dateString: String): Long {
         if (dateString.isBlank()) {
             return getDefaultTimestamp()
         }
-
+        
         val cleaned = dateString.trim()
         val lowerCase = cleaned.lowercase(Locale.ENGLISH)
         val now = Calendar.getInstance(jakartaTimeZone)
@@ -287,10 +264,6 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
         val absoluteDate = parseAbsoluteDate(cleaned)
         if (absoluteDate != null) {
             return absoluteDate.time
-        }
-
-        if (lowerCase.contains("diperbarui")) {
-            return parseRelativeDate(lowerCase.replace("diperbarui", "").trim())
         }
 
         // Handle relative terms
@@ -342,10 +315,10 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
                 return now.timeInMillis
             }
         }
-
+        
         return getDefaultTimestamp()
     }
-
+    
     private fun parseAbsoluteDate(dateString: String): Date? {
         val patterns = listOf(
             "dd/MM/yy" to Regex("""\d{1,2}/\d{1,2}/\d{2}"""),
@@ -354,7 +327,7 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             "dd-MM-yyyy" to Regex("""\d{1,2}-\d{1,2}-\d{4}"""),
             "yyyy-MM-dd" to Regex("""\d{4}-\d{2}-\d{2}""")
         )
-
+        
         for ((pattern, regex) in patterns) {
             val match = regex.find(dateString)
             if (match != null) {
@@ -367,22 +340,22 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
                 }
             }
         }
-
+        
         return null
     }
-
+    
     private fun getDefaultTimestamp(): Long {
         val defaultTime = Calendar.getInstance(jakartaTimeZone)
         defaultTime.add(Calendar.DAY_OF_MONTH, -7)
         return defaultTime.timeInMillis
     }
-
+    
     private fun formatDateForDisplay(timestamp: Long, originalDateString: String): String {
         if (timestamp == 0L) return "Unknown"
-
+    
         val now = Calendar.getInstance(jakartaTimeZone)
         val date = Calendar.getInstance(jakartaTimeZone).apply { timeInMillis = timestamp }
-
+    
         return when {
             isSameDay(now, date) -> "Hari Ini"
             isYesterday(now, date) -> "Kemarin"
@@ -393,39 +366,17 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             }
         }
     }
-
+    
     private fun isSameDay(cal1: Calendar, cal2: Calendar): Boolean {
         return cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR) &&
                cal1.get(Calendar.DAY_OF_YEAR) == cal2.get(Calendar.DAY_OF_YEAR)
     }
-
+    
     private fun isYesterday(now: Calendar, date: Calendar): Boolean {
         val yesterday = Calendar.getInstance(now.timeZone).apply {
             timeInMillis = now.timeInMillis
             add(Calendar.DAY_OF_MONTH, -1)
         }
         return isSameDay(yesterday, date)
-    }
-
-    private fun parseRelativeDate(dateStr: String): Long {
-        val now = Calendar.getInstance(jakartaTimeZone)
-        val regex = Regex("""(\d+)\s*(menit|jam|hari|minggu|bulan|tahun)""")
-        val match = regex.find(dateStr)
-
-        if (match != null) {
-            val value = match.groups[1]?.value?.toIntOrNull() ?: 0
-            val unit = match.groups[2]?.value ?: ""
-
-            return when (unit) {
-                "menit" -> now.apply { add(Calendar.MINUTE, -value) }.timeInMillis
-                "jam" -> now.apply { add(Calendar.HOUR, -value) }.timeInMillis
-                "hari" -> now.apply { add(Calendar.DAY_OF_MONTH, -value) }.timeInMillis
-                "minggu" -> now.apply { add(Calendar.WEEK_OF_YEAR, -value) }.timeInMillis
-                "bulan" -> now.apply { add(Calendar.MONTH, -value) }.timeInMillis
-                "tahun" -> now.apply { add(Calendar.YEAR, -value) }.timeInMillis
-                else -> now.timeInMillis
-            }
-        }
-        return now.timeInMillis
     }
 }

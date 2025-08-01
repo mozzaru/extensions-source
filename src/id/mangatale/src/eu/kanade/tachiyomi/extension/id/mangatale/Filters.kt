@@ -20,7 +20,7 @@ class StatusFilter : Filter.Select<String>("Status", arrayOf("Semua", "Ongoing",
     }
 }
 
-class Genre(val id: String, name: String) : Filter.CheckBox(name, false)
+class Genre(val id: String, name: String) : Filter.CheckBox(name, false) // Default false
 
 class GenreFilterList(genres: List<Genre>) : Filter.Group<Genre>("Genre", genres)
 
