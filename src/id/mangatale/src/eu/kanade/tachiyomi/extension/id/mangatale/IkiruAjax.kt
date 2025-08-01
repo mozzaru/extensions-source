@@ -19,30 +19,53 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
     
     fun getChapterList(mangaId: String, chapterId: String): List<SChapter> {
         val chapters = mutableListOf<SChapter>()
-        
-        listOf("head", "footer").forEach { loc ->
-            val ajaxUrl = "$baseUrl/ajax-call?action=chapter_selects&manga_id=$mangaId&chapter_id=$chapterId&loc=$loc"
-            try {
-                val request = Request.Builder()
-                    .url(ajaxUrl)
-                    .headers(headers)
-                    .build()
-                    
-                val response = client.newCall(request).execute()
-                if (response.isSuccessful) {
-                    val responseBody = response.body?.string()
-                    if (!responseBody.isNullOrBlank()) {
-                        val ajaxDoc = Jsoup.parse(responseBody)
-                        chapters.addAll(parseChaptersFromAjax(ajaxDoc))
-                    }
+
+        val ajaxUrl = "$baseUrl/ajax-call?action=chapter_selects&manga_id=$mangaId&chapter_id=$chapterId&all=1"
+        try {
+            val request = Request.Builder()
+                .url(ajaxUrl)
+                .headers(headers)
+                .build()
+
+            val response = client.newCall(request).execute()
+            if (response.isSuccessful) {
+                val responseBody = response.body?.string()
+                if (!responseBody.isNullOrBlank()) {
+                    val ajaxDoc = Jsoup.parse(responseBody)
+                    chapters.addAll(parseChaptersFromAjax(ajaxDoc))
                 }
-                response.close()
-            } catch (e: Exception) {
-                // Log error but continue to next location
-                println("Error fetching chapters from $loc: ${e.message}")
+            }
+            response.close()
+        } catch (e: Exception) {
+            // Log error
+            println("Error fetching chapters: ${e.message}")
+        }
+
+        if (chapters.isEmpty()) {
+            listOf("head", "footer").forEach { loc ->
+                val locAjaxUrl = "$baseUrl/ajax-call?action=chapter_selects&manga_id=$mangaId&chapter_id=$chapterId&loc=$loc"
+                try {
+                    val request = Request.Builder()
+                        .url(locAjaxUrl)
+                        .headers(headers)
+                        .build()
+                        
+                    val response = client.newCall(request).execute()
+                    if (response.isSuccessful) {
+                        val responseBody = response.body?.string()
+                        if (!responseBody.isNullOrBlank()) {
+                            val ajaxDoc = Jsoup.parse(responseBody)
+                            chapters.addAll(parseChaptersFromAjax(ajaxDoc))
+                        }
+                    }
+                    response.close()
+                } catch (e: Exception) {
+                    // Log error but continue to next location
+                    println("Error fetching chapters from $loc: ${e.message}")
+                }
             }
         }
-        
+
         return chapters
             .distinctBy { it.url }
             .sortedByDescending { extractChapterNumber(it.name) }
