@@ -9,28 +9,42 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
 import okhttp3.FormBody
+import okhttp3.Interceptor
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.Jsoup
+import java.util.concurrent.TimeUnit
 
 class Ikiru : HttpSource() {
     override val name = "Ikiru"
-    override val baseUrl = "https://id.ikiru.wtf"
+    override val baseUrl = "https://01.ikiru.wtf"
     override val lang = "id"
     override val supportsLatest = true
     override val id = 1532456597012176985
 
-    override val client = network.cloudflareClient
+    private val rateLimitInterceptor = Interceptor { chain ->
+        // 2 requests per second
+        Thread.sleep(500)
+        chain.proceed(chain.request())
+    }
+
+    override val client = network.cloudflareClient.newBuilder()
+        .callTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
+        .addInterceptor(rateLimitInterceptor)
+        .build()
 
     private val ajaxHandler by lazy { IkiruAjax(client, baseUrl, headers) }
     private val mangaParser by lazy { IkiruMangaParser() }
 
-    override fun headersBuilder() =
-        super.headersBuilder()
-            .add("Referer", baseUrl)
-            .add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
-            .add("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
-            .add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+    override fun headersBuilder() = super.headersBuilder()
+        .add("Accept", "text/html,application/xhtml+xml")
+        .add("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
+        .add("DNT", "1")
+        .add("Sec-GPC", "1")
+        .add("Upgrade-Insecure-Requests", "1")
 
     // Popular Manga
     override fun popularMangaRequest(page: Int): Request {
@@ -60,16 +74,45 @@ class Ikiru : HttpSource() {
             .add("page", page.toString())
             .add("query", query)
             .add("orderby", "popular")
-            .build()
-        return POST("$baseUrl/ajax-call?action=advanced_search", headers, formBody)
+
+        // Process filters
+        filters.forEach { filter ->
+            when (filter) {
+                is TypeFilter -> {
+                    val type = filter.toUriPart()
+                    if (type.isNotEmpty()) formBody.add("type", type)
+                }
+                is StatusFilter -> {
+                    val status = filter.toUriPart()
+                    if (status.isNotEmpty()) formBody.add("status", status)
+                }
+                is GenreFilterList -> {
+                    // Fixed genre processing
+                    val selectedGenres = filter.state
+                        .filter { it.state }
+                        .mapNotNull { (it as? Genre)?.id }
+                    
+                    selectedGenres.forEach { genreId ->
+                        formBody.add("genre[]", genreId)
+                    }
+                }
+                else -> {
+                    // Handle other filter types if needed
+                }
+            }
+        }
+
+        return POST("$baseUrl/ajax-call?action=advanced_search", headers, formBody.build())
     }
+
+    override fun getFilterList() = getFilterListInternal()
 
     override fun searchMangaParse(response: Response): MangasPage = parseMangaResponse(response)
 
-    // Common manga parsing
+    // Common manga parsing - FIXED
     private fun parseMangaResponse(response: Response): MangasPage {
         val raw = response.body!!.string()
-        
+
         if (IkiruUtils.checkCloudflareBlock(raw)) {
             throw Exception("Diblokir Cloudflare - Silakan coba lagi nanti")
         }
@@ -77,44 +120,93 @@ class Ikiru : HttpSource() {
         val document = Jsoup.parse(raw)
         val mangas = mutableListOf<SManga>()
 
-        // Parse manga items
-        document.select("div.flex.rounded-lg.overflow-hidden, div.group-data-\\[mode\\=horizontal\\]\\:hidden").forEach { item ->
-            item.selectFirst("a[href^='/manga/']")?.let { link ->
+        // Parse manga items - Enhanced selectors for modern website structure
+        document.select("""
+            div.manga-item, 
+            div.flex.rounded-lg.overflow-hidden, 
+            div.group-data-\\[mode\\=horizontal\\]\\:hidden,
+            div.grid > div,
+            div.relative.flex.flex-col,
+            div.manga-list-item,
+            div[class*="manga"],
+            div[class*="card"],
+            article
+        """.trimIndent()).forEach { item ->
+            item.selectFirst("a[href*='/manga/']")?.let { link ->
                 val href = link.attr("href")
                 if (!IkiruUtils.isValidMangaUrl(href)) return@forEach
-                
-                val title = item.selectFirst("h1, h2, h3, div.text-base")?.text()
-                    ?: item.selectFirst("img")?.attr("alt")
-                    ?: ""
-                
+
+                val title = extractTitleFromItem(item, link)
                 val thumbnailUrl = IkiruUtils.extractThumbnailUrl(item)
                 
-                mangas.add(SManga.create().apply {
-                    url = href.removePrefix(baseUrl)
-                    this.title = IkiruUtils.sanitizeTitle(title)
-                    thumbnail_url = thumbnailUrl
-                })
-            }
-        }
-
-        // Fallback parsing if no results
-        if (mangas.isEmpty()) {
-            document.select("img.wp-post-image").forEach { img ->
-                img.parents().firstOrNull { parent -> 
-                    val href = parent.attr("href")
-                    href.contains("/manga/") && IkiruUtils.isValidMangaUrl(href)
-                }?.let { link ->
+                if (title.isNotBlank()) {
                     mangas.add(SManga.create().apply {
-                        url = link.attr("href").removePrefix(baseUrl)
-                        title = IkiruUtils.sanitizeTitle(img.attr("alt"))
-                        thumbnail_url = IkiruUtils.extractThumbnailUrl(img.parent()!!)
+                        url = href.removePrefix(baseUrl)
+                        this.title = IkiruUtils.sanitizeTitle(title)
+                        thumbnail_url = thumbnailUrl
                     })
                 }
             }
         }
 
-        val hasNextPage = mangas.size >= 18
+        // Fallback parsing for grid layouts
+        if (mangas.isEmpty() || mangas.size < 10) {
+            document.select("div.grid, div[class*='grid']").forEach { grid ->
+                grid.select("""
+                    div:has(> a[href*='/manga/']),
+                    div:has(> div > a[href*='/manga/']),
+                    div:has(a[href*='/manga/'])
+                """.trimIndent()).forEach { item ->
+                    val link = item.selectFirst("a[href*='/manga/']") ?: return@forEach
+                    val href = link.attr("href")
+                    if (!IkiruUtils.isValidMangaUrl(href)) return@forEach
+
+                    val title = extractTitleFromItem(item, link)
+                    val thumbnailUrl = IkiruUtils.extractThumbnailUrl(item)
+
+                    if (title.isNotBlank() && mangas.none { it.url == href.removePrefix(baseUrl) }) {
+                        mangas.add(SManga.create().apply {
+                            url = href.removePrefix(baseUrl)
+                            this.title = IkiruUtils.sanitizeTitle(title)
+                            thumbnail_url = thumbnailUrl
+                        })
+                    }
+                }
+            }
+        }
+
+        val hasNextPage = determineHasNextPage(document, mangas.size)
+
         return MangasPage(mangas.distinctBy { it.url }, hasNextPage)
+    }
+
+    private fun extractTitleFromItem(item: org.jsoup.nodes.Element, link: org.jsoup.nodes.Element): String {
+        return item.selectFirst("""
+            h1, h2, h3, h4, h5, h6,
+            div.text-base, 
+            div.title, 
+            span.font-semibold,
+            .manga-title,
+            .font-bold,
+            .text-lg,
+            .text-xl,
+            div[class*="title"],
+            span[class*="title"]
+        """.trimIndent())?.text()?.trim()
+            ?: link.attr("title").trim()
+            ?: link.selectFirst("img")?.attr("alt")?.trim()
+            ?: ""
+    }
+
+    private fun determineHasNextPage(document: org.jsoup.nodes.Document, mangaCount: Int): Boolean {
+        return when {
+            mangaCount >= 20 -> true
+            document.select("a.next, a:contains(Next), button:contains(Lanjut), button:contains(Next)").isNotEmpty() -> true
+            document.select("div.pagination, .pagination").isNotEmpty() -> true
+            document.select("button:contains(Load More), button[class*='load']").isNotEmpty() -> true
+            document.select("[data-page], [data-next-page]").isNotEmpty() -> true
+            else -> false
+        }
     }
 
     // Manga Details
@@ -130,12 +222,12 @@ class Ikiru : HttpSource() {
 
     override fun chapterListParse(response: Response): List<SChapter> {
         val document = Jsoup.parse(response.body!!.string())
-        
+
         val mangaId = IkiruUtils.findMangaId(document) 
             ?: throw Exception("Manga ID tidak ditemukan")
         val chapterId = IkiruUtils.findChapterId(document) 
             ?: throw Exception("Chapter ID tidak ditemukan")
-        
+
         return ajaxHandler.getChapterList(mangaId, chapterId)
     }
 
@@ -144,21 +236,45 @@ class Ikiru : HttpSource() {
 
     override fun pageListParse(response: Response): List<Page> {
         val document = Jsoup.parse(response.body!!.string())
+        val cloudflareToken = IkiruUtils.extractCloudflareToken(document)
+
         return document.select("""
             section.mx-auto img, 
             section.w-full img, 
             div.reading-content img,
-            img[src*='/wp-content/uploads/']
+            div[class*="reader"] img,
+            div[class*="chapter"] img,
+            img[src*='/wp-content/uploads/'],
+            img[src*='/uploads/'],
+            img[class*="page"],
+            img[id*="image"]
         """.trimIndent()).mapIndexed { index, img ->
-            val imageUrl = img.absUrl("src").ifBlank { 
-                img.absUrl("data-src").ifBlank { 
-                    img.absUrl("data-original") 
-                } 
+            val imageUrl = if (cloudflareToken != null) {
+                var src = img.absUrl("src").ifBlank { 
+                    img.absUrl("data-src").ifBlank { 
+                        img.absUrl("data-original") 
+                    } 
+                }
+                if (src.contains("/uploads/")) {
+                    src = src.replace("/uploads/", "/cdn-cgi/imagedelivery/$cloudflareToken/")
+                }
+                src
+            } else {
+                IkiruUtils.extractImageUrl(img)
             }
             Page(index, "", imageUrl)
-        }
+        }.filter { it.imageUrl!!.isNotBlank() }
+    }
+
+    override fun imageRequest(page: Page): Request {
+        return GET(page.imageUrl!!, headers.newBuilder()
+            .removeAll("Accept")
+            .add("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
+            .removeAll("Referer")
+            .add("Referer", "$baseUrl/")
+            .build()
+        )
     }
 
     override fun imageUrlParse(response: Response): String = throw UnsupportedOperationException("Not used")
-    override fun getFilterList(): FilterList = FilterList()
 }
