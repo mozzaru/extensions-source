@@ -69,7 +69,7 @@ class Ikiru : HttpSource() {
     // Common manga parsing
     private fun parseMangaResponse(response: Response): MangasPage {
         val raw = response.body!!.string()
-        
+
         if (IkiruUtils.checkCloudflareBlock(raw)) {
             throw Exception("Diblokir Cloudflare - Silakan coba lagi nanti")
         }
@@ -82,13 +82,12 @@ class Ikiru : HttpSource() {
             item.selectFirst("a[href^='/manga/']")?.let { link ->
                 val href = link.attr("href")
                 if (!IkiruUtils.isValidMangaUrl(href)) return@forEach
-                
+
                 val title = item.selectFirst("h1, h2, h3, div.text-base")?.text()
                     ?: item.selectFirst("img")?.attr("alt")
                     ?: ""
-                
+
                 val thumbnailUrl = IkiruUtils.extractThumbnailUrl(item)
-                
                 mangas.add(SManga.create().apply {
                     url = href.removePrefix(baseUrl)
                     this.title = IkiruUtils.sanitizeTitle(title)
@@ -112,7 +111,6 @@ class Ikiru : HttpSource() {
                 }
             }
         }
-
         val hasNextPage = mangas.size >= 18
         return MangasPage(mangas.distinctBy { it.url }, hasNextPage)
     }
@@ -126,16 +124,28 @@ class Ikiru : HttpSource() {
     }
 
     // Chapter List
-    override fun chapterListRequest(manga: SManga): Request = GET(baseUrl + manga.url, headers)
+    override fun chapterListRequest(manga: SManga): Request {
+        // Ambil mangaId langsung dari URL atau simpan waktu parse detail page
+        // Misal URL: "/manga-235168/judul-manga"
+        val mangaId = manga.url
+            .substringAfter("manga-")
+            .substringBefore("/")
+            .takeIf { it.isNotBlank() }
+            ?: throw IllegalStateException("Manga ID tidak ditemukan di URL: ${manga.url}")
 
+        return GET("$baseUrl/ajax-call?action=chapter_list&manga_id=$mangaId&page=1", headers)
+    }
+
+    // Di Ikiru.kt
     override fun chapterListParse(response: Response): List<SChapter> {
         val document = Jsoup.parse(response.body!!.string())
-        
-        val mangaId = IkiruUtils.findMangaId(document) 
+
+        val mangaId = IkiruUtils.findMangaId(document)
             ?: throw Exception("Manga ID tidak ditemukan")
-        val chapterId = IkiruUtils.findChapterId(document) 
+        val chapterId = IkiruUtils.findChapterId(document)
             ?: throw Exception("Chapter ID tidak ditemukan")
-        
+
+        // Gunakan ajaxHandler yang sudah memiliki getChapterList optimized
         return ajaxHandler.getChapterList(mangaId, chapterId)
     }
 
