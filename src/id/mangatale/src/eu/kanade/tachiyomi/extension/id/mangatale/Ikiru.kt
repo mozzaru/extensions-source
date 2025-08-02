@@ -58,20 +58,34 @@ class Ikiru : HttpSource() {
         document.select("a[href*=/chapter-]").forEach { a ->
             val chapterUrl = a.attr("href").removePrefix(baseUrl)
             val mangaUrl = chapterUrl.substringBefore("/chapter-")
-    
+        
             val chapterName = a.selectFirst("p")?.text()?.trim().orEmpty()
             val timeText = a.selectFirst("time")?.attr("datetime").orEmpty()
             val uploadTime = parseIsoDate(timeText)
-    
+        
+            val parentDiv = a.closest("div.flex") ?: a.parent()
+        
+            val title = parentDiv?.selectFirst("h1, h2, h3, .text-base")?.text()?.trim().orEmpty()
+            val thumbnail = parentDiv?.selectFirst("img")?.absUrl("src").orEmpty()
+        
             val manga = SManga.create().apply {
                 url = mangaUrl
-                title = "Tidak diketahui"
-                thumbnail_url = null
+                this.title = if (title.isNotBlank()) title else "Tidak diketahui"
+                thumbnail_url = if (thumbnail.isNotBlank()) thumbnail else null
             }
-    
+        
+            val chapter = SChapter.create().apply {
+                url = chapterUrl
+                name = chapterName
+                date_upload = uploadTime
+            }
+        
+            manga.initialized = true
+            manga.author = null // optional
+        
             mangas.add(manga)
         }
-    
+
         val page = response.request.url.queryParameter("the_page")?.toIntOrNull() ?: 1
         val hasNextPage = document.select("a[href*=?the_page=${page + 1}]").isNotEmpty()
     

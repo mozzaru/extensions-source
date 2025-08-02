@@ -1,11 +1,6 @@
 package eu.kanade.tachiyomi.extension.id.mangatale
 
 import org.jsoup.nodes.Document
-import java.text.SimpleDateFormat
-import java.util.Locale
-import java.util.TimeZone
-import java.time.Instant
-import java.time.format.DateTimeFormatter
 
 object IkiruUtils {
 
@@ -95,17 +90,5 @@ object IkiruUtils {
 
     fun isValidMangaUrl(url: String): Boolean {
         return url.isNotBlank() && url.contains("/manga/") && !url.contains("javascript:")
-    }
-
-    private val isoDateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.ENGLISH).apply {
-        timeZone = TimeZone.getTimeZone("Asia/Jakarta")
-    }
-    
-    fun parseIsoDate(isoString: String): Long {
-        return try {
-            isoDateFormat.parse(isoString)?.time ?: 0L
-        } catch (e: Exception) {
-            0L
-        }
     }
 }

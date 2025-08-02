@@ -77,11 +77,11 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             val timeAttr = chapterLink.selectFirst("time")?.attr("datetime")
             val dateElement = findDateElement(chapterLink)
             val dateStr = timeAttr ?: dateElement?.text()?.trim().orEmpty()
-            val uploadTime = if (timeAttr != null) parseIsoDate(timeAttr) else parseChapterDate(dateStr)
+            val uploadTime = if (timeAttr != null) Ikiru().parseIsoDate(timeAttr) else parseChapterDate(dateStr)
 
             return SChapter.create().apply {
-                url = if (href.startsWith("http")) href.removePrefix(baseUrl) else href
-                name = rawName
+                val url = href.removePrefix(baseUrl)
+                name = "$rawName\n${formatDateForDisplay(uploadTime)}"
                 scanlator   = null
                 date_upload = uploadTime
             }
@@ -103,11 +103,11 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             val dateElement = chapterDiv.selectFirst(".chapter-date, .date, .time, .upload-date")
                 ?: findDateElement(chapterDiv)
             val dateStr = timeAttr ?: dateElement?.text()?.trim().orEmpty()
-            val uploadTime = if (timeAttr != null) parseIsoDate(timeAttr) else parseChapterDate(dateStr)
+            val uploadTime = if (timeAttr != null) Ikiru().parseIsoDate(timeAttr) else parseChapterDate(dateStr)
     
             return SChapter.create().apply {
-                url = if (href.startsWith("http")) href.removePrefix(baseUrl) else href
-                name = rawName
+                val url = href.removePrefix(baseUrl)
+                name = "$rawName\n${formatDateForDisplay(uploadTime)}"
                 scanlator = null
                 date_upload = uploadTime
             }
@@ -129,11 +129,11 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             val timeAttr = button.selectFirst("time")?.attr("datetime")
             val dateElement = findDateElement(button)
             val dateStr = timeAttr ?: dateElement?.text()?.trim().orEmpty()
-            val uploadTime = if (timeAttr != null) parseIsoDate(timeAttr) else parseChapterDate(dateStr)
+            val uploadTime = if (timeAttr != null) Ikiru().parseIsoDate(timeAttr) else parseChapterDate(dateStr)
     
             return SChapter.create().apply {
-                url = if (href.startsWith("http")) href.removePrefix(baseUrl) else href
-                name = rawName
+                val url = href.removePrefix(baseUrl)
+                name = "$rawName\n${formatDateForDisplay(uploadTime)}"
                 scanlator = null
                 date_upload = uploadTime
             }
@@ -154,11 +154,11 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             val timeAttr = row.selectFirst("time")?.attr("datetime")
             val dateCell = row.select("td").find { isDateText(it.text()) }
             val dateStr = timeAttr ?: dateCell?.text()?.trim().orEmpty()
-            val uploadTime = if (timeAttr != null) parseIsoDate(timeAttr) else parseChapterDate(dateStr)
+            val uploadTime = if (timeAttr != null) Ikiru().parseIsoDate(timeAttr) else parseChapterDate(dateStr)
     
             return SChapter.create().apply {
-                url = if (href.startsWith("http")) href.removePrefix(baseUrl) else href
-                name = rawName
+                val url = href.removePrefix(baseUrl)
+                name = "$rawName\n${formatDateForDisplay(uploadTime)}"
                 scanlator = null
                 date_upload = uploadTime
             }
@@ -356,6 +356,26 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             Instant.parse(datetime).toEpochMilli()
         } catch (e: Exception) {
             0L
+        }
+    }
+    
+    private fun formatDateForDisplay(timestamp: Long): String {
+        if (timestamp == 0L) return "Unknown"
+    
+        val now = Calendar.getInstance(jakartaTimeZone)
+        val date = Calendar.getInstance(jakartaTimeZone).apply {
+            timeInMillis = timestamp
+        }
+    
+        val diffDays = ((now.timeInMillis - date.timeInMillis) / (1000 * 60 * 60 * 24)).toInt()
+    
+        return when {
+            diffDays == 0 -> "Hari Ini"
+            diffDays == 1 -> "1 hari yang lalu"
+            diffDays in 2..6 -> "$diffDays hari yang lalu"
+            else -> SimpleDateFormat("dd/MM/yyyy", Locale.ENGLISH).apply {
+                timeZone = jakartaTimeZone
+            }.format(Date(timestamp))
         }
     }
 }
