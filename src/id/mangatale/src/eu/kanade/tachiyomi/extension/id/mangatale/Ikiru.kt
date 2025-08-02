@@ -125,15 +125,8 @@ class Ikiru : HttpSource() {
 
     // Chapter List
     override fun chapterListRequest(manga: SManga): Request {
-        // Ambil mangaId langsung dari URL atau simpan waktu parse detail page
-        // Misal URL: "/manga-235168/judul-manga"
-        val mangaId = manga.url
-            .substringAfter("manga-")
-            .substringBefore("/")
-            .takeIf { it.isNotBlank() }
-            ?: throw IllegalStateException("Manga ID tidak ditemukan di URL: ${manga.url}")
-
-        return GET("$baseUrl/ajax-call?action=chapter_list&manga_id=$mangaId&page=1", headers)
+        // Langsung ambil halaman detail, ID diambil nanti dari isinya
+        return GET(baseUrl + manga.url, headers)
     }
 
     // Di Ikiru.kt
