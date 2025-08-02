@@ -75,12 +75,10 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             val dateElement = findDateElement(chapterLink)
             val dateStr     = dateElement?.text()?.trim() ?: ""
             val uploadTime  = parseChapterDate(dateStr)
-            val displayDate = formatDateForDisplay(uploadTime, dateStr)
 
             return SChapter.create().apply {
-                url         = href.removePrefix(baseUrl)
-                // Sisipkan tanggal di baris baru
-                name        = "$rawName\n$displayDate"
+                url = if (href.startsWith("http")) href.removePrefix(baseUrl) else href
+                name = rawName
                 scanlator   = null
                 date_upload = uploadTime
             }
@@ -102,11 +100,10 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
                 ?: findDateElement(chapterDiv)
             val dateStr     = dateElement?.text()?.trim() ?: ""
             val uploadTime  = parseChapterDate(dateStr)
-            val displayDate = formatDateForDisplay(uploadTime, dateStr)
 
             return SChapter.create().apply {
-                url         = href.removePrefix(baseUrl)
-                name        = "$rawName\n$displayDate"
+                url = if (href.startsWith("http")) href.removePrefix(baseUrl) else href
+                name = rawName
                 scanlator   = null
                 date_upload = uploadTime
             }
@@ -129,11 +126,10 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             val dateElement = findDateElement(button)
             val dateStr     = dateElement?.text()?.trim() ?: ""
             val uploadTime  = parseChapterDate(dateStr)
-            val displayDate = formatDateForDisplay(uploadTime, dateStr)
 
             return SChapter.create().apply {
-                url         = href.removePrefix(baseUrl)
-                name        = "$rawName\n$displayDate"
+                url = if (href.startsWith("http")) href.removePrefix(baseUrl) else href
+                name = rawName
                 scanlator   = null
                 date_upload = uploadTime
             }
@@ -154,11 +150,10 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             val dateCell   = row.select("td").find { isDateText(it.text()) }
             val dateStr    = dateCell?.text()?.trim() ?: ""
             val uploadTime = parseChapterDate(dateStr)
-            val displayDate= formatDateForDisplay(uploadTime, dateStr)
 
             return SChapter.create().apply {
-                url         = href.removePrefix(baseUrl)
-                name        = "$rawName\n$displayDate"
+                url = if (href.startsWith("http")) href.removePrefix(baseUrl) else href
+                name = rawName
                 scanlator   = null
                 date_upload = uploadTime
             }
@@ -336,32 +331,6 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
         val defaultTime = Calendar.getInstance(jakartaTimeZone)
         defaultTime.add(Calendar.DAY_OF_MONTH, -7)
         return defaultTime.timeInMillis
-    }
-
-    private fun formatDateForDisplay(timestamp: Long, originalDateString: String): String {
-        if (timestamp == 0L) return "Unknown"
-
-        // Waktu sekarang dan waktu chapter, pakai timezone Jakarta
-        val now = Calendar.getInstance(jakartaTimeZone)
-        val date = Calendar.getInstance(jakartaTimeZone).apply {
-            timeInMillis = timestamp
-        }
-
-        // Hitung selisih hari penuh
-        val diffMillis = now.timeInMillis - date.timeInMillis
-        val diffDays = (diffMillis / (1000 * 60 * 60 * 24)).toInt()
-
-        return when {
-            diffDays == 0 -> "Hari Ini"
-            diffDays == 1 -> "Kemarin"
-            diffDays in 2..6 -> "$diffDays hari yang lalu"
-            else -> {
-                // Untuk >6 hari: format dd/MM/yyyy
-                val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.ENGLISH)
-                sdf.timeZone = jakartaTimeZone
-                sdf.format(Date(timestamp))
-            }
-        }
     }
 
     private fun isSameDay(cal1: Calendar, cal2: Calendar): Boolean {
