@@ -12,6 +12,9 @@ import okhttp3.FormBody
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.Jsoup
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.TimeZone
 
 class Ikiru : HttpSource() {
     override val name = "Ikiru"
@@ -45,14 +48,46 @@ class Ikiru : HttpSource() {
 
     // Latest Updates
     override fun latestUpdatesRequest(page: Int): Request {
-        val body = FormBody.Builder()
-            .add("orderby", "updated")
-            .add("page", page.toString())
-            .build()
-        return POST("$baseUrl/ajax-call?action=advanced_search", headers, body)
+        return GET("$baseUrl/latest-update/?the_page=$page", headers)
     }
 
-    override fun latestUpdatesParse(response: Response): MangasPage = parseMangaResponse(response)
+    override fun latestUpdatesParse(response: Response): MangasPage {
+        val document = Jsoup.parse(response.body!!.string())
+        val mangas = mutableListOf<SManga>()
+
+        val updates = document.select("div.rounded-lg.border.border-divider") // atau class lain jika beda
+
+        for (card in updates) {
+            val mangaLink = card.selectFirst("a[href^=/manga/]") ?: continue
+            val mangaUrl = mangaLink.attr("href").removePrefix(baseUrl)
+            val title = mangaLink.attr("title") ?: mangaLink.text()
+            val thumbnail = card.selectFirst("img")?.absUrl("src")
+
+            val chapterLink = card.selectFirst("a[href*=/chapter-]") ?: continue
+            val chapterName = chapterLink.text()
+            val chapterUrl = chapterLink.attr("href").removePrefix(baseUrl)
+
+            val timeText = card.selectFirst("time")?.attr("datetime") ?: ""
+            val uploadTime = parseIsoDate(timeText)
+
+            val manga = SManga.create().apply {
+                url = mangaUrl
+                this.title = IkiruUtils.sanitizeTitle(title)
+                thumbnail_url = thumbnail
+                initialized = false
+            }
+
+            val chapter = SChapter.create().apply {
+                url = chapterUrl
+                name = chapterName
+                date_upload = uploadTime
+            }
+            mangas.add(manga)
+        }
+
+        val hasNextPage = document.selectFirst("a[aria-label=next]") != null
+        return MangasPage(mangas.distinctBy { it.url }, hasNextPage)
+    }
 
     // Search
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
@@ -164,4 +199,16 @@ class Ikiru : HttpSource() {
 
     override fun imageUrlParse(response: Response): String = throw UnsupportedOperationException("Not used")
     override fun getFilterList(): FilterList = FilterList()
+    
+    private val isoDateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.ENGLISH).apply {
+        timeZone = TimeZone.getTimeZone("Asia/Jakarta")
+    }
+    
+    fun parseIsoDate(isoString: String): Long {
+        return try {
+            isoDateFormat.parse(isoString)?.time ?: 0L
+        } catch (e: Exception) {
+            0L
+        }
+    }
 }

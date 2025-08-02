@@ -38,15 +38,15 @@ class IkiruMangaParser {
     }
 
     private fun extractAuthor(document: Document): String {
-        // Cari blok dengan <h4> atau <h5> yang mengandung kata 'Author'
-        val authorBlock = document.selectFirst(
-            "div:has(h4:contains(Author)), div:has(h5:contains(Author))"
-        ) ?: return "Unknown"
-        // Ambil semua teks <a> atau <p> di dalamnya
-        val names = authorBlock.select("a, p").map { it.text().trim() }
-            .filter { it.isNotEmpty() }
-        return if (names.isNotEmpty()) names.joinToString(", ") else "Unknown"
-    }
+        // Cari elemen teks yang mengandung kata "Author"
+        val label = document.selectFirst("div:matchesOwn(?i)^author\$")?.parent()
+            ?: document.selectFirst("div:matchesOwn(?i)^penulis\$")?.parent()
+            ?: return "Unknown"
+
+        val authorText = label.selectFirst("p, span, a")?.text()?.trim().orEmpty()
+        return if (authorText.isNotEmpty()) authorText else "Unknown"
+        }
+
 
     private fun extractGenres(document: Document): String {
         val genres = document.select("a[href*='/genre/']")
@@ -65,21 +65,17 @@ class IkiruMangaParser {
     }
 
     private fun extractStatus(document: Document): Int {
-        val rawStatus = document.selectFirst(
-            "div:has(h4:matches(Status)), div:has(h5:matches(Status))"
-        )
-        ?.selectFirst("div, p, span")
-        ?.text()?.trim()?.lowercase(Locale.ROOT)
-        ?: ""
+        val label = document.selectFirst("div:matchesOwn(?i)^status\$")?.parent()
+            ?: document.selectFirst("div:matchesOwn(?i)^status manga\$")?.parent()
+            ?: return SManga.UNKNOWN
+
+        val statusText = label.selectFirst("p, span, div")?.text()?.trim()?.lowercase(Locale.ROOT).orEmpty()
+
         return when {
-            rawStatus.contains("ongoing") || rawStatus.contains("berlanjut") ->
-                SManga.ONGOING
-            rawStatus.contains("completed") || rawStatus.contains("selesai") || rawStatus.contains("tamat") ->
-                SManga.COMPLETED
-            rawStatus.contains("hiatus") ->
-                SManga.ON_HIATUS
-            else ->
-                SManga.UNKNOWN
+            statusText.contains("ongoing") || statusText.contains("berlanjut") -> SManga.ONGOING
+            statusText.contains("completed") || statusText.contains("selesai") || statusText.contains("tamat") -> SManga.COMPLETED
+            statusText.contains("hiatus") -> SManga.ON_HIATUS
+            else -> SManga.UNKNOWN
         }
     }
 }
