@@ -38,15 +38,13 @@ class IkiruMangaParser {
     }
 
     private fun extractAuthor(document: Document): String {
-        // Cari elemen teks yang mengandung kata "Author"
-        val label = document.selectFirst("div:matchesOwn(?i)^author\$")?.parent()
-            ?: document.selectFirst("div:matchesOwn(?i)^penulis\$")?.parent()
+        val label = document.selectFirst("div:containsOwn(Author)")?.parent()
+            ?: document.selectFirst("div:containsOwn(Penulis)")?.parent()
             ?: return "Unknown"
 
         val authorText = label.selectFirst("p, span, a")?.text()?.trim().orEmpty()
         return if (authorText.isNotEmpty()) authorText else "Unknown"
-        }
-
+    }
 
     private fun extractGenres(document: Document): String {
         val genres = document.select("a[href*='/genre/']")
@@ -65,8 +63,8 @@ class IkiruMangaParser {
     }
 
     private fun extractStatus(document: Document): Int {
-        val label = document.selectFirst("div:matchesOwn(?i)^status\$")?.parent()
-            ?: document.selectFirst("div:matchesOwn(?i)^status manga\$")?.parent()
+        val label = document.selectFirst("div:containsOwn(Status)")?.parent()
+            ?: document.selectFirst("div:containsOwn(Status Manga)")?.parent()
             ?: return SManga.UNKNOWN
 
         val statusText = label.selectFirst("p, span, div")?.text()?.trim()?.lowercase(Locale.ROOT).orEmpty()

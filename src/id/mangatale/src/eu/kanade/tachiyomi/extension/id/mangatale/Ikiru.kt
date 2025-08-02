@@ -54,38 +54,27 @@ class Ikiru : HttpSource() {
     override fun latestUpdatesParse(response: Response): MangasPage {
         val document = Jsoup.parse(response.body!!.string())
         val mangas = mutableListOf<SManga>()
-
-        val updates = document.select("div.rounded-lg.border.border-divider") // atau class lain jika beda
-
-        for (card in updates) {
-            val mangaLink = card.selectFirst("a[href^=/manga/]") ?: continue
-            val mangaUrl = mangaLink.attr("href").removePrefix(baseUrl)
-            val title = mangaLink.attr("title") ?: mangaLink.text()
-            val thumbnail = card.selectFirst("img")?.absUrl("src")
-
-            val chapterLink = card.selectFirst("a[href*=/chapter-]") ?: continue
-            val chapterName = chapterLink.text()
-            val chapterUrl = chapterLink.attr("href").removePrefix(baseUrl)
-
-            val timeText = card.selectFirst("time")?.attr("datetime") ?: ""
+    
+        document.select("a[href*=/chapter-]").forEach { a ->
+            val chapterUrl = a.attr("href").removePrefix(baseUrl)
+            val mangaUrl = chapterUrl.substringBefore("/chapter-")
+    
+            val chapterName = a.selectFirst("p")?.text()?.trim().orEmpty()
+            val timeText = a.selectFirst("time")?.attr("datetime").orEmpty()
             val uploadTime = parseIsoDate(timeText)
-
+    
             val manga = SManga.create().apply {
                 url = mangaUrl
-                this.title = IkiruUtils.sanitizeTitle(title)
-                thumbnail_url = thumbnail
-                initialized = false
+                title = "Tidak diketahui"
+                thumbnail_url = null
             }
-
-            val chapter = SChapter.create().apply {
-                url = chapterUrl
-                name = chapterName
-                date_upload = uploadTime
-            }
+    
             mangas.add(manga)
         }
-
-        val hasNextPage = document.selectFirst("a[aria-label=next]") != null
+    
+        val page = response.request.url.queryParameter("the_page")?.toIntOrNull() ?: 1
+        val hasNextPage = document.select("a[href*=?the_page=${page + 1}]").isNotEmpty()
+    
         return MangasPage(mangas.distinctBy { it.url }, hasNextPage)
     }
 
