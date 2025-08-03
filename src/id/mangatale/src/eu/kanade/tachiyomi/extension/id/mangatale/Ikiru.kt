@@ -51,48 +51,40 @@ class Ikiru : HttpSource() {
         return GET("$baseUrl/latest-update/?the_page=$page", headers)
     }
 
+    // Di file Ikiru.kt, dalam fungsi latestUpdatesParse
     override fun latestUpdatesParse(response: Response): MangasPage {
         val document = Jsoup.parse(response.body!!.string())
         val mangas = mutableListOf<SManga>()
     
-        // Pilih setiap link chapter dalam kontainer flex
-        document.select("div.flex.space-x-4 a[href*=/chapter-]").forEach { a ->
-            val chapterUrl = a.attr("href").removePrefix(baseUrl)
-            val mangaUrl = chapterUrl.substringBefore("/chapter-")
+        // Perbaikan: Gunakan forEachIndexed untuk menghindari continue
+        document.select("div.flex.space-x-4").forEach { container ->
+            // Cari link manga secara langsung
+            val mangaLink = container.selectFirst("a[href^='/manga/']")
+            val chapterLink = container.selectFirst("a[href*='/chapter-']")
     
-            // Cari div kontainer teks (biasanya sibling img)
-            val infoDiv = a.selectFirst("div.flex-1") 
-                ?: a // fallback ke anchor jika tak ada
+            val mangaUrl = mangaLink?.attr("href")?.removePrefix(baseUrl)
+                ?: chapterLink?.attr("href")?.removePrefix(baseUrl)?.substringBefore("/chapter-")
+                ?: return@forEach  // Gunakan return@forEach sebagai pengganti continue
     
-            // Ambil title & thumbnail dengan safe-call
-            val title = infoDiv.selectFirst("h3.text-lg, h2.text-lg, h1.text-lg, .text-base")
-                ?.text()?.trim().orEmpty()
-            val thumbnail = a.selectFirst("img")
-                ?.absUrl("src")
-                .takeIf { !it.isNullOrBlank() }
-                .orEmpty()
+            // Ambil thumbnail dari gambar di dalam kontainer
+            val thumbnail = container.selectFirst("img")?.absUrl("src") ?: ""
     
-            // Ambil nama chapter & waktu
-            val chapterName = infoDiv.selectFirst("p")
-                ?.text()?.trim().orEmpty().ifBlank { "Chapter ?" }
-            val timeText = infoDiv.selectFirst("time")
-                ?.attr("datetime").orEmpty()
-            val uploadTime = parseIsoDate(timeText)
+            // Ambil judul dari berbagai kemungkinan elemen
+            val title = container.selectFirst("h1, h2, h3, h4, h5, h6, .text-base")?.text()
+                ?: mangaLink?.attr("title")
+                ?: container.selectFirst("img")?.attr("alt")
+                ?: "Tidak diketahui"
     
-            // Buat objek SManga
-            val manga = SManga.create().apply {
+            mangas.add(SManga.create().apply {
                 url = mangaUrl
-                // sanitize title, fallback jika kosong
-                this.title = title.ifBlank { "Tidak diketahui" }
+                this.title = IkiruUtils.sanitizeTitle(title)
                 thumbnail_url = thumbnail.ifBlank { null }
                 initialized = true
-            }
-    
-            mangas.add(manga)
+            })
         }
     
         val currentPage = response.request.url.queryParameter("the_page")?.toIntOrNull() ?: 1
-        val hasNextPage = document.select("a[href*=?the_page=${currentPage + 1}]").isNotEmpty()
+        val hasNextPage = document.select("a[href*='?the_page=${currentPage + 1}']").isNotEmpty()
         return MangasPage(mangas.distinctBy { it.url }, hasNextPage)
     }
 
