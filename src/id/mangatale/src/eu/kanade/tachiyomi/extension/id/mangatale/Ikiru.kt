@@ -56,35 +56,36 @@ class Ikiru : HttpSource() {
         val document = Jsoup.parse(response.body!!.string())
         val mangas = mutableListOf<SManga>()
     
-        // Perbaikan: Gunakan forEachIndexed untuk menghindari continue
         document.select("div.flex.space-x-4").forEach { container ->
-            // Cari link manga secara langsung
-            val mangaLink = container.selectFirst("a[href^='/manga/']")
-            val chapterLink = container.selectFirst("a[href*='/chapter-']")
+            val chapterLink = container.selectFirst("a[href*='/chapter-']") ?: return@forEach
+            val chapterUrl = chapterLink.attr("href").removePrefix(baseUrl)
+            val mangaUrl = chapterUrl.substringBefore("/chapter-")
     
-            val mangaUrl = mangaLink?.attr("href")?.removePrefix(baseUrl)
-                ?: chapterLink?.attr("href")?.removePrefix(baseUrl)?.substringBefore("/chapter-")
-                ?: return@forEach  // Gunakan return@forEach sebagai pengganti continue
-    
-            // Ambil thumbnail dari gambar di dalam kontainer
-            val thumbnail = container.selectFirst("img")?.absUrl("src") ?: ""
-    
-            // Ambil judul dari berbagai kemungkinan elemen
             val title = container.selectFirst("h1, h2, h3, h4, h5, h6, .text-base")?.text()
-                ?: mangaLink?.attr("title")
                 ?: container.selectFirst("img")?.attr("alt")
                 ?: "Tidak diketahui"
     
-            mangas.add(SManga.create().apply {
+            val imageUrl = container.selectFirst("img")?.let {
+                it.absUrl("src").ifBlank {
+                    it.absUrl("data-src").ifBlank {
+                        it.absUrl("data-original")
+                    }
+                }
+            } ?: ""
+    
+            val manga = SManga.create().apply {
                 url = mangaUrl
                 this.title = IkiruUtils.sanitizeTitle(title)
-                thumbnail_url = thumbnail.ifBlank { null }
+                thumbnail_url = imageUrl.ifBlank { null }
                 initialized = true
-            })
+            }
+    
+            mangas.add(manga)
         }
     
         val currentPage = response.request.url.queryParameter("the_page")?.toIntOrNull() ?: 1
         val hasNextPage = document.select("a[href*='?the_page=${currentPage + 1}']").isNotEmpty()
+    
         return MangasPage(mangas.distinctBy { it.url }, hasNextPage)
     }
 
