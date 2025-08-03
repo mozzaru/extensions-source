@@ -55,39 +55,37 @@ class Ikiru : HttpSource() {
         val document = Jsoup.parse(response.body!!.string())
         val mangas = mutableListOf<SManga>()
     
-        document.select("a[href*=/chapter-]").forEach { a ->
+        document.select("div.flex a[href*=/chapter-]").forEach { a ->
             val chapterUrl = a.attr("href").removePrefix(baseUrl)
             val mangaUrl = chapterUrl.substringBefore("/chapter-")
-        
-            val chapterName = a.selectFirst("p")?.text()?.trim().orEmpty()
+    
+            val parent = a.closest("div.flex") ?: a.parent()
+            val title = parent?.selectFirst("h1, h2, h3, .text-base")?.text()?.trim().orEmpty()
+            val thumbnail = parent?.selectFirst("img")?.absUrl("src").orEmpty()
+    
+            val chapterName = a.selectFirst("p")?.text()?.trim().orEmpty().ifBlank { "Chapter ?" }
             val timeText = a.selectFirst("time")?.attr("datetime").orEmpty()
             val uploadTime = parseIsoDate(timeText)
-        
-            val parentDiv = a.closest("div.flex") ?: a.parent()
-        
-            val title = parentDiv?.selectFirst("h1, h2, h3, .text-base")?.text()?.trim().orEmpty()
-            val thumbnail = parentDiv?.selectFirst("img")?.absUrl("src").orEmpty()
-        
+    
             val manga = SManga.create().apply {
                 url = mangaUrl
                 this.title = if (title.isNotBlank()) title else "Tidak diketahui"
                 thumbnail_url = if (thumbnail.isNotBlank()) thumbnail else null
+                initialized = true
             }
-        
+    
             val chapter = SChapter.create().apply {
                 url = chapterUrl
                 name = chapterName
                 date_upload = uploadTime
             }
-        
-            manga.initialized = true
-            manga.author = null // optional
-        
+    
+            // Note: Latest Updates tidak menyimpan chapter list di SManga
             mangas.add(manga)
         }
-
-        val page = response.request.url.queryParameter("the_page")?.toIntOrNull() ?: 1
-        val hasNextPage = document.select("a[href*=?the_page=${page + 1}]").isNotEmpty()
+    
+        val currentPage = response.request.url.queryParameter("the_page")?.toIntOrNull() ?: 1
+        val hasNextPage = document.select("a[href*=?the_page=${currentPage + 1}]").isNotEmpty()
     
         return MangasPage(mangas.distinctBy { it.url }, hasNextPage)
     }
@@ -107,37 +105,39 @@ class Ikiru : HttpSource() {
     // Common manga parsing
     private fun parseMangaResponse(response: Response): MangasPage {
         val raw = response.body!!.string()
-
+    
         if (IkiruUtils.checkCloudflareBlock(raw)) {
             throw Exception("Diblokir Cloudflare - Silakan coba lagi nanti")
         }
-
+    
         val document = Jsoup.parse(raw)
         val mangas = mutableListOf<SManga>()
-
+    
         // Parse manga items
         document.select("div.flex.rounded-lg.overflow-hidden, div.group-data-\\[mode\\=horizontal\\]\\:hidden").forEach { item ->
             item.selectFirst("a[href^='/manga/']")?.let { link ->
                 val href = link.attr("href")
                 if (!IkiruUtils.isValidMangaUrl(href)) return@forEach
-
+    
                 val title = item.selectFirst("h1, h2, h3, div.text-base")?.text()
                     ?: item.selectFirst("img")?.attr("alt")
                     ?: ""
-
+    
                 val thumbnailUrl = IkiruUtils.extractThumbnailUrl(item)
                 mangas.add(SManga.create().apply {
                     url = href.removePrefix(baseUrl)
                     this.title = IkiruUtils.sanitizeTitle(title)
                     thumbnail_url = thumbnailUrl
+                }.apply {
+                    thumbnail_url = if (thumbnail_url.isNullOrBlank()) null else thumbnail_url
                 })
             }
         }
-
+    
         // Fallback parsing if no results
         if (mangas.isEmpty()) {
             document.select("img.wp-post-image").forEach { img ->
-                img.parents().firstOrNull { parent -> 
+                img.parents().firstOrNull { parent ->
                     val href = parent.attr("href")
                     href.contains("/manga/") && IkiruUtils.isValidMangaUrl(href)
                 }?.let { link ->
@@ -145,10 +145,13 @@ class Ikiru : HttpSource() {
                         url = link.attr("href").removePrefix(baseUrl)
                         title = IkiruUtils.sanitizeTitle(img.attr("alt"))
                         thumbnail_url = IkiruUtils.extractThumbnailUrl(img.parent()!!)
+                    }.apply {
+                        thumbnail_url = if (thumbnail_url.isNullOrBlank()) null else thumbnail_url
                     })
                 }
             }
         }
+    
         val hasNextPage = mangas.size >= 18
         return MangasPage(mangas.distinctBy { it.url }, hasNextPage)
     }

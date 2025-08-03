@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.extension.id.mangatale
 
 import org.jsoup.nodes.Document
+import org.jsoup.nodes.Element
 
 object IkiruUtils {
 
@@ -77,15 +78,14 @@ object IkiruUtils {
             .ifBlank { "Tanpa Judul" }
     }
 
-    fun extractThumbnailUrl(element: org.jsoup.nodes.Element): String {
-        return element.selectFirst("img.wp-post-image, img")
-            ?.let { img ->
-                img.absUrl("src").ifBlank { 
-                    img.absUrl("data-src").ifBlank { 
-                        img.absUrl("data-original") 
-                    } 
+    fun extractThumbnailUrl(element: Element): String {
+        return element.select("img").firstNotNullOfOrNull { img: Element ->
+            img.absUrl("src").ifBlank {
+                img.absUrl("data-src").ifBlank {
+                    img.absUrl("data-original")
                 }
-            } ?: ""
+            }
+        }?.trim().orEmpty()
     }
 
     fun isValidMangaUrl(url: String): Boolean {

@@ -80,9 +80,9 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             val uploadTime = if (timeAttr != null) Ikiru().parseIsoDate(timeAttr) else parseChapterDate(dateStr)
 
             return SChapter.create().apply {
-                val url = href.removePrefix(baseUrl)
+                this.url = href.removePrefix(baseUrl)
                 name = "$rawName\n${formatDateForDisplay(uploadTime)}"
-                scanlator   = null
+                scanlator = null
                 date_upload = uploadTime
             }
         } catch (e: Exception) {
@@ -106,7 +106,7 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             val uploadTime = if (timeAttr != null) Ikiru().parseIsoDate(timeAttr) else parseChapterDate(dateStr)
     
             return SChapter.create().apply {
-                val url = href.removePrefix(baseUrl)
+                this.url = href.removePrefix(baseUrl)
                 name = "$rawName\n${formatDateForDisplay(uploadTime)}"
                 scanlator = null
                 date_upload = uploadTime
@@ -132,7 +132,7 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             val uploadTime = if (timeAttr != null) Ikiru().parseIsoDate(timeAttr) else parseChapterDate(dateStr)
     
             return SChapter.create().apply {
-                val url = href.removePrefix(baseUrl)
+                this.url = href.removePrefix(baseUrl)
                 name = "$rawName\n${formatDateForDisplay(uploadTime)}"
                 scanlator = null
                 date_upload = uploadTime
@@ -157,7 +157,7 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             val uploadTime = if (timeAttr != null) Ikiru().parseIsoDate(timeAttr) else parseChapterDate(dateStr)
     
             return SChapter.create().apply {
-                val url = href.removePrefix(baseUrl)
+                this.url = href.removePrefix(baseUrl)
                 name = "$rawName\n${formatDateForDisplay(uploadTime)}"
                 scanlator = null
                 date_upload = uploadTime

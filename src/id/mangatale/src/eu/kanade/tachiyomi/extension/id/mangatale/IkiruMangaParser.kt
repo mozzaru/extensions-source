@@ -8,13 +8,18 @@ class IkiruMangaParser {
 
     fun parseMangaDetails(document: Document): SManga {
         return SManga.create().apply {
-            title = document.selectFirst("h1[itemprop=name]")?.text()?.trim().orEmpty()
+            title = IkiruUtils.sanitizeTitle(
+                document.selectFirst("h1[itemprop=name]")?.text().orEmpty()
+            )
             thumbnail_url = document.selectFirst("div[itemprop=image] img")?.absUrl("src") ?: ""
-
+    
             description = buildDescription(document)
             author = extractAuthor(document)
             genre = extractGenres(document)
             status = extractStatus(document)
+    
+            // Normalisasi thumbnail_url
+            thumbnail_url = if (thumbnail_url.isNullOrBlank()) null else thumbnail_url
         }
     }
 
@@ -38,10 +43,10 @@ class IkiruMangaParser {
     }
 
     private fun extractAuthor(document: Document): String {
-        val label = document.selectFirst("div:containsOwn(Author)")?.parent()
-            ?: document.selectFirst("div:containsOwn(Penulis)")?.parent()
+        val label = document.selectFirst("div:matchesOwn(?i)^author$")?.parent()
+            ?: document.selectFirst("div:matchesOwn(?i)^penulis$")?.parent()
             ?: return "Unknown"
-
+    
         val authorText = label.selectFirst("p, span, a")?.text()?.trim().orEmpty()
         return if (authorText.isNotEmpty()) authorText else "Unknown"
     }
@@ -63,12 +68,12 @@ class IkiruMangaParser {
     }
 
     private fun extractStatus(document: Document): Int {
-        val label = document.selectFirst("div:containsOwn(Status)")?.parent()
-            ?: document.selectFirst("div:containsOwn(Status Manga)")?.parent()
+        val label = document.selectFirst("div:matchesOwn(?i)^status$")?.parent()
+            ?: document.selectFirst("div:matchesOwn(?i)^status manga$")?.parent()
             ?: return SManga.UNKNOWN
-
+    
         val statusText = label.selectFirst("p, span, div")?.text()?.trim()?.lowercase(Locale.ROOT).orEmpty()
-
+    
         return when {
             statusText.contains("ongoing") || statusText.contains("berlanjut") -> SManga.ONGOING
             statusText.contains("completed") || statusText.contains("selesai") || statusText.contains("tamat") -> SManga.COMPLETED
