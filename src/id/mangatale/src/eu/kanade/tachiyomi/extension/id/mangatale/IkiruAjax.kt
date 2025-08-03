@@ -71,49 +71,28 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
     }
 
     private fun parseChaptersFromAjax(document: Document): List<SChapter> {
-        val chapters = mutableListOf<SChapter>()
+        return document.select("a[href*=/chapter-], li.wp-manga-chapter, .eph-num a").mapNotNull { chapterElement ->
+            try {
+                val href = chapterElement.attr("href")
+                if (href.isBlank()) return@mapNotNull null
     
-        // Method 1: Parse dari latest-update page format yang baru
-        document.select("#search-results > div").forEach { item ->
-            val chapterLink = item.selectFirst("a[href*=/chapter-]") ?: return@forEach
-            val href = chapterLink.attr("href")
-            if (href.isBlank() || !href.contains("/chapter-")) return@forEach
+                val chapterName = chapterElement.select(".chapternum, .chapter-title, span").first()?.text()
+                    ?: chapterElement.text()
     
-            // Extract chapter name dari p.inline-block
-            val rawName = item.selectFirst("p.inline-block")?.text()?.trim()
-                ?: chapterLink.text().trim()
-            
-            if (rawName.isBlank()) return@forEach
-            
-            // Extract date dari time element dengan datetime attribute
-            val timeElement = item.selectFirst("time")
-            val uploadTime = if (timeElement != null) {
-                val datetime = timeElement.attr("datetime")
-                if (datetime.isNotBlank()) {
-                    parseIsoDate(datetime)
-                } else {
-                    parseRelativeDate(timeElement.text())
+                val cleanedName = cleanChapterName(chapterName)
+                if (cleanedName.isBlank() || cleanedName == "Unknown Chapter") return@mapNotNull null
+    
+                val uploadTime = findAndParseDate(chapterElement)
+    
+                SChapter.create().apply {
+                    url = href.removePrefix(baseUrl)
+                    name = cleanedName
+                    date_upload = uploadTime
                 }
-            } else {
-                // Fallback ke current time jika tidak ada tanggal
-                System.currentTimeMillis()
+            } catch (e: Exception) {
+                null
             }
-    
-            chapters.add(SChapter.create().apply {
-                url = href.removePrefix(baseUrl)
-                name = cleanChapterName(rawName)
-                date_upload = uploadTime
-            })
-        }
-    
-        // Method 2: Fallback untuk format lama
-        if (chapters.isEmpty()) {
-            document.select("a[href*=/chapter-]").forEach { chapterLink ->
-                parseChapterFromLink(chapterLink)?.let { chapters.add(it) }
-            }
-        }
-    
-        return chapters.distinctBy { it.url }
+        }.distinctBy { it.url }
     }
 
     private fun parseChapterFromLink(chapterLink: Element): SChapter? {
@@ -467,32 +446,27 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
     }
     
     private fun findAndParseDate(element: Element): Long {
-        // Cek time element di current element
-        element.selectFirst("time")?.let { timeEl ->
-            val datetime = timeEl.attr("datetime")
-            if (datetime.isNotBlank()) {
-                return parseIsoDate(datetime)
-            }
-            val timeText = timeEl.text()
-            if (timeText.isNotBlank()) {
-                return parseRelativeDate(timeText)
-            }
+        // 1. Cari elemen <time> dengan atribut datetime
+        element.select("time[datetime], .post-on, .chapter-release-date").first()?.let { timeEl ->
+            timeEl.attr("datetime").takeIf { it.isNotBlank() }?.let { return parseIsoDate(it) }
+            timeEl.text().takeIf { it.isNotBlank() }?.let { return parseRelativeDate(it) }
         }
     
-        // Cek parent elements
-        var parent = element.parent()
-        repeat(3) { // Cek sampai 3 level parent
-            parent?.selectFirst("time")?.let { timeEl ->
-                val datetime = timeEl.attr("datetime")
-                if (datetime.isNotBlank()) {
-                    return parseIsoDate(datetime)
-                }
-            }
-            parent = parent?.parent()
+        // 2. Fallback: Cari di parent terdekat
+        element.parent()?.select("time[datetime], .post-on, .chapter-release-date")?.first()?.let { parentTimeEl ->
+            parentTimeEl.attr("datetime").takeIf { it.isNotBlank() }?.let { return parseIsoDate(it) }
+            parentTimeEl.text().takeIf { it.isNotBlank() }?.let { return parseRelativeDate(it) }
+        }
+        
+        // 3. Fallback: Cari teks tanggal di dalam elemen atau sibling
+        val dateText = element.select(".date, .tps, .chapterdate").first()?.text()
+            ?: element.nextElementSibling()?.text()
+    
+        if (!dateText.isNullOrBlank()) {
+            return parseRelativeDate(dateText)
         }
     
-        // Fallback ke current time
-        return System.currentTimeMillis()
+        return System.currentTimeMillis() // Default jika tidak ditemukan
     }
     
     private fun parseRelativeDate(dateText: String): Long {

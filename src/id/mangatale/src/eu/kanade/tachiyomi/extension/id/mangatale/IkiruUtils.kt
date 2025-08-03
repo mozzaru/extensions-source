@@ -5,32 +5,35 @@ import org.jsoup.nodes.Element
 
 object IkiruUtils {
 
+    // Di file IkiruUtils.kt, ganti fungsi findMangaId
     fun findMangaId(document: Document): String? {
         val body = document.html()
-
-        // Try to find manga_id from ajax-call URL
-        Regex("""manga_id=(\d+)""").find(body)?.let { 
-            return it.groupValues[1] 
+    
+        // 1. Coba dari URL ajax-call di dalam body HTML
+        Regex("""manga_id=(\d+)""").find(body)?.let {
+            return it.groupValues[1]
         }
-
-        // Fallback: search in hx-get attributes
-        document.select("[hx-get]").forEach { element ->
-            Regex("""manga_id=(\d+)""").find(element.attr("hx-get"))?.let { match ->
-                return match.groupValues[1]
-            }
+    
+        // 2. Fallback: Cari di atribut hx-get
+        document.select("[hx-get*='manga_id']").firstNotNullOfOrNull { element ->
+            Regex("""manga_id=(\d+)""").find(element.attr("hx-get"))?.groupValues?.get(1)
+        }?.let { return it }
+    
+        // 3. Fallback: Cari di atribut data-manga-id
+        document.select("[data-manga-id]").firstOrNull()?.attr("data-manga-id")?.let {
+            if (it.isNotBlank()) return it
         }
-
-        // Fallback: search in data attributes
-        document.select("[data-manga-id]").firstOrNull()?.let { element ->
-            return element.attr("data-manga-id")
+        
+        // 4. Fallback: Cari di atribut onclick
+        document.select("[onclick*='manga_id']").firstNotNullOfOrNull { element ->
+            Regex("""manga_id[=:]\s*'?"?(\d+)'?"?""").find(element.attr("onclick"))?.groupValues?.get(1)
+        }?.let { return it }
+    
+        // 5. Fallback: Cari di dalam input-hidden
+        document.select("input[name=manga_id], input#manga_id").firstOrNull()?.`val`()?.let {
+            if (it.isNotBlank()) return it
         }
-
-        // Fallback: search in onclick attributes
-        document.select("[onclick*='manga_id']").forEach { element ->
-            Regex("""manga_id[=:](\d+)""").find(element.attr("onclick"))?.let { match ->
-                return match.groupValues[1]
-            }
-        }
+    
         return null
     }
 

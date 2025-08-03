@@ -55,6 +55,7 @@ class Ikiru : HttpSource() {
     }
 
     // Di file Ikiru.kt, dalam fungsi latestUpdatesParse
+    // Di file Ikiru.kt, ganti fungsi latestUpdatesParse
     override fun latestUpdatesParse(response: Response): MangasPage {
         val raw = response.body!!.string()
     
@@ -65,10 +66,9 @@ class Ikiru : HttpSource() {
         val document = Jsoup.parse(raw)
         val mangas = mutableListOf<SManga>()
     
-        // Parse berdasarkan struktur HTML terbaru dari latest-update
-        document.select("#search-results > div").forEach { item ->
+        // Selektor utama yang lebih andal untuk setiap item manga
+        document.select("#search-results > div, div.w-full[data-post-id]").forEach { item ->
             try {
-                // Cari link manga utama
                 val mangaLinkElement = item.selectFirst("a[href*=/manga/]") ?: return@forEach
                 val mangaUrl = mangaLinkElement.attr("href")
     
@@ -77,54 +77,29 @@ class Ikiru : HttpSource() {
                 val manga = SManga.create().apply {
                     url = mangaUrl.substringAfter(baseUrl)
                     
-                    // Extract title - coba beberapa selector
+                    // Logika title yang lebih kuat dengan beberapa fallback
                     title = IkiruUtils.sanitizeTitle(
-                        item.selectFirst("h1.text-\\[15px\\]")?.text()
-                            ?: item.selectFirst("h1")?.text()  
+                        item.selectFirst("h1, h2, .font-bold")?.text()
                             ?: mangaLinkElement.attr("title")
-                            ?: mangaLinkElement.text()
-                            ?: "Unknown Title"
+                            ?: item.selectFirst("img")?.attr("alt")
+                            ?: "Judul tidak ditemukan"
                     )
     
-                    // Extract thumbnail
                     thumbnail_url = IkiruUtils.extractThumbnailUrl(item)
-                    
                     initialized = true
                 }
     
-                if (manga.title != "Unknown Title" && manga.title.isNotBlank()) {
+                if (manga.title != "Judul tidak ditemukan" && manga.title.isNotBlank()) {
                     mangas.add(manga)
                 }
             } catch (e: Exception) {
-                // Skip item ini jika error
+                // Lanjutkan ke item berikutnya jika terjadi error
             }
         }
     
-        // Fallback jika tidak ada hasil dari method utama
-        if (mangas.isEmpty()) {
-            document.select("div.flex.rounded-lg.overflow-hidden").forEach { item ->
-                item.selectFirst("a[href^='/manga/']")?.let { link ->
-                    val href = link.attr("href")
-                    if (IkiruUtils.isValidMangaUrl(href)) {
-                        val title = item.selectFirst("h1, h2, h3")?.text()
-                            ?: link.attr("title") 
-                            ?: ""
-                        
-                        if (title.isNotBlank()) {
-                            mangas.add(SManga.create().apply {
-                                url = href.removePrefix(baseUrl)
-                                this.title = IkiruUtils.sanitizeTitle(title)
-                                thumbnail_url = IkiruUtils.extractThumbnailUrl(item)
-                            })
-                        }
-                    }
-                }
-            }
-        }
-    
-        // Deteksi halaman berikutnya
+        // Deteksi halaman berikutnya dengan selector yang lebih stabil
         val currentPage = response.request.url.queryParameter("the_page")?.toIntOrNull() ?: 1
-        val hasNextPage = document.select("a[href*='the_page=${currentPage + 1}']").isNotEmpty()
+        val hasNextPage = document.select("a[href*='the_page=${currentPage + 1}'], a.next.page-numbers").isNotEmpty()
     
         return MangasPage(mangas.distinctBy { it.url }, hasNextPage)
     }
