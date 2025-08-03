@@ -91,4 +91,29 @@ object IkiruUtils {
     fun isValidMangaUrl(url: String): Boolean {
         return url.isNotBlank() && url.contains("/manga/") && !url.contains("javascript:")
     }
+    
+    fun extractRating(element: Element): String {
+        return element.selectFirst(".numscore")?.text()?.trim() ?: "N/A"
+    }
+    
+    fun extractTypeWithIcon(element: Element): String {
+        val typeImg = element.selectFirst("span img[alt]")?.attr("alt")
+        return when (typeImg?.lowercase()) {
+            "manga" -> "🇯🇵 Manga"
+            "manhwa" -> "🇰🇷 Manhwa"
+            "manhua" -> "🇨🇳 Manhua"
+            else -> "📖 Unknown"
+        }
+    }
+    
+    fun formatRelativeTime(timeStr: String): String {
+        return when {
+            timeStr.contains("minute") -> timeStr.replace("minutes ago", "menit lalu")
+            timeStr.contains("hour") -> timeStr.replace("hours ago", "jam lalu")
+            timeStr.contains("day") -> timeStr.replace("days ago", "hari lalu")
+            timeStr.contains("week") -> timeStr.replace("weeks ago", "minggu lalu")
+            timeStr.contains("month") -> timeStr.replace("months ago", "bulan lalu")
+            else -> timeStr
+        }
+    }
 }

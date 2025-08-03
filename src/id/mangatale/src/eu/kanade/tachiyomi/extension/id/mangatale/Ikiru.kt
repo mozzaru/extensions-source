@@ -62,7 +62,7 @@ class Ikiru : HttpSource() {
         val document = Jsoup.parse(raw)
         val mangas = mutableListOf<SManga>()
     
-        // Selector yang benar berdasarkan HTML
+        // Selector yang benar berdasarkan HTML struktur
         document.select("#search-results > div").forEach { item ->
             try {
                 // Cari link manga dalam struktur yang ada

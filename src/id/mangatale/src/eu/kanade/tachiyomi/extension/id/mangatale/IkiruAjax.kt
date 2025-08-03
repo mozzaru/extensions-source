@@ -70,19 +70,20 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
         try {
             val href = chapterLink.attr("href")
             if (href.isBlank() || !href.contains("/chapter-")) return null
-
+    
             val rawName = cleanChapterName(chapterLink.text())
             if (rawName.isBlank()) return null
-
+    
             val timeAttr = chapterLink.selectFirst("time")?.attr("datetime")
             val dateElement = findDateElement(chapterLink)
             val dateStr = timeAttr ?: dateElement?.text()?.trim().orEmpty()
-            val uploadTime = if (timeAttr != null) Ikiru().parseIsoDate(timeAttr) else parseChapterDate(dateStr)
-
+            val uploadTime = if (timeAttr != null) parseIsoDate(timeAttr) else parseChapterDate(dateStr)
+    
             return SChapter.create().apply {
                 this.url = href.removePrefix(baseUrl)
-                name = "$rawName\n${formatDateForDisplay(uploadTime)}"
-                scanlator = null
+                // Hanya tampilkan nama chapter, tanpa tanggal di name
+                name = rawName
+                scanlator = formatDateForDisplay(uploadTime) // Pindahkan format tanggal ke scanlator
                 date_upload = uploadTime
             }
         } catch (e: Exception) {
@@ -103,12 +104,12 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             val dateElement = chapterDiv.selectFirst(".chapter-date, .date, .time, .upload-date")
                 ?: findDateElement(chapterDiv)
             val dateStr = timeAttr ?: dateElement?.text()?.trim().orEmpty()
-            val uploadTime = if (timeAttr != null) Ikiru().parseIsoDate(timeAttr) else parseChapterDate(dateStr)
+            val uploadTime = if (timeAttr != null) parseIsoDate(timeAttr) else parseChapterDate(dateStr)
     
             return SChapter.create().apply {
                 this.url = href.removePrefix(baseUrl)
-                name = "$rawName\n${formatDateForDisplay(uploadTime)}"
-                scanlator = null
+                name = rawName
+                scanlator = formatDateForDisplay(uploadTime)
                 date_upload = uploadTime
             }
         } catch (e: Exception) {
@@ -129,12 +130,12 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             val timeAttr = button.selectFirst("time")?.attr("datetime")
             val dateElement = findDateElement(button)
             val dateStr = timeAttr ?: dateElement?.text()?.trim().orEmpty()
-            val uploadTime = if (timeAttr != null) Ikiru().parseIsoDate(timeAttr) else parseChapterDate(dateStr)
+            val uploadTime = if (timeAttr != null) parseIsoDate(timeAttr) else parseChapterDate(dateStr)
     
             return SChapter.create().apply {
                 this.url = href.removePrefix(baseUrl)
-                name = "$rawName\n${formatDateForDisplay(uploadTime)}"
-                scanlator = null
+                name = rawName
+                scanlator = formatDateForDisplay(uploadTime)
                 date_upload = uploadTime
             }
         } catch (e: Exception) {
@@ -154,12 +155,12 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             val timeAttr = row.selectFirst("time")?.attr("datetime")
             val dateCell = row.select("td").find { isDateText(it.text()) }
             val dateStr = timeAttr ?: dateCell?.text()?.trim().orEmpty()
-            val uploadTime = if (timeAttr != null) Ikiru().parseIsoDate(timeAttr) else parseChapterDate(dateStr)
+            val uploadTime = if (timeAttr != null) parseIsoDate(timeAttr) else parseChapterDate(dateStr)
     
             return SChapter.create().apply {
                 this.url = href.removePrefix(baseUrl)
-                name = "$rawName\n${formatDateForDisplay(uploadTime)}"
-                scanlator = null
+                name = rawName
+                scanlator = formatDateForDisplay(uploadTime)
                 date_upload = uploadTime
             }
         } catch (e: Exception) {
@@ -243,69 +244,58 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
 
     private fun parseChapterDate(dateString: String): Long {
         if (dateString.isBlank()) {
-            return getDefaultTimestamp()
+            return System.currentTimeMillis() // Return current time instead of default
         }
-
+    
         val cleaned = dateString.trim()
         val lowerCase = cleaned.lowercase(Locale.ENGLISH)
         val now = Calendar.getInstance(jakartaTimeZone)
-
-        // Try to parse absolute date first
-        val absoluteDate = parseAbsoluteDate(cleaned)
-        if (absoluteDate != null) {
-            return absoluteDate.time
-        }
-
-        // Handle relative terms
+    
+        // Handle "Hari Ini" dan "Baru saja"
         when {
-            lowerCase.contains("hari ini") || lowerCase.contains("today") -> {
+            lowerCase.contains("hari ini") || lowerCase.contains("today") || 
+            lowerCase.contains("baru saja") || lowerCase.contains("just now") -> {
                 return now.timeInMillis
             }
             lowerCase.contains("kemarin") || lowerCase.contains("yesterday") -> {
                 now.add(Calendar.DAY_OF_MONTH, -1)
                 return now.timeInMillis
             }
-            lowerCase.contains("baru saja") || lowerCase.contains("just now") -> {
-                return now.timeInMillis
-            }
-            lowerCase.matches(Regex(""".*\d+\s+menit.*lalu.*""")) || 
-            lowerCase.matches(Regex(""".*\d+\s+minute.*ago.*""")) -> {
-                val minutes = Regex("""\d+""").find(lowerCase)?.value?.toIntOrNull() ?: 0
-                now.add(Calendar.MINUTE, -minutes)
-                return now.timeInMillis
-            }
-            lowerCase.matches(Regex(""".*\d+\s+jam.*lalu.*""")) || 
-            lowerCase.matches(Regex(""".*\d+\s+hour.*ago.*""")) -> {
-                val hours = Regex("""\d+""").find(lowerCase)?.value?.toIntOrNull() ?: 0
-                now.add(Calendar.HOUR_OF_DAY, -hours)
-                return now.timeInMillis
-            }
-            lowerCase.matches(Regex(""".*\d+\s+hari.*lalu.*""")) || 
-            lowerCase.matches(Regex(""".*\d+\s+day.*ago.*""")) -> {
-                val days = Regex("""\d+""").find(lowerCase)?.value?.toIntOrNull() ?: 0
-                now.add(Calendar.DAY_OF_MONTH, -days)
-                return now.timeInMillis
-            }
-            lowerCase.matches(Regex(""".*\d+\s+minggu.*lalu.*""")) || 
-            lowerCase.matches(Regex(""".*\d+\s+week.*ago.*""")) -> {
-                val weeks = Regex("""\d+""").find(lowerCase)?.value?.toIntOrNull() ?: 0
-                now.add(Calendar.WEEK_OF_YEAR, -weeks)
-                return now.timeInMillis
-            }
-            lowerCase.matches(Regex(""".*\d+\s+bulan.*lalu.*""")) || 
-            lowerCase.matches(Regex(""".*\d+\s+month.*ago.*""")) -> {
-                val months = Regex("""\d+""").find(lowerCase)?.value?.toIntOrNull() ?: 0
-                now.add(Calendar.MONTH, -months)
-                return now.timeInMillis
-            }
-            lowerCase.matches(Regex(""".*\d+\s+tahun.*lalu.*""")) || 
-            lowerCase.matches(Regex(""".*\d+\s+year.*ago.*""")) -> {
-                val years = Regex("""\d+""").find(lowerCase)?.value?.toIntOrNull() ?: 0
-                now.add(Calendar.YEAR, -years)
+        }
+    
+        // Parse relative time dengan regex yang lebih akurat
+        val relativePatterns = listOf(
+            Regex("""(\d+)\s*menit.*lalu""") to Calendar.MINUTE,
+            Regex("""(\d+)\s*minute.*ago""") to Calendar.MINUTE,
+            Regex("""(\d+)\s*jam.*lalu""") to Calendar.HOUR_OF_DAY,
+            Regex("""(\d+)\s*hour.*ago""") to Calendar.HOUR_OF_DAY,
+            Regex("""(\d+)\s*hari.*lalu""") to Calendar.DAY_OF_MONTH,
+            Regex("""(\d+)\s*day.*ago""") to Calendar.DAY_OF_MONTH,
+            Regex("""(\d+)\s*minggu.*lalu""") to Calendar.WEEK_OF_YEAR,
+            Regex("""(\d+)\s*week.*ago""") to Calendar.WEEK_OF_YEAR,
+            Regex("""(\d+)\s*bulan.*lalu""") to Calendar.MONTH,
+            Regex("""(\d+)\s*month.*ago""") to Calendar.MONTH,
+            Regex("""(\d+)\s*tahun.*lalu""") to Calendar.YEAR,
+            Regex("""(\d+)\s*year.*ago""") to Calendar.YEAR
+        )
+    
+        for ((pattern, timeUnit) in relativePatterns) {
+            val match = pattern.find(lowerCase)
+            if (match != null) {
+                val amount = match.groupValues[1].toIntOrNull() ?: 0
+                now.add(timeUnit, -amount)
                 return now.timeInMillis
             }
         }
-        return getDefaultTimestamp()
+    
+        // Try to parse absolute date
+        val absoluteDate = parseAbsoluteDate(cleaned)
+        if (absoluteDate != null) {
+            return absoluteDate.time
+        }
+    
+        // Fallback to current time
+        return now.timeInMillis
     }
 
     private fun parseAbsoluteDate(dateString: String): Date? {
@@ -367,15 +357,33 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             timeInMillis = timestamp
         }
     
-        val diffDays = ((now.timeInMillis - date.timeInMillis) / (1000 * 60 * 60 * 24)).toInt()
+        val diffMillis = now.timeInMillis - date.timeInMillis
+        val diffMinutes = (diffMillis / (1000 * 60)).toInt()
+        val diffHours = (diffMillis / (1000 * 60 * 60)).toInt()
+        val diffDays = (diffMillis / (1000 * 60 * 60 * 24)).toInt()
+        val diffWeeks = diffDays / 7
+        val diffMonths = diffDays / 30
     
         return when {
-            diffDays == 0 -> "Hari Ini"
+            diffMinutes < 1 -> "Baru saja"
+            diffMinutes < 60 -> "$diffMinutes menit yang lalu"
+            diffHours < 24 -> {
+                if (isSameDay(now, date)) {
+                    "Hari Ini"
+                } else {
+                    "$diffHours jam yang lalu"
+                }
+            }
             diffDays == 1 -> "1 hari yang lalu"
             diffDays in 2..6 -> "$diffDays hari yang lalu"
-            else -> SimpleDateFormat("dd/MM/yyyy", Locale.ENGLISH).apply {
-                timeZone = jakartaTimeZone
-            }.format(Date(timestamp))
+            diffWeeks == 1 -> "1 minggu yang lalu"
+            diffWeeks in 2..3 -> "$diffWeeks minggu yang lalu"
+            diffMonths == 1 -> "1 bulan yang lalu"
+            diffMonths in 2..11 -> "$diffMonths bulan yang lalu"
+            else -> {
+                val years = diffDays / 365
+                if (years == 1) "1 tahun yang lalu" else "$years tahun yang lalu"
+            }
         }
     }
 }

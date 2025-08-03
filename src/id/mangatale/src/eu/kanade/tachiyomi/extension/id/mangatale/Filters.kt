@@ -24,9 +24,20 @@ class Genre(val id: String, name: String) : Filter.CheckBox(name, false) // Defa
 
 class GenreFilterList(genres: List<Genre>) : Filter.Group<Genre>("Genre", genres)
 
+class RatingFilter : Filter.Select<String>("Rating", arrayOf("Semua", "9.0+", "8.0+", "7.0+", "6.0+")) {
+    fun toUriPart(): String = when (state) {
+        1 -> "9"
+        2 -> "8"
+        3 -> "7"
+        4 -> "6"
+        else -> ""
+    }
+}
+
 fun getFilterListInternal() = FilterList(
     TypeFilter(),
     StatusFilter(),
+    RatingFilter(), // Tambah rating filter
     GenreFilterList(
         listOf(
             Genre("action", "Action"),
@@ -42,9 +53,15 @@ fun getFilterListInternal() = FilterList(
             Genre("isekai", "Isekai"),
             Genre("reincarnation", "Reincarnation"),
             Genre("historical", "Historical"),
-            Genre("manhua", "Manhua"),
-            Genre("manhwa", "Manhwa"),
-            Genre("manga", "Manga"),
+            Genre("slice-of-life", "Slice of Life"), // Tambah genre yang hilang
+            Genre("psychological", "Psychological"),
+            Genre("thriller", "Thriller"),
+            Genre("mystery", "Mystery"),
+            Genre("horror", "Horror"),
+            Genre("shounen", "Shounen"),
+            Genre("seinen", "Seinen"),
+            Genre("josei", "Josei"),
+            Genre("shoujo", "Shoujo"),
         ),
     ),
 )

@@ -43,6 +43,7 @@ class IkiruMangaParser {
     }
 
     private fun extractAuthor(document: Document): String {
+        // Cari elemen dengan label "author" atau "penulis"
         val label = document.select("div").firstOrNull {
             it.ownText().trim().equals("author", ignoreCase = true) ||
             it.ownText().trim().equals("penulis", ignoreCase = true)
@@ -69,16 +70,72 @@ class IkiruMangaParser {
     }
 
     private fun extractStatus(document: Document): Int {
-        val label = document.selectFirst("div:matchesOwn(?i)^status$")?.parent()
-            ?: document.selectFirst("div:matchesOwn(?i)^status manga$")?.parent()
-            ?: return SManga.UNKNOWN
-    
-        val statusText = label.selectFirst("p, span, div")?.text()?.trim()?.lowercase(Locale.ROOT).orEmpty()
-    
+        // JSoup tidak mendukung regex selector seperti :matchesOwn(?i)
+        // Gunakan pendekatan yang lebih sederhana dan reliable
+        
+        // Method 1: Cari berdasarkan text content yang mengandung "status"
+        val statusElement = document.select("div").firstOrNull { element ->
+            val text = element.ownText().trim().lowercase(Locale.ROOT)
+            text == "status" || text == "status manga" || text.contains("status")
+        }?.parent()
+        
+        if (statusElement != null) {
+            val statusText = statusElement.selectFirst("p, span, div")?.text()?.trim()?.lowercase(Locale.ROOT).orEmpty()
+            return parseStatusText(statusText)
+        }
+        
+        // Method 2: Cari berdasarkan class atau struktur HTML yang umum
+        val statusFromClass = document.selectFirst(".status, .manga-status")?.text()?.trim()?.lowercase(Locale.ROOT)
+        if (!statusFromClass.isNullOrEmpty()) {
+            return parseStatusText(statusFromClass)
+        }
+        
+        // Method 3: Cari dalam metadata atau structured data
+        val statusFromMeta = document.selectFirst("meta[property*='status'], meta[name*='status']")
+            ?.attr("content")?.trim()?.lowercase(Locale.ROOT)
+        if (!statusFromMeta.isNullOrEmpty()) {
+            return parseStatusText(statusFromMeta)
+        }
+        
+        // Method 4: Cari berdasarkan label-value pair pattern
+        document.select("div").forEach { div ->
+            val label = div.selectFirst("h4, h5, strong, label")?.text()?.trim()?.lowercase(Locale.ROOT)
+            if (label == "status" || label == "status manga") {
+                val statusText = div.selectFirst("p, span, div:not(:has(h4,h5,strong,label))")
+                    ?.text()?.trim()?.lowercase(Locale.ROOT)
+                if (!statusText.isNullOrEmpty()) {
+                    return parseStatusText(statusText)
+                }
+            }
+        }
+        
+        // Method 5: Fallback - cari berdasarkan pattern umum di website manga
+        val allText = document.text().lowercase(Locale.ROOT)
         return when {
-            statusText.contains("ongoing") || statusText.contains("berlanjut") -> SManga.ONGOING
-            statusText.contains("completed") || statusText.contains("selesai") || statusText.contains("tamat") -> SManga.COMPLETED
-            statusText.contains("hiatus") -> SManga.ON_HIATUS
+            allText.contains("status: ongoing") || allText.contains("status:ongoing") -> SManga.ONGOING
+            allText.contains("status: completed") || allText.contains("status:completed") -> SManga.COMPLETED
+            allText.contains("status: hiatus") || allText.contains("status:hiatus") -> SManga.ON_HIATUS
+            else -> SManga.UNKNOWN
+        }
+    }
+    
+    private fun parseStatusText(statusText: String): Int {
+        return when {
+            statusText.contains("ongoing") || 
+            statusText.contains("berlanjut") || 
+            statusText.contains("continuing") ||
+            statusText.contains("publishing") -> SManga.ONGOING
+            
+            statusText.contains("completed") || 
+            statusText.contains("selesai") || 
+            statusText.contains("tamat") ||
+            statusText.contains("finished") ||
+            statusText.contains("end") -> SManga.COMPLETED
+            
+            statusText.contains("hiatus") ||
+            statusText.contains("pause") ||
+            statusText.contains("discontinued") -> SManga.ON_HIATUS
+            
             else -> SManga.UNKNOWN
         }
     }
