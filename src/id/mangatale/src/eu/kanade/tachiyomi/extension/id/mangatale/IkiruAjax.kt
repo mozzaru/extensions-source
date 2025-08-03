@@ -71,30 +71,29 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             val href = chapterLink.attr("href")
             if (href.isBlank() || !href.contains("/chapter-")) return null
     
-            // Extract chapter number from URL as fallback
-            val chapterNumberFromUrl = Regex("""chapter-(\d+(?:\.\d+)?)""").find(href)?.groupValues?.get(1)
-            
-            var rawName = chapterLink.text().trim()
-            
-            // If name is messy, construct clean name from URL
-            if (rawName.contains("ago") || rawName.length > 20) {
-                rawName = if (chapterNumberFromUrl != null) {
-                    "Chapter $chapterNumberFromUrl"
-                } else {
-                    cleanChapterName(rawName)
-                }
-            } else {
-                rawName = cleanChapterName(rawName)
+            // DAPATKAN NAMA dari elemen <p> di dalam link
+            var rawName = chapterLink.selectFirst("p.inline-block")?.text()?.trim()
+                ?: chapterLink.text() // Fallback ke teks link biasa
+    
+            // Jika nama masih berantakan (misal dari fallback), coba ekstrak dari URL
+            if (rawName.isNullOrBlank() || rawName.contains("ago")) {
+                 val chapterNumberFromUrl = Regex("""chapter-(\d+(?:\.\d+)?)""").find(href)?.groupValues?.get(1)
+                 if (chapterNumberFromUrl != null) {
+                     rawName = "Chapter $chapterNumberFromUrl"
+                 }
             }
             
+            rawName = cleanChapterName(rawName!!) // Bersihkan nama chapter
             if (rawName.isBlank()) return null
     
-            // Parse date from time element or adjacent text
-            val timeAttr = chapterLink.selectFirst("time")?.attr("datetime")
-            val uploadTime = if (timeAttr != null) {
-                parseIsoDate(timeAttr)
+            // PRIORITASKAN tanggal dari elemen <time>
+            val timeElement = chapterLink.selectFirst("time")
+            val datetimeAttr = timeElement?.attr("datetime")
+            
+            val uploadTime = if (!datetimeAttr.isNullOrBlank()) {
+                 parseIsoDate(datetimeAttr)
             } else {
-                // Look for date in parent or sibling elements
+                // Fallback jika <time> tidak ada, cari teks tanggal di sekitar
                 val dateText = findDateInElement(chapterLink)
                 parseChapterDate(dateText)
             }
@@ -102,41 +101,42 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             return SChapter.create().apply {
                 this.url = href.removePrefix(baseUrl)
                 name = rawName
-                scanlator = formatDateForDisplay(uploadTime)
                 date_upload = uploadTime
+                // Gunakan formatDateForDisplay untuk scanlator agar tampilan konsisten
+                scanlator = formatDateForDisplay(uploadTime)
             }
         } catch (e: Exception) {
             return null
         }
     }
-
+    
+    // Ganti juga fungsi parseChapterFromDiv dengan logika yang sama
     private fun parseChapterFromDiv(chapterDiv: Element): SChapter? {
         try {
             val chapterLink = chapterDiv.selectFirst("a[href*=/chapter-]") ?: return null
             val href = chapterLink.attr("href")
             if (href.isBlank()) return null
     
-            // Extract chapter number from URL
-            val chapterNumberFromUrl = Regex("""chapter-(\d+(?:\.\d+)?)""").find(href)?.groupValues?.get(1)
-            
-            var rawName = chapterLink.text().trim()
-            
-            // Clean the name or use URL-based name
-            if (rawName.contains("ago") || rawName.length > 20) {
-                rawName = if (chapterNumberFromUrl != null) {
-                    "Chapter $chapterNumberFromUrl"
-                } else {
-                    cleanChapterName(rawName)
-                }
-            } else {
-                rawName = cleanChapterName(rawName)
+            // DAPATKAN NAMA dari elemen <p> di dalam link
+            var rawName = chapterLink.selectFirst("p.inline-block")?.text()?.trim()
+                ?: chapterDiv.selectFirst(".item-center p")?.text()?.trim() // Alternatif selector
+                ?: chapterLink.text() // Fallback
+    
+            if (rawName.isNullOrBlank() || rawName.contains("ago")) {
+                 val chapterNumberFromUrl = Regex("""chapter-(\d+(?:\.\d+)?)""").find(href)?.groupValues?.get(1)
+                 if (chapterNumberFromUrl != null) {
+                     rawName = "Chapter $chapterNumberFromUrl"
+                 }
             }
-            
+    
+            rawName = cleanChapterName(rawName!!)
             if (rawName.isBlank()) return null
     
-            val timeAttr = chapterDiv.selectFirst("time")?.attr("datetime")
-            val uploadTime = if (timeAttr != null) {
-                parseIsoDate(timeAttr)
+            val timeElement = chapterDiv.selectFirst("time")
+            val datetimeAttr = timeElement?.attr("datetime")
+            
+            val uploadTime = if (!datetimeAttr.isNullOrBlank()) {
+                parseIsoDate(datetimeAttr)
             } else {
                 val dateText = findDateInElement(chapterDiv)
                 parseChapterDate(dateText)
@@ -145,8 +145,8 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             return SChapter.create().apply {
                 this.url = href.removePrefix(baseUrl)
                 name = rawName
-                scanlator = formatDateForDisplay(uploadTime)
                 date_upload = uploadTime
+                scanlator = formatDateForDisplay(uploadTime)
             }
         } catch (e: Exception) {
             return null
@@ -208,22 +208,10 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
     }
 
     private fun cleanChapterName(name: String): String {
-        var cleaned = name.trim()
-        
-        // Remove time-related text (hours ago, days ago, etc)
-        cleaned = cleaned.replace(Regex("""\d+\s+(hours?|days?|weeks?|months?|years?)\s+ago\s*\d*\s*\d*""", RegexOption.IGNORE_CASE), "")
-        cleaned = cleaned.replace(Regex("""\d+\s+(jam|hari|minggu|bulan|tahun)\s+(yang\s+)?lalu""", RegexOption.IGNORE_CASE), "")
-        
-        // Remove trailing numbers and spaces
-        cleaned = cleaned.replace(Regex("""\s+\d+\s*\d*$"""), "")
-        
-        // Normalize chapter format
-        cleaned = cleaned.replace(Regex("""^\s*chapter\s*""", RegexOption.IGNORE_CASE), "Chapter ")
-        
-        // Clean multiple spaces
-        cleaned = cleaned.replace(Regex("""\s+"""), " ").trim()
-        
-        return cleaned
+        // Fungsi pembersihan yang lebih agresif untuk menghapus info tanggal dari nama
+        return name.replace(Regex("""\s+\d+\s+(minutes?|hours?|days?|weeks?|months?|years?)\s+ago.*""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""\s+\d+\s+(menit|jam|hari|minggu|bulan|tahun)\s+(yang\s+)?lalu.*""", RegexOption.IGNORE_CASE), "")
+            .trim()
     }
 
     private fun findDateInElement(element: Element): String {

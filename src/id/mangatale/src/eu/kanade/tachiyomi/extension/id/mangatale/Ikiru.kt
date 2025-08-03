@@ -57,61 +57,55 @@ class Ikiru : HttpSource() {
     // Di file Ikiru.kt, dalam fungsi latestUpdatesParse
     override fun latestUpdatesParse(response: Response): MangasPage {
         val raw = response.body!!.string()
-        
+    
         if (IkiruUtils.checkCloudflareBlock(raw)) {
-            throw Exception("Diblokir Cloudflare - Silakan coba lagi nanti")
+            throw Exception("Diblokir Cloudflare - Silakan coba lagi nanti atau selesaikan captcha di WebView.")
         }
-        
+    
         val document = Jsoup.parse(raw)
         val mangas = mutableListOf<SManga>()
     
-        // SELECTOR YANG DIPERBAIKI - tangkap semua manga card
-        document.select("#search-results > div, .group-data-\\[direction\\=horizontal\\]\\:hidden").forEach { item ->
+        //SELECTOR BARU: Menargetkan setiap div item di dalam #search-results
+        document.select("#search-results > div").forEach { item ->
             try {
-                // Cari link manga dengan selector yang lebih fleksibel
-                val mangaLink = item.selectFirst("a[href*='/manga/'], a[color='primary']")
-                val mangaUrl = mangaLink?.attr("href")?.let { url ->
-                    if (url.startsWith("http")) {
-                        url.substringAfter(baseUrl)
-                    } else {
-                        url
-                    }
-                } ?: return@forEach
+                // Menggunakan selector yang lebih spesifik berdasarkan HTML baru
+                val mangaLinkElement = item.selectFirst("a[href*=/manga/]") ?: return@forEach
+                val mangaUrl = mangaLinkElement.attr("href")
     
-                // Ambil thumbnail dengan prioritas
-                val thumbnail = item.selectFirst("img.wp-post-image, img")?.let { img ->
-                    listOf("src", "data-src", "data-original")
-                        .map { attr -> img.attr(attr) }
-                        .firstOrNull { it.isNotBlank() }
-                } ?: ""
-    
-                // Ambil title dari berbagai kemungkinan lokasi
-                val title = item.selectFirst("h1, .text-\\[15px\\], a[href*='/manga/']")?.text()?.trim()
-                    ?: item.selectFirst("img")?.attr("alt")?.trim()
-                    ?: "Unknown Title"
-    
-                if (title.isBlank() || title == "Unknown Title") return@forEach
+                // Memastikan URL valid sebelum melanjutkan
+                if (!IkiruUtils.isValidMangaUrl(mangaUrl)) return@forEach
     
                 val manga = SManga.create().apply {
-                    url = mangaUrl
-                    this.title = IkiruUtils.sanitizeTitle(title)
-                    thumbnail_url = if (thumbnail.isNotBlank()) {
-                        if (thumbnail.startsWith("http")) thumbnail else baseUrl + thumbnail
-                    } else null
+                    // Ekstrak URL
+                    url = mangaUrl.substringAfter(baseUrl)
+    
+                    // Ekstrak Judul
+                    title = IkiruUtils.sanitizeTitle(
+                        item.selectFirst("h1.text-\\[15px\\]")?.text()
+                            ?: mangaLinkElement.attr("title")
+                            ?: "Judul tidak ditemukan"
+                    )
+    
+                    // Ekstrak Thumbnail
+                    thumbnail_url = IkiruUtils.extractThumbnailUrl(item)
+                    
+                    // Set initialized agar tidak perlu fetch detail lagi dari list
                     initialized = true
                 }
     
-                mangas.add(manga)
-                
+                // Hanya tambahkan jika judul valid
+                if (manga.title != "Judul tidak ditemukan") {
+                    mangas.add(manga)
+                }
             } catch (e: Exception) {
+                // Lanjutkan ke item berikutnya jika terjadi error
                 e.printStackTrace()
             }
         }
     
-        // Perbaiki deteksi halaman selanjutnya
+        // Deteksi halaman selanjutnya yang lebih andal
         val currentPage = response.request.url.queryParameter("the_page")?.toIntOrNull() ?: 1
-        val hasNextPage = document.selectFirst("a[href*='the_page=${currentPage + 1}']") != null || 
-                         mangas.size >= 18 // fallback berdasarkan jumlah item
+        val hasNextPage = document.select("a.flex.items-center.justify-center[href*='the_page=${currentPage + 1}']").isNotEmpty()
     
         return MangasPage(mangas.distinctBy { it.url }, hasNextPage)
     }
