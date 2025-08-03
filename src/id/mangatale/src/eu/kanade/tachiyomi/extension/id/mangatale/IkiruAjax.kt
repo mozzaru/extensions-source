@@ -19,51 +19,101 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
 
     private val jakartaTimeZone = TimeZone.getTimeZone("Asia/Jakarta")
 
-    fun getChapterList(mangaId: String, @Suppress("UNUSED_PARAMETER") chapterId: String): List<SChapter> {
-        val ajaxUrl = "$baseUrl/ajax-call?action=chapter_list&manga_id=$mangaId&page=1"
-        return try {
-            val request = Request.Builder()
-                .url(ajaxUrl)
-                .headers(headers)
-                .build()
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return emptyList()
-                val body = response.body?.string().orEmpty()
-                val doc = Jsoup.parse(body)
-                // Reuse parseChaptersFromAjax untuk parsing full list
-                parseChaptersFromAjax(doc)
-                    .distinctBy { it.url }
-                    .sortedByDescending { extractChapterNumber(it.name) }
+    // Fungsi ini tidak lagi memerlukan chapterId.
+    fun getChapterList(mangaId: String): List<SChapter> {
+        val allChapters = mutableListOf<SChapter>()
+        var page = 1
+        var hasMoreChapters = true
+    
+        while (hasMoreChapters) {
+            // Membuat URL dengan parameter halaman yang dinamis
+            val ajaxUrl = "$baseUrl/ajax-call?action=chapter_list&manga_id=$mangaId&page=$page"
+            try {
+                val request = Request.Builder()
+                    .url(ajaxUrl)
+                    .headers(headers)
+                    .build()
+    
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        hasMoreChapters = false
+                        return@use
+                    }
+    
+                    val body = response.body?.string().orEmpty()
+                    // Hentikan loop jika halaman kosong atau tidak ada chapter
+                    if (body.isBlank() || body.contains("No chapters found") || body.contains("Tidak ada chapter")) {
+                        hasMoreChapters = false
+                        return@use
+                    }
+    
+                    val doc = Jsoup.parse(body)
+                    val newChapters = parseChaptersFromAjax(doc)
+    
+                    if (newChapters.isNotEmpty()) {
+                        allChapters.addAll(newChapters)
+                        page++ // Lanjut ke halaman berikutnya
+                    } else {
+                        // Berhenti jika tidak ada chapter lagi yang di-parse
+                        hasMoreChapters = false
+                    }
+                }
+            } catch (e: Exception) {
+                // Hentikan pengambilan jika terjadi error (misal: timeout)
+                hasMoreChapters = false
             }
-        } catch (e: Exception) {
-            println("Error fetching chapter_list: ${e.message}")
-            emptyList()
         }
+    
+        // Mengembalikan daftar chapter yang sudah lengkap, unik, dan terurut
+        return allChapters
+            .distinctBy { it.url }
+            .sortedByDescending { extractChapterNumber(it.name) }
     }
 
     private fun parseChaptersFromAjax(document: Document): List<SChapter> {
         val chapters = mutableListOf<SChapter>()
-
-        // Method 1: Look for direct chapter links with ikiru.wtf structure
-        document.select("a[href*=/chapter-]").forEach { chapterLink ->
-            parseChapterFromLink(chapterLink)?.let { chapters.add(it) }
+    
+        // Method 1: Parse dari latest-update page format yang baru
+        document.select("#search-results > div").forEach { item ->
+            val chapterLink = item.selectFirst("a[href*=/chapter-]") ?: return@forEach
+            val href = chapterLink.attr("href")
+            if (href.isBlank() || !href.contains("/chapter-")) return@forEach
+    
+            // Extract chapter name dari p.inline-block
+            val rawName = item.selectFirst("p.inline-block")?.text()?.trim()
+                ?: chapterLink.text().trim()
+            
+            if (rawName.isBlank()) return@forEach
+            
+            // Extract date dari time element dengan datetime attribute
+            val timeElement = item.selectFirst("time")
+            val uploadTime = if (timeElement != null) {
+                val datetime = timeElement.attr("datetime")
+                if (datetime.isNotBlank()) {
+                    parseIsoDate(datetime)
+                } else {
+                    parseRelativeDate(timeElement.text())
+                }
+            } else {
+                // Fallback ke current time jika tidak ada tanggal
+                System.currentTimeMillis()
+            }
+    
+            chapters.add(SChapter.create().apply {
+                url = href.removePrefix(baseUrl)
+                name = cleanChapterName(rawName)
+                date_upload = uploadTime
+            })
         }
-
-        // Method 2: Look for chapter entries in list format (common in ikiru.wtf)
-        document.select("div.chapter-item, .chapter-list-item, .chapter-entry").forEach { chapterDiv ->
-            parseChapterFromDiv(chapterDiv)?.let { chapters.add(it) }
+    
+        // Method 2: Fallback untuk format lama
+        if (chapters.isEmpty()) {
+            document.select("a[href*=/chapter-]").forEach { chapterLink ->
+                parseChapterFromLink(chapterLink)?.let { chapters.add(it) }
+            }
         }
-
-        // Method 3: Look for button elements with onclick navigation
-        document.select("button[onclick*='location.href'], button[onclick*='window.location']").forEach { button ->
-            parseChapterFromButton(button)?.let { chapters.add(it) }
-        }
-
-        // Method 4: Look for table rows (alternative layout)
-        document.select("tr").forEach { row ->
-            parseChapterFromTableRow(row)?.let { chapters.add(it) }
-        }
-        return chapters
+    
+        return chapters.distinctBy { it.url }
     }
 
     private fun parseChapterFromLink(chapterLink: Element): SChapter? {
@@ -71,39 +121,28 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             val href = chapterLink.attr("href")
             if (href.isBlank() || !href.contains("/chapter-")) return null
     
-            // DAPATKAN NAMA dari elemen <p> di dalam link
+            // Ambil nama chapter
             var rawName = chapterLink.selectFirst("p.inline-block")?.text()?.trim()
-                ?: chapterLink.text() // Fallback ke teks link biasa
+                ?: chapterLink.selectFirst("h1.text-\\[15px\\]")?.text()?.trim()
+                ?: chapterLink.text().trim()
     
-            // Jika nama masih berantakan (misal dari fallback), coba ekstrak dari URL
-            if (rawName.isNullOrBlank() || rawName.contains("ago")) {
-                 val chapterNumberFromUrl = Regex("""chapter-(\d+(?:\.\d+)?)""").find(href)?.groupValues?.get(1)
-                 if (chapterNumberFromUrl != null) {
-                     rawName = "Chapter $chapterNumberFromUrl"
-                 }
+            // Jika nama masih kosong atau mengandung waktu relatif, extract dari URL
+            if (rawName.isBlank() || rawName.contains("ago") || rawName.contains("lalu")) {
+                val chapterNum = Regex("""chapter-(\d+(?:\.\d+)?)""").find(href)?.groupValues?.get(1)
+                if (chapterNum != null) {
+                    rawName = "Chapter $chapterNum"
+                }
             }
-            
-            rawName = cleanChapterName(rawName!!) // Bersihkan nama chapter
+    
             if (rawName.isBlank()) return null
     
-            // PRIORITASKAN tanggal dari elemen <time>
-            val timeElement = chapterLink.selectFirst("time")
-            val datetimeAttr = timeElement?.attr("datetime")
-            
-            val uploadTime = if (!datetimeAttr.isNullOrBlank()) {
-                 parseIsoDate(datetimeAttr)
-            } else {
-                // Fallback jika <time> tidak ada, cari teks tanggal di sekitar
-                val dateText = findDateInElement(chapterLink)
-                parseChapterDate(dateText)
-            }
+            // Parse tanggal dari time element atau parent element
+            val uploadTime = findAndParseDate(chapterLink)
     
             return SChapter.create().apply {
-                this.url = href.removePrefix(baseUrl)
-                name = rawName
+                url = href.removePrefix(baseUrl)
+                name = cleanChapterName(rawName)
                 date_upload = uploadTime
-                // Gunakan formatDateForDisplay untuk scanlator agar tampilan konsisten
-                scanlator = formatDateForDisplay(uploadTime)
             }
         } catch (e: Exception) {
             return null
@@ -146,7 +185,6 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
                 this.url = href.removePrefix(baseUrl)
                 name = rawName
                 date_upload = uploadTime
-                scanlator = formatDateForDisplay(uploadTime)
             }
         } catch (e: Exception) {
             return null
@@ -174,7 +212,6 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             return SChapter.create().apply {
                 this.url = href.removePrefix(baseUrl)
                 name = rawName
-                scanlator = formatDateForDisplay(uploadTime)
                 date_upload = uploadTime
             }
         } catch (e: Exception) {
@@ -199,7 +236,6 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             return SChapter.create().apply {
                 this.url = href.removePrefix(baseUrl)
                 name = rawName
-                scanlator = formatDateForDisplay(uploadTime)
                 date_upload = uploadTime
             }
         } catch (e: Exception) {
@@ -208,10 +244,12 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
     }
 
     private fun cleanChapterName(name: String): String {
-        // Fungsi pembersihan yang lebih agresif untuk menghapus info tanggal dari nama
-        return name.replace(Regex("""\s+\d+\s+(minutes?|hours?|days?|weeks?|months?|years?)\s+ago.*""", RegexOption.IGNORE_CASE), "")
+        return name
+            .replace(Regex("""\s+\d+\s+(minutes?|hours?|days?|weeks?|months?|years?)\s+ago.*""", RegexOption.IGNORE_CASE), "")
             .replace(Regex("""\s+\d+\s+(menit|jam|hari|minggu|bulan|tahun)\s+(yang\s+)?lalu.*""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""^\s*Chapter\s*""", RegexOption.IGNORE_CASE), "Chapter ")
             .trim()
+            .ifBlank { "Unknown Chapter" }
     }
 
     private fun findDateInElement(element: Element): String {
@@ -281,10 +319,18 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
     }
 
     private fun extractChapterNumber(name: String): Float {
-        val numberMatch = Regex("""chapter\s*(\d+(?:\.\d+)?)|(\d+(?:\.\d+)?)""", RegexOption.IGNORE_CASE).find(name)
-        return numberMatch?.let { 
-            it.groups[1]?.value?.toFloatOrNull() ?: it.groups[2]?.value?.toFloatOrNull() 
-        } ?: 0f
+        val patterns = listOf(
+            Regex("""chapter\s*(\d+(?:\.\d+)?)""", RegexOption.IGNORE_CASE),
+            Regex("""(\d+(?:\.\d+)?)""")
+        )
+        
+        for (pattern in patterns) {
+            pattern.find(name)?.let { match ->
+                return match.groupValues[1].toFloatOrNull() ?: 0f
+            }
+        }
+        
+        return 0f
     }
 
     private fun parseChapterDate(dateString: String): Long {
@@ -418,5 +464,72 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             diffDays < 365 -> "${diffDays / 30} bulan yang lalu"
             else -> "${diffDays / 365} tahun yang lalu"
         }
+    }
+    
+    private fun findAndParseDate(element: Element): Long {
+        // Cek time element di current element
+        element.selectFirst("time")?.let { timeEl ->
+            val datetime = timeEl.attr("datetime")
+            if (datetime.isNotBlank()) {
+                return parseIsoDate(datetime)
+            }
+            val timeText = timeEl.text()
+            if (timeText.isNotBlank()) {
+                return parseRelativeDate(timeText)
+            }
+        }
+    
+        // Cek parent elements
+        var parent = element.parent()
+        repeat(3) { // Cek sampai 3 level parent
+            parent?.selectFirst("time")?.let { timeEl ->
+                val datetime = timeEl.attr("datetime")
+                if (datetime.isNotBlank()) {
+                    return parseIsoDate(datetime)
+                }
+            }
+            parent = parent?.parent()
+        }
+    
+        // Fallback ke current time
+        return System.currentTimeMillis()
+    }
+    
+    private fun parseRelativeDate(dateText: String): Long {
+        if (dateText.isBlank()) return System.currentTimeMillis()
+        
+        val now = System.currentTimeMillis()
+        val text = dateText.lowercase().trim()
+        
+        // Handle specific patterns
+        when {
+            text.contains("baru saja") || text.contains("just now") -> return now
+            text.contains("hari ini") || text.contains("today") -> return now
+            text.contains("kemarin") || text.contains("yesterday") -> 
+                return now - (24 * 60 * 60 * 1000)
+        }
+        
+        // Parse numeric relative time
+        val patterns = mapOf(
+            Regex("""(\d+)\s*menit.*lalu""") to (60 * 1000L),
+            Regex("""(\d+)\s*minutes?\s+ago""") to (60 * 1000L),
+            Regex("""(\d+)\s*jam.*lalu""") to (60 * 60 * 1000L),
+            Regex("""(\d+)\s*hours?\s+ago""") to (60 * 60 * 1000L),
+            Regex("""(\d+)\s*hari.*lalu""") to (24 * 60 * 60 * 1000L),
+            Regex("""(\d+)\s*days?\s+ago""") to (24 * 60 * 60 * 1000L),
+            Regex("""(\d+)\s*minggu.*lalu""") to (7 * 24 * 60 * 60 * 1000L),
+            Regex("""(\d+)\s*weeks?\s+ago""") to (7 * 24 * 60 * 60 * 1000L),
+            Regex("""(\d+)\s*bulan.*lalu""") to (30L * 24 * 60 * 60 * 1000L),
+            Regex("""(\d+)\s*months?\s+ago""") to (30L * 24 * 60 * 60 * 1000L)
+        )
+        
+        for ((pattern, multiplier) in patterns) {
+            pattern.find(text)?.let { match ->
+                val amount = match.groupValues[1].toLongOrNull() ?: 0
+                return now - (amount * multiplier)
+            }
+        }
+        
+        return now
     }
 }

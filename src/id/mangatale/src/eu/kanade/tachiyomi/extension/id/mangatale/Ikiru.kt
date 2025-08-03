@@ -65,47 +65,66 @@ class Ikiru : HttpSource() {
         val document = Jsoup.parse(raw)
         val mangas = mutableListOf<SManga>()
     
-        //SELECTOR BARU: Menargetkan setiap div item di dalam #search-results
+        // Parse berdasarkan struktur HTML terbaru dari latest-update
         document.select("#search-results > div").forEach { item ->
             try {
-                // Menggunakan selector yang lebih spesifik berdasarkan HTML baru
+                // Cari link manga utama
                 val mangaLinkElement = item.selectFirst("a[href*=/manga/]") ?: return@forEach
                 val mangaUrl = mangaLinkElement.attr("href")
     
-                // Memastikan URL valid sebelum melanjutkan
                 if (!IkiruUtils.isValidMangaUrl(mangaUrl)) return@forEach
     
                 val manga = SManga.create().apply {
-                    // Ekstrak URL
                     url = mangaUrl.substringAfter(baseUrl)
-    
-                    // Ekstrak Judul
+                    
+                    // Extract title - coba beberapa selector
                     title = IkiruUtils.sanitizeTitle(
                         item.selectFirst("h1.text-\\[15px\\]")?.text()
+                            ?: item.selectFirst("h1")?.text()  
                             ?: mangaLinkElement.attr("title")
-                            ?: "Judul tidak ditemukan"
+                            ?: mangaLinkElement.text()
+                            ?: "Unknown Title"
                     )
     
-                    // Ekstrak Thumbnail
+                    // Extract thumbnail
                     thumbnail_url = IkiruUtils.extractThumbnailUrl(item)
                     
-                    // Set initialized agar tidak perlu fetch detail lagi dari list
                     initialized = true
                 }
     
-                // Hanya tambahkan jika judul valid
-                if (manga.title != "Judul tidak ditemukan") {
+                if (manga.title != "Unknown Title" && manga.title.isNotBlank()) {
                     mangas.add(manga)
                 }
             } catch (e: Exception) {
-                // Lanjutkan ke item berikutnya jika terjadi error
-                e.printStackTrace()
+                // Skip item ini jika error
             }
         }
     
-        // Deteksi halaman selanjutnya yang lebih andal
+        // Fallback jika tidak ada hasil dari method utama
+        if (mangas.isEmpty()) {
+            document.select("div.flex.rounded-lg.overflow-hidden").forEach { item ->
+                item.selectFirst("a[href^='/manga/']")?.let { link ->
+                    val href = link.attr("href")
+                    if (IkiruUtils.isValidMangaUrl(href)) {
+                        val title = item.selectFirst("h1, h2, h3")?.text()
+                            ?: link.attr("title") 
+                            ?: ""
+                        
+                        if (title.isNotBlank()) {
+                            mangas.add(SManga.create().apply {
+                                url = href.removePrefix(baseUrl)
+                                this.title = IkiruUtils.sanitizeTitle(title)
+                                thumbnail_url = IkiruUtils.extractThumbnailUrl(item)
+                            })
+                        }
+                    }
+                }
+            }
+        }
+    
+        // Deteksi halaman berikutnya
         val currentPage = response.request.url.queryParameter("the_page")?.toIntOrNull() ?: 1
-        val hasNextPage = document.select("a.flex.items-center.justify-center[href*='the_page=${currentPage + 1}']").isNotEmpty()
+        val hasNextPage = document.select("a[href*='the_page=${currentPage + 1}']").isNotEmpty()
     
         return MangasPage(mangas.distinctBy { it.url }, hasNextPage)
     }
@@ -191,16 +210,15 @@ class Ikiru : HttpSource() {
     }
 
     // Di Ikiru.kt
-    override fun chapterListParse(response: Response): List<SChapter> {
+    // Di dalam file Ikiru.kt
+override fun chapterListParse(response: Response): List<SChapter> {
         val document = Jsoup.parse(response.body!!.string())
-
+    
         val mangaId = IkiruUtils.findMangaId(document)
             ?: throw Exception("Manga ID tidak ditemukan")
-        val chapterId = IkiruUtils.findChapterId(document)
-            ?: throw Exception("Chapter ID tidak ditemukan")
-
-        // Gunakan ajaxHandler yang sudah memiliki getChapterList optimized
-        return ajaxHandler.getChapterList(mangaId, chapterId)
+        
+        // Panggil fungsi yang sudah diperbaiki tanpa chapterId
+        return ajaxHandler.getChapterList(mangaId)
     }
 
     // Page List
