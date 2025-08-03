@@ -53,38 +53,73 @@ class Ikiru : HttpSource() {
 
     // Di file Ikiru.kt, dalam fungsi latestUpdatesParse
     override fun latestUpdatesParse(response: Response): MangasPage {
-        val document = Jsoup.parse(response.body!!.string())
+        val raw = response.body!!.string()
+        
+        if (IkiruUtils.checkCloudflareBlock(raw)) {
+            throw Exception("Diblokir Cloudflare - Silakan coba lagi nanti")
+        }
+        
+        val document = Jsoup.parse(raw)
         val mangas = mutableListOf<SManga>()
     
-        document.select("div.flex.space-x-4").forEach { container ->
-            val chapterLink = container.selectFirst("a[href*='/chapter-']") ?: return@forEach
-            val chapterUrl = chapterLink.attr("href").removePrefix(baseUrl)
-            val mangaUrl = chapterUrl.substringBefore("/chapter-")
-    
-            val title = container.selectFirst("h1, h2, h3, h4, h5, h6, .text-base")?.text()
-                ?: container.selectFirst("img")?.attr("alt")
-                ?: "Tidak diketahui"
-    
-            val imageUrl = container.selectFirst("img")?.let {
-                it.absUrl("src").ifBlank {
-                    it.absUrl("data-src").ifBlank {
-                        it.absUrl("data-original")
+        // Selector yang benar berdasarkan HTML
+        document.select("#search-results > div").forEach { item ->
+            try {
+                // Cari link manga dalam struktur yang ada
+                val mangaLink = item.selectFirst("a[href*='/manga/']")
+                val mangaUrl = mangaLink?.attr("href")?.let { url ->
+                    // Pastikan URL relatif
+                    if (url.startsWith("http")) {
+                        url.substringAfter(baseUrl)
+                    } else {
+                        url
                     }
+                } ?: return@forEach
+    
+                // Ambil thumbnail dari img dengan prioritas
+                val thumbnail = item.selectFirst("img.wp-post-image")?.let { img ->
+                    img.attr("src").ifBlank { 
+                        img.attr("data-src") 
+                    }
+                } ?: item.selectFirst("img")?.attr("src") ?: ""
+    
+                // Ambil title dengan prioritas dari berbagai elemen
+                val title = item.selectFirst("h1")?.text()?.trim()
+                    ?: item.selectFirst("a[href*='/manga/']")?.text()?.trim()
+                    ?: item.selectFirst("img")?.attr("alt")?.trim()
+                    ?: "Unknown Title"
+    
+                // Skip jika title kosong atau hanya whitespace
+                if (title.isBlank() || title == "Unknown Title") return@forEach
+    
+                // Buat manga object
+                val manga = SManga.create().apply {
+                    url = mangaUrl
+                    this.title = IkiruUtils.sanitizeTitle(title)
+                    thumbnail_url = if (thumbnail.isNotBlank()) {
+                        if (thumbnail.startsWith("http")) thumbnail else baseUrl + thumbnail
+                    } else null
+                    initialized = true
                 }
-            } ?: ""
     
-            val manga = SManga.create().apply {
-                url = mangaUrl
-                this.title = IkiruUtils.sanitizeTitle(title)
-                thumbnail_url = imageUrl.ifBlank { null }
-                initialized = true
+                mangas.add(manga)
+                
+            } catch (e: Exception) {
+                // Log error tapi lanjutkan parsing item lain
+                e.printStackTrace()
             }
-    
-            mangas.add(manga)
         }
     
+        // Handle pagination - cek struktur pagination yang benar
         val currentPage = response.request.url.queryParameter("the_page")?.toIntOrNull() ?: 1
-        val hasNextPage = document.select("a[href*='?the_page=${currentPage + 1}']").isNotEmpty()
+        
+        // Cari tombol next dengan berbagai kemungkinan selector
+        val hasNextPage = document.selectFirst(
+            "a[href*='the_page=${currentPage + 1}'], " +
+            "a:contains(Next), " +
+            "a:contains(»), " +
+            ".pagination a:last-child:not(.current)"
+        ) != null
     
         return MangasPage(mangas.distinctBy { it.url }, hasNextPage)
     }
