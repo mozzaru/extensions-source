@@ -55,38 +55,44 @@ class Ikiru : HttpSource() {
         val document = Jsoup.parse(response.body!!.string())
         val mangas = mutableListOf<SManga>()
     
-        document.select("div.flex a[href*=/chapter-]").forEach { a ->
+        // Pilih setiap link chapter dalam kontainer flex
+        document.select("div.flex.space-x-4 a[href*=/chapter-]").forEach { a ->
             val chapterUrl = a.attr("href").removePrefix(baseUrl)
             val mangaUrl = chapterUrl.substringBefore("/chapter-")
     
-            val parent = a.closest("div.flex") ?: a.parent()
-            val title = parent?.selectFirst("h1, h2, h3, .text-base")?.text()?.trim().orEmpty()
-            val thumbnail = parent?.selectFirst("img")?.absUrl("src").orEmpty()
+            // Cari div kontainer teks (biasanya sibling img)
+            val infoDiv = a.selectFirst("div.flex-1") 
+                ?: a // fallback ke anchor jika tak ada
     
-            val chapterName = a.selectFirst("p")?.text()?.trim().orEmpty().ifBlank { "Chapter ?" }
-            val timeText = a.selectFirst("time")?.attr("datetime").orEmpty()
+            // Ambil title & thumbnail dengan safe-call
+            val title = infoDiv.selectFirst("h3.text-lg, h2.text-lg, h1.text-lg, .text-base")
+                ?.text()?.trim().orEmpty()
+            val thumbnail = a.selectFirst("img")
+                ?.absUrl("src")
+                .takeIf { !it.isNullOrBlank() }
+                .orEmpty()
+    
+            // Ambil nama chapter & waktu
+            val chapterName = infoDiv.selectFirst("p")
+                ?.text()?.trim().orEmpty().ifBlank { "Chapter ?" }
+            val timeText = infoDiv.selectFirst("time")
+                ?.attr("datetime").orEmpty()
             val uploadTime = parseIsoDate(timeText)
     
+            // Buat objek SManga
             val manga = SManga.create().apply {
                 url = mangaUrl
-                this.title = if (title.isNotBlank()) title else "Tidak diketahui"
-                thumbnail_url = if (thumbnail.isNotBlank()) thumbnail else null
+                // sanitize title, fallback jika kosong
+                this.title = title.ifBlank { "Tidak diketahui" }
+                thumbnail_url = thumbnail.ifBlank { null }
                 initialized = true
             }
     
-            val chapter = SChapter.create().apply {
-                url = chapterUrl
-                name = chapterName
-                date_upload = uploadTime
-            }
-    
-            // Note: Latest Updates tidak menyimpan chapter list di SManga
             mangas.add(manga)
         }
     
         val currentPage = response.request.url.queryParameter("the_page")?.toIntOrNull() ?: 1
         val hasNextPage = document.select("a[href*=?the_page=${currentPage + 1}]").isNotEmpty()
-    
         return MangasPage(mangas.distinctBy { it.url }, hasNextPage)
     }
 

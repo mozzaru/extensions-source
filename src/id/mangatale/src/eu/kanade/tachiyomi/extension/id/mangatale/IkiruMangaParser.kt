@@ -43,10 +43,11 @@ class IkiruMangaParser {
     }
 
     private fun extractAuthor(document: Document): String {
-        val label = document.selectFirst("div:matchesOwn(?i)^author$")?.parent()
-            ?: document.selectFirst("div:matchesOwn(?i)^penulis$")?.parent()
-            ?: return "Unknown"
-    
+        val label = document.select("div").firstOrNull {
+            it.ownText().trim().equals("author", ignoreCase = true) ||
+            it.ownText().trim().equals("penulis", ignoreCase = true)
+        }?.parent() ?: return "Unknown"
+            
         val authorText = label.selectFirst("p, span, a")?.text()?.trim().orEmpty()
         return if (authorText.isNotEmpty()) authorText else "Unknown"
     }
