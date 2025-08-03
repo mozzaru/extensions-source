@@ -29,11 +29,13 @@ class Ikiru : HttpSource() {
     private val mangaParser by lazy { IkiruMangaParser() }
 
     override fun headersBuilder() =
-        super.headersBuilder()
-            .add("Referer", baseUrl)
-            .add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
-            .add("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
-            .add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+    super.headersBuilder()
+        .add("Referer", baseUrl)
+        .add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
+        .add("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
+        .add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+        .add("Cache-Control", "no-cache, no-store, must-revalidate")
+        .add("Pragma", "no-cache")
 
     // Popular Manga
     override fun popularMangaRequest(page: Int): Request {
@@ -48,7 +50,8 @@ class Ikiru : HttpSource() {
 
     // Latest Updates
     override fun latestUpdatesRequest(page: Int): Request {
-        return GET("$baseUrl/latest-update/?the_page=$page", headers)
+        val timestamp = System.currentTimeMillis()
+        return GET("$baseUrl/latest-update/?the_page=$page&t=$timestamp", headers)
     }
 
     // Di file Ikiru.kt, dalam fungsi latestUpdatesParse
@@ -62,13 +65,12 @@ class Ikiru : HttpSource() {
         val document = Jsoup.parse(raw)
         val mangas = mutableListOf<SManga>()
     
-        // Selector yang benar berdasarkan HTML struktur
-        document.select("#search-results > div").forEach { item ->
+        // SELECTOR YANG DIPERBAIKI - tangkap semua manga card
+        document.select("#search-results > div, .group-data-\\[direction\\=horizontal\\]\\:hidden").forEach { item ->
             try {
-                // Cari link manga dalam struktur yang ada
-                val mangaLink = item.selectFirst("a[href*='/manga/']")
+                // Cari link manga dengan selector yang lebih fleksibel
+                val mangaLink = item.selectFirst("a[href*='/manga/'], a[color='primary']")
                 val mangaUrl = mangaLink?.attr("href")?.let { url ->
-                    // Pastikan URL relatif
                     if (url.startsWith("http")) {
                         url.substringAfter(baseUrl)
                     } else {
@@ -76,23 +78,20 @@ class Ikiru : HttpSource() {
                     }
                 } ?: return@forEach
     
-                // Ambil thumbnail dari img dengan prioritas
-                val thumbnail = item.selectFirst("img.wp-post-image")?.let { img ->
-                    img.attr("src").ifBlank { 
-                        img.attr("data-src") 
-                    }
-                } ?: item.selectFirst("img")?.attr("src") ?: ""
+                // Ambil thumbnail dengan prioritas
+                val thumbnail = item.selectFirst("img.wp-post-image, img")?.let { img ->
+                    listOf("src", "data-src", "data-original")
+                        .map { attr -> img.attr(attr) }
+                        .firstOrNull { it.isNotBlank() }
+                } ?: ""
     
-                // Ambil title dengan prioritas dari berbagai elemen
-                val title = item.selectFirst("h1")?.text()?.trim()
-                    ?: item.selectFirst("a[href*='/manga/']")?.text()?.trim()
+                // Ambil title dari berbagai kemungkinan lokasi
+                val title = item.selectFirst("h1, .text-\\[15px\\], a[href*='/manga/']")?.text()?.trim()
                     ?: item.selectFirst("img")?.attr("alt")?.trim()
                     ?: "Unknown Title"
     
-                // Skip jika title kosong atau hanya whitespace
                 if (title.isBlank() || title == "Unknown Title") return@forEach
     
-                // Buat manga object
                 val manga = SManga.create().apply {
                     url = mangaUrl
                     this.title = IkiruUtils.sanitizeTitle(title)
@@ -105,21 +104,14 @@ class Ikiru : HttpSource() {
                 mangas.add(manga)
                 
             } catch (e: Exception) {
-                // Log error tapi lanjutkan parsing item lain
                 e.printStackTrace()
             }
         }
     
-        // Handle pagination - cek struktur pagination yang benar
+        // Perbaiki deteksi halaman selanjutnya
         val currentPage = response.request.url.queryParameter("the_page")?.toIntOrNull() ?: 1
-        
-        // Cari tombol next dengan berbagai kemungkinan selector
-        val hasNextPage = document.selectFirst(
-            "a[href*='the_page=${currentPage + 1}'], " +
-            "a:contains(Next), " +
-            "a:contains(»), " +
-            ".pagination a:last-child:not(.current)"
-        ) != null
+        val hasNextPage = document.selectFirst("a[href*='the_page=${currentPage + 1}']") != null || 
+                         mangas.size >= 18 // fallback berdasarkan jumlah item
     
         return MangasPage(mangas.distinctBy { it.url }, hasNextPage)
     }
