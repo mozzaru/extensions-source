@@ -17,49 +17,53 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
     
     private val jakartaTimeZone = TimeZone.getTimeZone("Asia/Jakarta")
     
-    fun getChapterList(mangaId: String): List<SChapter> {
-        val chapters = mutableListOf<SChapter>()
+    fun getChapterList(mangaId: String, chapterId: String): List<SChapter> {
+        val chapters = mutableSetOf<SChapter>() // pakai Set untuk menghindari duplikat
+    
+        // 1. Coba endpoint cepat dulu
         var page = 1
-        var hasNext = true
-    
-        while (hasNext) {
-            val url = "$baseUrl/ajax-call?action=chapter_list&manga_id=$mangaId&page=$page"
+        var found = false
+        while (true) {
+            val fastUrl = "$baseUrl/ajax-call?action=chapter_list&manga_id=$mangaId&page=$page"
             try {
-                val request = Request.Builder()
-                    .url(url)
-                    .headers(headers)
-                    .build()
-    
+                val request = Request.Builder().url(fastUrl).headers(headers).build()
                 client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        hasNext = false
-                        return@use
-                    }
-    
+                    if (!response.isSuccessful) return@use
                     val body = response.body?.string().orEmpty()
-                    if (body.isBlank() || body.contains("Tidak ada chapter", true)) {
-                        hasNext = false
-                        return@use
-                    }
+                    if (body.isBlank() || body.contains("Tidak ada chapter", true)) return@use
     
-                    val doc = Jsoup.parseBodyFragment(body)
+                    val doc = Jsoup.parse(body)
                     val parsed = parseChapters(doc)
-                    if (parsed.isEmpty()) {
-                        hasNext = false
-                    } else {
-                        chapters += parsed
-                        page++
-                    }
+                    if (parsed.isEmpty()) return@use
+                    chapters += parsed
+                    page++
+                    found = true
                 }
             } catch (e: Exception) {
-                println("Gagal ambil chapter halaman $page: ${e.message}")
-                hasNext = false
+                break
+            }
+        }
+    
+        // 2. Fallback kalau chapter_list kosong: pakai head/footer
+        if (!found || chapters.isEmpty()) {
+            listOf("head", "footer").forEach { loc ->
+                val slowUrl = "$baseUrl/ajax-call?action=chapter_selects&manga_id=$mangaId&chapter_id=$chapterId&loc=$loc"
+                try {
+                    val request = Request.Builder().url(slowUrl).headers(headers).build()
+                    client.newCall(request).execute().use { response ->
+                        if (!response.isSuccessful) return@use
+                        val body = response.body?.string().orEmpty()
+                        if (body.isBlank()) return@use
+                        val doc = Jsoup.parse(body)
+                        chapters += parseChapters(doc)
+                    }
+                } catch (_: Exception) {}
             }
         }
     
         return chapters
             .distinctBy { it.url }
-            .sortedByDescending { extractNum(it.name) }
+            .sortedByDescending { extractChapterNumber(it.name) }
     }
     
     private fun parseChapters(doc: Document): List<SChapter> =
