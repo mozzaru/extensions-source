@@ -135,14 +135,11 @@ class Ikiru : HttpSource() {
 
     override fun chapterListParse(response: Response): List<SChapter> {
         val document = Jsoup.parse(response.body!!.string())
-        
-        val mangaId = IkiruUtils.findMangaId(document) 
+        val mangaId = IkiruUtils.findMangaId(document)
             ?: throw Exception("Manga ID tidak ditemukan")
-        val chapterId = IkiruUtils.findChapterId(document) 
-            ?: throw Exception("Chapter ID tidak ditemukan")
-        
-        return ajaxHandler.getChapterList(mangaId, chapterId)
+        return ajaxHandler.getChapterList(mangaId)
     }
+
 
     // Page List
     override fun pageListRequest(chapter: SChapter): Request = GET(baseUrl + chapter.url, headers)

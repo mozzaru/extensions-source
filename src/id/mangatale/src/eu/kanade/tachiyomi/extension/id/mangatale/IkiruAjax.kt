@@ -17,34 +17,65 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
     
     private val jakartaTimeZone = TimeZone.getTimeZone("Asia/Jakarta")
     
-    fun getChapterList(mangaId: String, chapterId: String): List<SChapter> {
+    fun getChapterList(mangaId: String): List<SChapter> {
         val chapters = mutableListOf<SChapter>()
+        var page = 1
+        var hasNext = true
     
-        listOf("head", "footer").forEach { loc ->
-            val ajaxUrl = "$baseUrl/ajax-call?action=chapter_selects&manga_id=$mangaId&chapter_id=$chapterId&loc=$loc"
+        while (hasNext) {
+            val url = "$baseUrl/ajax-call?action=chapter_list&manga_id=$mangaId&page=$page"
             try {
                 val request = Request.Builder()
-                    .url(ajaxUrl)
+                    .url(url)
                     .headers(headers)
                     .build()
     
                 client.newCall(request).execute().use { response ->
-                    if (response.isSuccessful) {
-                        val body = response.body?.string()
-                        if (!body.isNullOrBlank()) {
-                            val doc = Jsoup.parse(body)
-                            chapters.addAll(parseChaptersFromAjax(doc))
-                        }
+                    if (!response.isSuccessful) {
+                        hasNext = false
+                        return@use
+                    }
+    
+                    val body = response.body?.string().orEmpty()
+                    if (body.isBlank() || body.contains("Tidak ada chapter", true)) {
+                        hasNext = false
+                        return@use
+                    }
+    
+                    val doc = Jsoup.parseBodyFragment(body)
+                    val parsed = parseChapters(doc)
+                    if (parsed.isEmpty()) {
+                        hasNext = false
+                    } else {
+                        chapters += parsed
+                        page++
                     }
                 }
             } catch (e: Exception) {
-                println("Error fetching chapters from $loc: ${e.message}")
+                println("Gagal ambil chapter halaman $page: ${e.message}")
+                hasNext = false
             }
         }
     
         return chapters
             .distinctBy { it.url }
-            .sortedByDescending { extractChapterNumber(it.name) }
+            .sortedByDescending { extractNum(it.name) }
+    }
+    
+    private fun parseChapters(doc: Document): List<SChapter> =
+    doc.select("a[href*=/chapter-]").mapNotNull { el ->
+        val href = el.attr("href").takeIf(String::isNotBlank) ?: return@mapNotNull null
+        val raw = el.selectFirst("p.inline-block, .chapternum, .chapter-title")
+            ?.text()?.trim() ?: el.text().trim()
+        val name = cleanName(raw).takeIf { it.isNotBlank() } ?: return@mapNotNull null
+        val date = el.selectFirst("time[datetime]")
+            ?.attr("datetime")?.let(::parseIso) ?: System.currentTimeMillis()
+
+        SChapter.create().apply {
+            url = href.removePrefix(baseUrl)
+            this.name = name
+            date_upload = date
+        }
     }
     
     private fun parseChaptersFromAjax(document: Document): List<SChapter> {
@@ -377,5 +408,24 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             add(Calendar.DAY_OF_MONTH, -1)
         }
         return isSameDay(yesterday, date)
+    }
+    
+    private fun extractNum(name: String): Float {
+        val numberMatch = Regex("""(\d+(?:\.\d+)?)""").find(name)
+        return numberMatch?.groupValues?.get(1)?.toFloatOrNull() ?: 0f
+    }
+    
+    private fun cleanName(name: String): String {
+        return name.trim()
+            .replace(Regex("""^\s*chapter\s*""", RegexOption.IGNORE_CASE), "Chapter ")
+            .replace(Regex("""\s+"""), " ")
+    }
+    
+    private fun parseIso(datetime: String): Long {
+        return try {
+            java.time.Instant.parse(datetime).toEpochMilli()
+        } catch (e: Exception) {
+            System.currentTimeMillis()
+        }
     }
 }
