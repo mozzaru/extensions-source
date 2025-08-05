@@ -110,20 +110,19 @@ class IkiruAjax(
                     chapters += SChapter.create().apply {
                         url = chapterHref
                         name = chapterName
-                        this.date_upload = dateUpload
-                        // Optional: tampilkan juga versi teks seperti "1 hari yang lalu"
-                        scanlator = formatDateForDisplay(dateUpload)
+                        date_upload = dateUpload
+                        println("CHAPTER: $chapterName | UPLOAD: ${Date(dateUpload)}")
                     }
                     already += chapterHref
                 }
             }
     
-            // [PERBAIKI PENCARIAN TOMBOL NEXT]
+            // [FIXED: Pencarian tombol Next]
             val nextBtn = doc.selectFirst(
-                "a[rel=next]," +
-                "a:matchesOwn((?i)(next\\s*chapter|›|»|下一章))," +
-                "a[aria-label~=(?i)next]," +
-                "a.next, a.btn-next, button.next-btn"
+                "a[aria-label=Next], " +
+                "a[aria-label='下一章'], " +
+                "a:has(p:matchesOwn((?i)^next$)), " +
+                "a:has(span[data-lucide=chevron-right])"
             )
             val next = nextBtn?.absUrl("href") ?: break
             nextUrl = next
@@ -150,10 +149,9 @@ class IkiruAjax(
         val (uploadTime, displayDate) = extractUploadDateFromElement(element)
 
         return SChapter.create().apply {
-            url = href.removePrefix("https://example.com") // Adjust base URL as needed
-            name = chapterLink.text()
-            date_upload = uploadTime
-            scanlator = displayDate // Optional: stores formatted date for UI
+            url = href.removePrefix(baseUrl) // Ganti dengan baseUrl yang kamu punya
+            name = cleanChapterName(chapterLink.text())
+            date_upload = uploadTime // Ini sudah dalam millis
         }
     }
 
