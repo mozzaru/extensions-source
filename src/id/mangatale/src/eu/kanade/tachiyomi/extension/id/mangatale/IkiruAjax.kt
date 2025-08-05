@@ -26,18 +26,17 @@ class IkiruAjax(
         val chapters = mutableSetOf<SChapter>()
         val timestamp = System.currentTimeMillis()
     
-        // 1. Ambil dari paginasi chapter_list
+        // 1. Ambil semua dari paginasi chapter_list AJAX
         var page = 1
         while (true) {
             val url = "$baseUrl/ajax-call?action=chapter_list&manga_id=$mangaId&page=$page&t=$timestamp"
-            val response = try {
+            val resp = try {
                 client.newCall(Request.Builder().url(url).headers(headers).build()).execute()
             } catch (_: Exception) { break }
     
-            if (!response.isSuccessful) break
-    
-            val body = response.body?.string().orEmpty()
-            if (body.isBlank() || body.contains("Tidak ada chapter", true)) break
+            if (!resp.isSuccessful) break
+            val body = resp.body?.string().orEmpty()
+            if (body.contains("Tidak ada chapter", true)) break
     
             val parsed = parseChaptersFromAjax(Jsoup.parse(body))
             if (parsed.isEmpty()) break
@@ -46,53 +45,39 @@ class IkiruAjax(
             page++
         }
     
-        // 2. Fallback: Ambil dari head/footer (jika list kosong)
-        if (chapters.isEmpty()) {
-            listOf("head", "footer").forEach { loc ->
-                val url = "$baseUrl/ajax-call?action=chapter_selects&manga_id=$mangaId&chapter_id=$chapterId&loc=$loc&t=$timestamp"
-                val response = try {
-                    client.newCall(Request.Builder().url(url).headers(headers).build()).execute()
-                } catch (_: Exception) { return@forEach }
-    
-                if (!response.isSuccessful) return@forEach
-                val body = response.body?.string().orEmpty()
-                if (body.isBlank()) return@forEach
-    
-                chapters += parseChaptersFromAjax(Jsoup.parse(body))
-            }
-        }
-    
-        // 3. Fallback terakhir: crawl halaman baca via tombol "next"
+        // 2. Ambil dari reader navigation (next chapter) jika masih ada yang terlewat
         val visited = mutableSetOf<String>()
+        val already = chapters.map { it.url }.toMutableSet()
         var nextUrl = "$baseUrl/chapter-$chapterId"
     
         while (true) {
             if (nextUrl in visited) break
             visited += nextUrl
     
-            val response = try {
-                client.newCall(Request.Builder().url(nextUrl).headers(headers).build()).execute()
+            val doc = try {
+                val resp = client.newCall(Request.Builder().url(nextUrl).headers(headers).build()).execute()
+                if (!resp.isSuccessful) break
+                Jsoup.parse(resp.body?.string().orEmpty())
             } catch (_: Exception) { break }
     
-            if (!response.isSuccessful) break
-            val doc = response.body?.string()?.let { Jsoup.parse(it) } ?: break
-    
-            // Tambahkan chapter dari halaman ini
-            doc.select("a[href*=/chapter-]").firstOrNull()?.let { link ->
-                val url = link.attr("href")
-                val name = cleanChapterName(link.text())
-                if (url.contains("/chapter-") && chapters.none { it.url == url.removePrefix(baseUrl) }) {
+            // Ambil link chapter saat ini dari URL halaman
+            val canonicalUrl = doc.selectFirst("link[rel=canonical]")?.attr("href")
+            if (canonicalUrl != null && canonicalUrl.contains("/chapter-")) {
+                val chapterHref = canonicalUrl.removePrefix(baseUrl)
+                if (chapterHref !in already) {
+                    val chapterName = doc.selectFirst("button > span")?.text()?.takeIf { it.contains("Chapter") }
+                        ?: "Chapter ${extractChapterNumber(chapterHref)}"
                     chapters += SChapter.create().apply {
-                        this.url = url.removePrefix(baseUrl)
-                        this.name = name
-                        this.date_upload = System.currentTimeMillis() // fallback date
+                        url = chapterHref
+                        name = cleanChapterName(chapterName)
+                        date_upload = System.currentTimeMillis()
                     }
+                    already += chapterHref
                 }
             }
     
-            // Ambil tombol next: <a aria-label="Go to next chapter">
-            val next = doc.selectFirst("a[aria-label='Go to next chapter']")?.absUrl("href") ?: break
-            if (next in visited) break
+            // Ambil tombol next
+            val next = doc.selectFirst("a[aria-label='Next'], a:containsOwn(Next)")?.absUrl("href") ?: break
             nextUrl = next
         }
     
