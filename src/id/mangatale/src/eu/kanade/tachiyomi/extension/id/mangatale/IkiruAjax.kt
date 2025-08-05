@@ -41,7 +41,7 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             page++
         }
 
-        // Fallback head/footer jika fast loop gagal
+        // Fallback head/footer if no fast results
         if (chapters.isEmpty()) {
             listOf("head", "footer").forEach { loc ->
                 val url = "$baseUrl/ajax-call?action=chapter_selects" +
@@ -54,7 +54,6 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
                 if (!resp2.isSuccessful) return@forEach
                 val body2 = resp2.body?.string().orEmpty()
                 if (body2.isBlank()) return@forEach
-
                 chapters += parseChaptersFromAjax(Jsoup.parse(body2))
             }
         }
@@ -63,21 +62,6 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             .distinctBy { it.url }
             .sortedByDescending { extractChapterNumber(it.name) }
     }
-
-    private fun parseChaptersFromAjax(doc: org.jsoup.nodes.Document): List<SChapter> =
-        doc.select("a[href*=/chapter-]").map { el ->
-            SChapter.create().apply {
-                url  = el.attr("href").removePrefix(baseUrl)
-                name = el.text().trim()
-            }
-        }
-
-    private fun extractChapterNumber(name: String): Float =
-        Pattern.compile("""\d+(\.\d+)?""")
-            .matcher(name)
-            .takeIf { it.find() }
-            ?.group()
-            ?.toFloatOrNull() ?: 0f
     
     private fun parseChapters(doc: Document): List<SChapter> =
     doc.select("a[href*=/chapter-]").mapNotNull { el ->
@@ -445,80 +429,4 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             System.currentTimeMillis()
         }
     }
-}
-
-
-
-package eu.kanade.tachiyomi.extension.id.mangatale
-
-import eu.kanade.tachiyomi.source.model.SChapter
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import org.jsoup.Jsoup
-import java.util.regex.Pattern
-
-class IkiruAjax(
-    private val client: OkHttpClient,
-    private val baseUrl: String,
-    private val headers: okhttp3.Headers
-) {
-    fun getChapterList(mangaId: String, chapterId: String): List<SChapter> {
-        val chapters = mutableSetOf<SChapter>()
-
-        // Fast loop: chapter_list pages
-        var page = 1
-        loop@ while (true) {
-            val url = "$baseUrl/ajax-call?action=chapter_list&manga_id=$mangaId&page=$page"
-            val resp = try {
-                client.newCall(Request.Builder().url(url).headers(headers).build()).execute()
-            } catch (_: Exception) {
-                break@loop
-            }
-            if (!resp.isSuccessful) break@loop
-            val body = resp.body?.string().orEmpty()
-            if (body.isBlank() || body.contains("Tidak ada chapter", true)) break@loop
-
-            val parsed = parseChaptersFromAjax(Jsoup.parse(body))
-            if (parsed.isEmpty()) break@loop
-            chapters += parsed
-            page++
-        }
-
-        // Fallback head/footer jika fast loop gagal
-        if (chapters.isEmpty()) {
-            listOf("head", "footer").forEach { loc ->
-                val url = "$baseUrl/ajax-call?action=chapter_selects" +
-                          "&manga_id=$mangaId&chapter_id=$chapterId&loc=$loc"
-                val resp2 = try {
-                    client.newCall(Request.Builder().url(url).headers(headers).build()).execute()
-                } catch (_: Exception) {
-                    return@forEach
-                }
-                if (!resp2.isSuccessful) return@forEach
-                val body2 = resp2.body?.string().orEmpty()
-                if (body2.isBlank()) return@forEach
-
-                chapters += parseChaptersFromAjax(Jsoup.parse(body2))
-            }
-        }
-
-        return chapters
-            .distinctBy { it.url }
-            .sortedByDescending { extractChapterNumber(it.name) }
-    }
-
-    private fun parseChaptersFromAjax(doc: org.jsoup.nodes.Document): List<SChapter> =
-        doc.select("a[href*=/chapter-]").map { el ->
-            SChapter.create().apply {
-                url  = el.attr("href").removePrefix(baseUrl)
-                name = el.text().trim()
-            }
-        }
-
-    private fun extractChapterNumber(name: String): Float =
-        Pattern.compile("""\d+(\.\d+)?""")
-            .matcher(name)
-            .takeIf { it.find() }
-            ?.group()
-            ?.toFloatOrNull() ?: 0f
 }
