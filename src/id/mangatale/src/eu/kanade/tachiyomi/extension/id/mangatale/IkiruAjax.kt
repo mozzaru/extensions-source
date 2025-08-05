@@ -72,7 +72,6 @@ class IkiruAjax(
                         url = chapterHref
                         name = chapterName
                         date_upload = dateUpload
-                        scanlator = formatDateDateOnly(dateUpload)
                     }
                     already += chapterHref
                 }
@@ -101,7 +100,6 @@ class IkiruAjax(
                     url = href
                     name = chapterName
                     date_upload = dateUpload
-                    scanlator = formatDateDateOnly(dateUpload)
                 }
             }
         }
