@@ -64,68 +64,43 @@ class IkiruAjax(
         }
     
         // 3. Fallback crawling via halaman baca reader (next chapter)
+        // … sebelum loop sudah tarik `chapters` dari AJAX/fallback …
+
+        var nextUrl = "$baseUrl/chapter-$chapterId"
         val visited = mutableSetOf<String>()
         val already = chapters.map { it.url }.toMutableSet()
-        var nextUrl = "$baseUrl/chapter-$chapterId"
-    
+        
         while (true) {
-            if (nextUrl in visited) break
-            visited += nextUrl
-    
-            val doc = try {
-                val resp = client.newCall(Request.Builder().url(nextUrl).headers(headers).build()).execute()
-                if (!resp.isSuccessful) break
-                resp.asJsoup()
-            } catch (_: Exception) { break }
-    
-            // [PERBAIKI DETEKSI HALAMAN CHAPTER]
-            val canonicalUrl = doc.selectFirst("link[rel=canonical]")?.attr("href")
-            val isChapterPage = canonicalUrl != null && (
-                canonicalUrl.contains("/chapter-") ||
-                canonicalUrl.contains("?chapter=") ||
-                canonicalUrl.contains("/manga/") ||
-                doc.selectFirst("div.font-semibold.text-gray-50.text-sm, time[itemprop=dateCreated]") != null
-            )
-    
-            if (isChapterPage) {
-                val chapterHref = canonicalUrl?.removePrefix(baseUrl) ?: nextUrl.removePrefix(baseUrl)
-    
+            if (!visited.add(nextUrl)) break
+            val doc = client.newCall(Request.Builder().url(nextUrl).headers(headers).build())
+                .execute().asJsoup()
+        
+            // 1) DETEKSI HALAMAN CHAPTER
+            val canonical = doc.selectFirst("link[rel=canonical]")?.attr("href") ?: doc.location()
+            if (canonical.contains("/chapter-")) {
+                val chapterHref = canonical.removePrefix(baseUrl)
                 if (chapterHref !in already) {
-                    // [PERBAIKI PENGAMBILAN NAMA CHAPTER]
-                    val nameElement = doc.selectFirst("div.font-semibold.text-gray-50.text-sm")
-                    val rawName = nameElement?.text() ?: "Chapter"
-                    val chapterName = cleanChapterName(
-                        rawName.substringAfterLast("Chapter").takeIf { it.isNotBlank() }
-                            ?: "Chapter ${extractChapterNumber(chapterHref)}"
-                    )
-    
-                    // [PERBAIKI PENGAMBILAN TANGGAL]
-                    val dateElement = doc.selectFirst("time[itemprop=dateCreated]")
-                    val dateUpload = if (dateElement != null) {
-                        parseDateFromDatetime(dateElement) ?: parseChapterDate(dateElement.text())
-                    } else {
-                        System.currentTimeMillis()
-                    }
-    
+                    // Ambil nama & tanggal
+                    val rawName = doc.selectFirst("div.font-semibold.text-gray-50.text-sm")?.text().orEmpty()
+                    val chapterName = cleanChapterName(rawName)
+                    val dateEl = doc.selectFirst("time[itemprop=dateCreated], time[itemprop=datePublished]")
+                    val dateUpload = dateEl?.let { parseDateFromDatetime(it) } ?: System.currentTimeMillis()
                     chapters += SChapter.create().apply {
                         url = chapterHref
                         name = chapterName
                         date_upload = dateUpload
-                        println("CHAPTER: $chapterName | UPLOAD: ${Date(dateUpload)}")
                     }
                     already += chapterHref
                 }
             }
-    
-            // [FIXED: Pencarian tombol Next]
+        
+            // 2) CARI LINK NEXT
             val nextBtn = doc.selectFirst(
-                "a[aria-label=Next], " +
-                "a[aria-label='下一章'], " +
-                "a:has(p:matchesOwn((?i)^next$)), " +
+                "a[aria-label=Next]," +
+                "a[aria-label='下一章']," +
                 "a:has(span[data-lucide=chevron-right])"
-            )
-            val next = nextBtn?.absUrl("href") ?: break
-            nextUrl = next
+            ) ?: break
+            nextUrl = nextBtn.absUrl("href")
         }
     
         return chapters
