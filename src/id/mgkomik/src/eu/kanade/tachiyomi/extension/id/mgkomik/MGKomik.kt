@@ -3,13 +3,12 @@ package eu.kanade.tachiyomi.extension.id.mgkomik
 import eu.kanade.tachiyomi.multisrc.madara.Madara
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
-import okhttp3.Headers
-import okhttp3.OkHttpClient
+import eu.kanade.tachiyomi.source.model.Filter
+import eu.kanade.tachiyomi.source.model.FilterList
 import okhttp3.Request
+import org.jsoup.nodes.Document
 import java.text.SimpleDateFormat
 import java.util.Locale
-import java.util.concurrent.TimeUnit
-import kotlin.random.Random
 
 class MGKomik : Madara(
     "MG Komik",
@@ -18,44 +17,105 @@ class MGKomik : Madara(
     SimpleDateFormat("dd MMM yy", Locale.US),
 ) {
     override val useLoadMoreRequest = LoadMoreStrategy.Never
+
     override val useNewChapterEndpoint = false
 
-    override val client: OkHttpClient = super.client.newBuilder()
-        .rateLimit(20, 5, TimeUnit.SECONDS)
+    override val mangaSubString = "komik"
+
+    override fun headersBuilder() = super.headersBuilder().apply {
+        add("Sec-Fetch-Dest", "document")
+        add("Sec-Fetch-Mode", "navigate")
+        add("Sec-Fetch-Site", "same-origin")
+        add("Upgrade-Insecure-Requests", "1")
+    }
+
+    override val client = network.client.newBuilder()
+        .addInterceptor { chain ->
+            val request = chain.request().newBuilder()
+                .removeHeader("X-Requested-With") // pastikan tidak dikirim
+                .build()
+            chain.proceed(request)
+        }
+        .rateLimit(9, 2)
         .build()
 
-    private val bypasser by lazy { CloudflareBypasser(client) }
+    // ================================== Popular ======================================
 
-    override fun headersBuilder(): Headers.Builder = super.headersBuilder()
-        .add("Accept", "text/html,application/xhtml+xml")
-        .add("Accept-Language", "en-US,en;q=0.9,id;q=0.8")
-        .add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-        .add("Referer", baseUrl)
-        .add("X-Requested-With", randomString)
+    override fun popularMangaNextPageSelector() = ".wp-pagenavi span.current + a"
 
-    private fun generateRandomString(length: Int): String {
-        val charset = "HALOGaES.BCDFHIJKMNPQRTUVWXYZ.bcdefghijklmnopqrstuvwxyz0123456789"
-        return (1..length).map { charset.random() }.joinToString("")
+    // ================================== Latest =======================================
+
+    override fun latestUpdatesRequest(page: Int): Request =
+        if (useLoadMoreRequest()) {
+            loadMoreRequest(page, popular = false)
+        } else {
+            GET("$baseUrl/$mangaSubString/${searchPage(page)}", headers)
+        }
+
+    // ================================== Search =======================================
+
+    override fun searchRequest(page: Int, query: String, filters: FilterList): Request {
+        filters.forEach { filter ->
+            when (filter) {
+                is GenreContentFilter -> {
+                    val url = filter.toUriPart()
+                    if (url.isBlank()) {
+                        return@forEach
+                    }
+                    return GET(filter.toUriPart(), headers)
+                }
+                else -> {}
+            }
+        }
+        return super.searchRequest(page, query, filters)
     }
 
-    private val randomLength = Random.Default.nextInt(13, 21)
-    private val randomString = generateRandomString(randomLength)
+    override fun searchMangaSelector() = "${super.searchMangaSelector()}, .page-listing-item .page-item-detail"
 
-    override fun searchPage(page: Int): String = if (page > 1) "page/$page/" else ""
-    override val mangaSubString = "komik"
     override fun searchMangaNextPageSelector() = "a.page.larger"
+
+    // ================================ Chapters ================================
+
     override val chapterUrlSuffix = ""
 
-    // Inject bypass ke popular/latest/search
-    override fun popularMangaRequest(page: Int): Request {
-        ensureCloudflareBypass("$baseUrl/manga/?page=$page")
-        return super.popularMangaRequest(page)
+    // ================================ Filters ================================
+
+    override fun getFilterList(): FilterList {
+        launchIO { fetchGenres() }
+
+        val filters = super.getFilterList().list.toMutableList()
+
+        filters += if (genresList.isNotEmpty()) {
+            listOf(
+                Filter.Separator(),
+                GenreContentFilter(
+                    title = intl["genre_filter_title"],
+                    options = genresList.map { it.name to it.id },
+                ),
+            )
+        } else {
+            listOf(
+                Filter.Separator(),
+                Filter.Header(intl["genre_missing_warning"]),
+            )
+        }
+
+        return FilterList(filters)
     }
 
-    private fun ensureCloudflareBypass(url: String) {
-        val token = bypasser.solveChallenge(url)
-        if (!token.isNullOrEmpty()) {
-            headersBuilder().add("Cookie", "cf_clearance=$token")
+    private class GenreContentFilter(title: String, options: List<Pair<String, String>>) : UriPartFilter(
+        title,
+        options.toTypedArray(),
+    )
+
+    override fun genresRequest() = GET("$baseUrl/$mangaSubString", headers)
+
+    override fun parseGenres(document: Document): List<Genre> {
+        val genres = mutableListOf<Genre>()
+        genres += Genre("All", "")
+        genres += document.select(".genres li a").map { a ->
+            Genre(a.text(), a.absUrl("href"))
         }
+        return genres
     }
 }
