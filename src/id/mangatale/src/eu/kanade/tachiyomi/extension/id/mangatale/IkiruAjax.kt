@@ -69,34 +69,58 @@ class IkiruAjax(
         while (true) {
             if (nextUrl in visited) break
             visited += nextUrl
-    
+        
             val doc = try {
                 val resp = client.newCall(Request.Builder().url(nextUrl).headers(headers).build()).execute()
                 if (!resp.isSuccessful) break
-                Jsoup.parse(resp.body?.string().orEmpty())
+                resp.asJsoup()
             } catch (_: Exception) { break }
-    
-            // Ambil URL canonical
+        
+            // [PERBAIKI DETEKSI HALAMAN CHAPTER] 
             val canonicalUrl = doc.selectFirst("link[rel=canonical]")?.attr("href")
-            if (canonicalUrl != null && canonicalUrl.contains("/chapter-")) {
-                val chapterHref = canonicalUrl.removePrefix(baseUrl)
+            val isChapterPage = canonicalUrl != null && (
+                canonicalUrl.contains("/chapter-") || 
+                canonicalUrl.contains("?chapter=") ||
+                canonicalUrl.contains("/manga/") || // Tambahkan pola baru
+                doc.selectFirst("div.font-semibold.text-gray-50.text-sm, time[itemprop=dateCreated]") != null
+            )
+        
+            if (isChapterPage) {
+                val chapterHref = canonicalUrl?.removePrefix(baseUrl) ?: nextUrl.removePrefix(baseUrl)
+                
                 if (chapterHref !in already) {
-                    val chapterName = doc.selectFirst("button span")
-                        ?.text()?.takeIf { it.contains("Chapter", true) }
-                        ?: "Chapter ${extractChapterNumber(chapterHref)}"
-    
+                    // [PERBAIKI PENGAMBILAN NAMA CHAPTER]
+                    val nameElement = doc.selectFirst("div.font-semibold.text-gray-50.text-sm")
+                    val rawName = nameElement?.text() ?: "Chapter"
+                    
+                    // Bersihkan nama chapter (hapus judul manga)
+                    val chapterName = cleanChapterName(
+                        rawName.substringAfterLast("Chapter").takeIf { it.isNotBlank() }
+                            ?: "Chapter ${extractChapterNumber(chapterHref)}"
+                    )
+        
+                    // [PERBAIKI PENGAMBILAN TANGGAL]
+                    val dateElement = doc.selectFirst("time[itemprop=dateCreated]")
+                    val dateUpload = if (dateElement != null) {
+                        parseDateFromDatetime(dateElement) ?: parseChapterDate(dateElement.text())
+                    } else {
+                        System.currentTimeMillis()
+                    }
+        
                     chapters += SChapter.create().apply {
                         url = chapterHref
-                        name = cleanChapterName(chapterName)
-                        date_upload = System.currentTimeMillis()
+                        name = chapterName
+                        this.date_upload = dateUpload
                     }
                     already += chapterHref
                 }
             }
-    
-            // Cari tombol Next (aria-label & text)
-            val next = doc.selectFirst("a[aria-label=Next], a:containsOwn(Next)")?.absUrl("href") ?: break
-            if (next in visited) break
+        
+            // [PERBAIKI PENCARIAN TOMBOL NEXT]
+            val nextBtn = doc.selectFirst("a:contains(Next), a:contains(下一章), a:contains(Next Chapter)")
+                ?: doc.selectFirst("a[aria-label='Next'], a[aria-label='下一章']")
+            
+            val next = nextBtn?.absUrl("href") ?: break
             nextUrl = next
         }
     
@@ -129,9 +153,25 @@ class IkiruAjax(
     }
 
     private fun extractUploadDateFromElement(root: Element): Pair<Long, String> {
-        val allText = root.select("*").map { it.text().trim() }
-        val absolute = allText.mapNotNull { parseAbsoluteDate(it) }.firstOrNull()
-        val relative = allText.find { isDateText(it) } ?: ""
+        // Prioritaskan mencari elemen waktu yang spesifik
+        val timeElement = root.selectFirst("time[datetime]")
+        if (timeElement != null) {
+            val datetime = timeElement.attr("datetime")
+            parseDateFromDatetime(timeElement)?.let {
+                return it to formatDateForDisplay(it)
+            }
+        }
+    
+        // Cari teks yang mengandung pola tanggal absolut
+        val absolute = root.select("*").mapNotNull { 
+            parseAbsoluteDate(it.text().trim()) 
+        }.firstOrNull()
+    
+        // Cari teks relatif hanya jika tidak ditemukan absolut
+        val relative = if (absolute == null) {
+            root.select("*").find { isDateText(it.text()) }?.text() ?: ""
+        } else ""
+    
         val timestamp = absolute?.time ?: parseChapterDate(relative)
         return timestamp to formatDateForDisplay(timestamp)
     }
@@ -193,7 +233,9 @@ class IkiruAjax(
 
     private fun formatDateForDisplay(timestamp: Long): String {
         val now = Calendar.getInstance(jakartaTimeZone)
-        val date = Calendar.getInstance(jakartaTimeZone).apply { timeInMillis = timestamp }
+        val date = Calendar.getInstance(jakartaTimeZone).apply { 
+            timeInMillis = timestamp 
+        }
     
         val diffInMillis = now.timeInMillis - date.timeInMillis
         val daysDiff = (diffInMillis / (1000 * 60 * 60 * 24)).toInt()
@@ -214,16 +256,29 @@ class IkiruAjax(
             "dd/MM/yyyy" to Regex("""\d{1,2}/\d{1,2}/\d{4}"""),
             "dd-MM-yy" to Regex("""\d{1,2}-\d{1,2}-\d{2}"""),
             "dd-MM-yyyy" to Regex("""\d{1,2}-\d{1,2}-\d{4}"""),
-            "yyyy-MM-dd" to Regex("""\d{4}-\d{2}-\d{2}""")
+            "yyyy-MM-dd" to Regex("""\d{4}-\d{2}-\d{2}"""),
+            // Tambahkan format baru untuk format tanpa garis miring
+            "ddMMyy" to Regex("""\d{6}""")
         )
-
+    
         for ((pattern, regex) in patterns) {
-            val match = regex.find(dateString) ?: continue
-            try {
-                return SimpleDateFormat(pattern, Locale.ENGLISH).apply {
-                    timeZone = jakartaTimeZone
-                }.parse(match.value)
-            } catch (_: Exception) {}
+            if (regex.containsMatchIn(dateString)) {
+                try {
+                    return SimpleDateFormat(pattern, Locale.ENGLISH).apply {
+                        timeZone = jakartaTimeZone
+                        // Handle format tanpa separator
+                        if (pattern == "ddMMyy") {
+                            val cleaned = dateString.take(6)
+                            val day = cleaned.substring(0, 2).toInt()
+                            val month = cleaned.substring(2, 4).toInt() - 1
+                            val year = cleaned.substring(4, 6).toInt() + 2000
+                            return Calendar.getInstance(jakartaTimeZone).apply {
+                                set(year, month, day)
+                            }.time
+                        }
+                    }.parse(dateString)
+                } catch (_: Exception) {}
+            }
         }
         return null
     }
@@ -253,5 +308,15 @@ class IkiruAjax(
             timeInMillis = now.timeInMillis
             add(Calendar.DAY_OF_MONTH, -1)
         }, date)
+    }
+    
+    private fun parseDateFromDatetime(element: Element): Long? {
+        return element.selectFirst("time[itemprop=dateCreated]")?.attr("datetime")?.let { dateStr ->
+            try {
+                SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.ENGLISH).parse(dateStr)?.time
+            } catch (e: Exception) {
+                null
+            }
+        }
     }
 }
