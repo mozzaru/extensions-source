@@ -10,10 +10,12 @@ import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.concurrent.TimeUnit
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import java.util.regex.Pattern
+
 
 class IkiruAjax(
     private val client: OkHttpClient,
@@ -69,36 +71,34 @@ class IkiruAjax(
         while (true) {
             if (nextUrl in visited) break
             visited += nextUrl
-        
+    
             val doc = try {
                 val resp = client.newCall(Request.Builder().url(nextUrl).headers(headers).build()).execute()
                 if (!resp.isSuccessful) break
                 resp.asJsoup()
             } catch (_: Exception) { break }
-        
-            // [PERBAIKI DETEKSI HALAMAN CHAPTER] 
+    
+            // [PERBAIKI DETEKSI HALAMAN CHAPTER]
             val canonicalUrl = doc.selectFirst("link[rel=canonical]")?.attr("href")
             val isChapterPage = canonicalUrl != null && (
-                canonicalUrl.contains("/chapter-") || 
+                canonicalUrl.contains("/chapter-") ||
                 canonicalUrl.contains("?chapter=") ||
-                canonicalUrl.contains("/manga/") || // Tambahkan pola baru
+                canonicalUrl.contains("/manga/") ||
                 doc.selectFirst("div.font-semibold.text-gray-50.text-sm, time[itemprop=dateCreated]") != null
             )
-        
+    
             if (isChapterPage) {
                 val chapterHref = canonicalUrl?.removePrefix(baseUrl) ?: nextUrl.removePrefix(baseUrl)
-                
+    
                 if (chapterHref !in already) {
                     // [PERBAIKI PENGAMBILAN NAMA CHAPTER]
                     val nameElement = doc.selectFirst("div.font-semibold.text-gray-50.text-sm")
                     val rawName = nameElement?.text() ?: "Chapter"
-                    
-                    // Bersihkan nama chapter (hapus judul manga)
                     val chapterName = cleanChapterName(
                         rawName.substringAfterLast("Chapter").takeIf { it.isNotBlank() }
                             ?: "Chapter ${extractChapterNumber(chapterHref)}"
                     )
-        
+    
                     // [PERBAIKI PENGAMBILAN TANGGAL]
                     val dateElement = doc.selectFirst("time[itemprop=dateCreated]")
                     val dateUpload = if (dateElement != null) {
@@ -106,20 +106,25 @@ class IkiruAjax(
                     } else {
                         System.currentTimeMillis()
                     }
-        
+    
                     chapters += SChapter.create().apply {
                         url = chapterHref
                         name = chapterName
                         this.date_upload = dateUpload
+                        // Optional: tampilkan juga versi teks seperti "1 hari yang lalu"
+                        scanlator = formatDateForDisplay(dateUpload)
                     }
                     already += chapterHref
                 }
             }
-        
+    
             // [PERBAIKI PENCARIAN TOMBOL NEXT]
-            val nextBtn = doc.selectFirst("a:contains(Next), a:contains(下一章), a:contains(Next Chapter)")
-                ?: doc.selectFirst("a[aria-label='Next'], a[aria-label='下一章']")
-            
+            val nextBtn = doc.selectFirst(
+                "a[rel=next]," +
+                "a:matchesOwn((?i)(next\\s*chapter|›|»|下一章))," +
+                "a[aria-label~=(?i)next]," +
+                "a.next, a.btn-next, button.next-btn"
+            )
             val next = nextBtn?.absUrl("href") ?: break
             nextUrl = next
         }
@@ -140,40 +145,23 @@ class IkiruAjax(
     }
 
     private fun parseChapter(element: Element): SChapter? {
-        val chapterLink = element.select("a[href*=/chapter-]").firstOrNull() ?: return null
-        val href = chapterLink.attr("href").takeIf { it.isNotBlank() } ?: return null
-        val name = cleanChapterName(chapterLink.text()).takeIf { it.isNotBlank() } ?: return null
-        val (uploadTime, _) = extractUploadDateFromElement(element) // displayDate diabaikan
-    
+        val chapterLink = element.selectFirst("a") ?: return null
+        val href = chapterLink.absUrl("href")
+        val (uploadTime, displayDate) = extractUploadDateFromElement(element)
+
         return SChapter.create().apply {
-            url = href.removePrefix(baseUrl)
-            this.name = name
-            this.date_upload = uploadTime
+            url = href.removePrefix("https://example.com") // Adjust base URL as needed
+            name = chapterLink.text()
+            date_upload = uploadTime
+            scanlator = displayDate // Optional: stores formatted date for UI
         }
     }
 
-    private fun extractUploadDateFromElement(root: Element): Pair<Long, String> {
-        // Prioritaskan mencari elemen waktu yang spesifik
-        val timeElement = root.selectFirst("time[datetime]")
-        if (timeElement != null) {
-            val datetime = timeElement.attr("datetime")
-            parseDateFromDatetime(timeElement)?.let {
-                return it to formatDateForDisplay(it)
-            }
-        }
-    
-        // Cari teks yang mengandung pola tanggal absolut
-        val absolute = root.select("*").mapNotNull { 
-            parseAbsoluteDate(it.text().trim()) 
-        }.firstOrNull()
-    
-        // Cari teks relatif hanya jika tidak ditemukan absolut
-        val relative = if (absolute == null) {
-            root.select("*").find { isDateText(it.text()) }?.text() ?: ""
-        } else ""
-    
-        val timestamp = absolute?.time ?: parseChapterDate(relative)
-        return timestamp to formatDateForDisplay(timestamp)
+    private fun extractUploadDateFromElement(element: Element): Pair<Long, String> {
+        val dateText = element.selectFirst(".chapter-date")?.text()?.trim() ?: return 0L to ""
+        val timestamp = parseDateText(dateText)
+        val displayDate = formatDateForDisplay(timestamp)
+        return timestamp to displayDate
     }
 
     private fun isDateText(text: String): Boolean {
@@ -231,22 +219,15 @@ class IkiruAjax(
         }
     }
 
-    private fun formatDateForDisplay(timestamp: Long): String {
-        val now = Calendar.getInstance(jakartaTimeZone)
-        val date = Calendar.getInstance(jakartaTimeZone).apply { 
-            timeInMillis = timestamp 
-        }
-    
-        val diffInMillis = now.timeInMillis - date.timeInMillis
-        val daysDiff = (diffInMillis / (1000 * 60 * 60 * 24)).toInt()
-    
-        return when {
-            daysDiff == 0 -> "Hari Ini"
-            daysDiff == 1 -> "1 hari yang lalu"
-            daysDiff in 2..6 -> "$daysDiff hari yang lalu"
-            else -> SimpleDateFormat("dd/MM/yy", Locale.ENGLISH).apply {
-                timeZone = jakartaTimeZone
-            }.format(Date(timestamp))
+    fun formatDateForDisplay(timestamp: Long): String {
+        val now = System.currentTimeMillis()
+        val diffDays = TimeUnit.MILLISECONDS.toDays(now - timestamp).toInt()
+
+        return when (diffDays) {
+            0 -> "Hari Ini"
+            1 -> "1 hari yang lalu"
+            in 2..6 -> "$diffDays hari yang lalu"
+            else -> SimpleDateFormat("dd/MM/yy", Locale("id")).format(Date(timestamp))
         }
     }
 
@@ -316,6 +297,25 @@ class IkiruAjax(
                 SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.ENGLISH).parse(dateStr)?.time
             } catch (e: Exception) {
                 null
+            }
+        }
+    }
+    
+    private fun parseDateText(dateText: String): Long {
+        val now = System.currentTimeMillis()
+        return when {
+            dateText.contains("hari yang lalu") -> {
+                val days = dateText.split(" ")[0].toIntOrNull() ?: 0
+                now - TimeUnit.DAYS.toMillis(days.toLong())
+            }
+            dateText.equals("Hari Ini", ignoreCase = true) -> now
+            else -> {
+                try {
+                    val format = SimpleDateFormat("dd/MM/yy", Locale("id"))
+                    format.parse(dateText)?.time ?: 0L
+                } catch (e: Exception) {
+                    0L
+                }
             }
         }
     }
