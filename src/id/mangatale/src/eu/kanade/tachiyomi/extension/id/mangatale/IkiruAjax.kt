@@ -18,6 +18,9 @@ class IkiruAjax(
     private val headers: okhttp3.Headers
 ) {
     private val jakartaTimeZone = TimeZone.getTimeZone("Asia/Jakarta")
+    private val dateFormatter = SimpleDateFormat("dd/MM/yy", Locale("id")).apply {
+        timeZone = jakartaTimeZone
+    }
 
     fun getChapterList(mangaId: String, chapterId: String): List<SChapter> {
         val chapters = mutableSetOf<SChapter>()
@@ -31,8 +34,8 @@ class IkiruAjax(
                 client.newCall(Request.Builder().url(url).headers(headers).build()).execute()
             } catch (_: Exception) { break }
             if (!resp.isSuccessful) break
-            val body = resp.body?.string().orEmpty()
-            if (body.contains("Tidak ada chapter", true)) break
+            if (resp.body?.string().orEmpty().contains("Tidak ada chapter", true)) break
+
             val parsed = parseChaptersFromAjax(resp.asJsoup())
             if (parsed.isEmpty()) break
             chapters += parsed
@@ -46,9 +49,7 @@ class IkiruAjax(
                 val resp = try {
                     client.newCall(Request.Builder().url(url).headers(headers).build()).execute()
                 } catch (_: Exception) { return@forEach }
-                if (!resp.isSuccessful) return@forEach
-                val body = resp.body?.string().orEmpty()
-                if (body.isBlank()) return@forEach
+                if (!resp.isSuccessful || resp.body?.string().isNullOrBlank()) return@forEach
                 chapters += parseChaptersFromAjax(resp.asJsoup())
             }
         }
@@ -71,7 +72,7 @@ class IkiruAjax(
                     val rawName = doc.selectFirst("div.font-semibold.text-gray-50.text-sm")?.text().orEmpty()
                     val chapterName = cleanChapterName(rawName)
                     val dateEl = doc.selectFirst("time[itemprop=dateCreated], time[itemprop=datePublished]")
-                    val dateUpload = dateEl?.let { parseDateFromDatetime(it) } ?: System.currentTimeMillis()
+                    val dateUpload = parseDateFromDatetime(dateEl) ?: defaultTimestamp()
                     chapters += SChapter.create().apply {
                         url = chapterHref
                         name = chapterName
@@ -81,9 +82,7 @@ class IkiruAjax(
                 }
             }
 
-            val nextBtn = doc.selectFirst(
-                "a[aria-label=\"Next\"],a:has(span[data-lucide=chevron-right])"
-            ) ?: break
+            val nextBtn = doc.selectFirst("a[aria-label=\"Next\"], a:has(span[data-lucide=chevron-right])") ?: break
             nextUrl = nextBtn.absUrl("href")
         }
 
@@ -97,7 +96,7 @@ class IkiruAjax(
             val href = el.absUrl("href").removePrefix(baseUrl)
             val chapterName = cleanChapterName(el.text())
             val dateText = el.parent()?.selectFirst(".chapter-date")?.text().orEmpty()
-            val dateUpload = parseFriendlyDate(dateText)
+            val dateUpload = parseAbsoluteDate(dateText) ?: defaultTimestamp()
             SChapter.create().apply {
                 url = href
                 name = chapterName
@@ -106,32 +105,34 @@ class IkiruAjax(
         }
     }
 
-    private fun parseDateFromDatetime(el: Element): Long = runCatching {
-        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.ENGLISH)
-            .parse(el.attr("datetime"))!!.time
-    }.getOrDefault(System.currentTimeMillis())
+    private fun parseAbsoluteDate(text: String): Long? {
+        return runCatching {
+            dateFormatter.parse(text)?.time
+        }.getOrNull()
+    }
 
-    private fun parseFriendlyDate(text: String): Long {
-        val now = Calendar.getInstance(jakartaTimeZone)
-        val lower = text.lowercase(Locale("id"))
-        return when {
-            "hari ini" in lower   -> now.timeInMillis
-            "kemarin" in lower    -> now.apply { add(Calendar.DAY_OF_MONTH, -1) }.timeInMillis
-            lower.matches(Regex(".*\\d+\\s+hari\\s+lalu.*")) -> {
-                val days = Regex("\\d+").find(lower)?.value?.toLongOrNull() ?: 0L
-                now.apply { add(Calendar.DAY_OF_MONTH, -days.toInt()) }.timeInMillis
-            }
-            text.matches(Regex("\\d{2}/\\d{2}/\\d{2}")) -> runCatching {
-                SimpleDateFormat("dd/MM/yy", Locale("id")).parse(text)!!.time
-            }.getOrDefault(now.timeInMillis)
-            else -> 0L
+    private fun parseDateFromDatetime(el: Element?): Long? {
+        return el?.attr("datetime")?.let {
+            runCatching {
+                SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.ENGLISH).apply {
+                    timeZone = jakartaTimeZone
+                }.parse(it)?.time
+            }.getOrNull()
         }
     }
 
-    private fun extractChapterNumber(name: String): Float =
-        Regex("chapter\\s*(\\d+(?:\\.\\d+)?)", RegexOption.IGNORE_CASE)
+    private fun extractChapterNumber(name: String): Float {
+        return Regex("chapter\\s*(\\d+(?:\\.\\d+)?)", RegexOption.IGNORE_CASE)
             .find(name)?.groups?.get(1)?.value?.toFloatOrNull() ?: 0f
+    }
 
-    private fun cleanChapterName(name: String): String =
-        name.trim().replace(Regex("(?i)^chapter\\s*"), "Chapter ")
+    private fun cleanChapterName(name: String): String {
+        return name.trim().replace(Regex("(?i)^chapter\\s*"), "Chapter ")
+    }
+
+    private fun defaultTimestamp(): Long {
+        return Calendar.getInstance(jakartaTimeZone).apply {
+            add(Calendar.DAY_OF_MONTH, -7)
+        }.timeInMillis
+    }
 }
