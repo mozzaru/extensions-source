@@ -5,11 +5,11 @@ import org.jsoup.nodes.Document
 object IkiruUtils {
     
     fun findMangaId(document: Document): String? {
-        val body = document.html()
-        
-        // Try to find manga_id from ajax-call URL
-        Regex("""manga_id=(\d+)""").find(body)?.let { 
-            return it.groupValues[1] 
+        Regex("""manga_id=(\d+)""").find(document.html())?.let { return it.groupValues[1] }
+        document.select("[hx-get],[data-manga-id],[onclick*='manga_id']").forEach { el ->
+            Regex("""manga_id[:=](\d+)""")
+                .find(el.attr("hx-get") + el.attr("data-manga-id") + el.attr("onclick"))
+                ?.let { return it.groupValues[1] }
         }
         
         // Fallback: search in hx-get attributes
@@ -34,12 +34,12 @@ object IkiruUtils {
         return null
     }
     
-    fun findChapterId(document: Document): String? {
-        val body = document.html()
-        
-        // Try to find chapter_id from ajax-call URL
-        Regex("""chapter_id=(\d+)""").find(body)?.let { 
-            return it.groupValues[1] 
+    fun findChapterId(document: Document): String {
+        Regex("""chapter_id=(\d+)""").find(document.html())?.let { return it.groupValues[1] }
+        document.select("a[href*=/chapter-],[data-chapter-id],[onclick*='chapter_id']").forEach { el ->
+            Regex("""chapter_id[:=](\d+)""")
+                .find(el.attr("href") + el.attr("data-chapter-id") + el.attr("onclick"))
+                ?.let { return it.groupValues[1] }
         }
         
         // Fallback: extract from first chapter href
@@ -67,7 +67,7 @@ object IkiruUtils {
             return it.groupValues[1]
         }
         
-        return null
+        return "0"
     }
     
     fun checkCloudflareBlock(response: String): Boolean {

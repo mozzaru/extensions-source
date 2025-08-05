@@ -19,6 +19,7 @@ import java.io.IOException
 import java.text.ParseException
 import java.text.SimpleDateFormat
 import java.util.Locale
+import java.time.Instant
 
 class Ikiru : HttpSource() {
     override val name = "Ikiru"
@@ -31,6 +32,7 @@ class Ikiru : HttpSource() {
 
     private val ajaxHandler by lazy { IkiruAjax(client, baseUrl, headers) }
     private val mangaParser by lazy { IkiruMangaParser() }
+    private val ajaxHelper by lazy { IkiruAjax(client, baseUrl, headers) }
 
     override fun headersBuilder() =
         super.headersBuilder()
@@ -38,6 +40,54 @@ class Ikiru : HttpSource() {
             .add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
             .add("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
             .add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+    
+    override fun fetchChapterList(manga: SManga): Observable<List<SChapter>> {
+        return Observable.fromCallable {
+            // 1) Load halaman manga
+            val resp = client.newCall(GET(baseUrl + manga.url, headers)).execute()
+            val doc  = Jsoup.parse(resp.body!!.string())
+
+            // 2) Ambil mangaId & chapterId
+            val mangaId   = IkiruUtils.findMangaId(doc)
+                ?: throw IOException("Gagal ekstrak manga_id")
+            val chapterId = IkiruUtils.findChapterId(doc)
+
+            // 3) Ambil URL AJAX dari hx-get di #chapter-list
+            val rawPath = doc.selectFirst("#chapter-list[hx-get]")
+                ?.attr("hx-get")?.trim()
+                ?: throw IOException("Tidak dapat menemukan URL AJAX chapter-list")
+            val ajaxUrl = if (rawPath.startsWith("http")) rawPath else baseUrl + rawPath
+
+            // 4) Panggil endpoint AJAX
+            val ajaxResp = client.newCall(GET(ajaxUrl, headers)).execute()
+            if (!ajaxResp.isSuccessful) throw IOException("Gagal load AJAX: ${ajaxResp.code}")
+            val ajaxDoc = Jsoup.parse(ajaxResp.body!!.string())
+
+            // 5) Parsing chapter list
+            val list = ajaxDoc.select("a[href*=\"/chapter-\"]").map { el ->
+                SChapter.create().apply {
+                    url         = el.attr("href").removePrefix(baseUrl)
+                    name        = el.selectFirst("p.inline-block")?.text().orEmpty().ifBlank { el.text().trim() }
+                    date_upload = el.selectFirst("time[datetime]")
+                        ?.attr("datetime")?.let { Instant.parse(it).toEpochMilli() } ?: 0L
+                }
+            }.toMutableList()
+
+            // 6) Fallback head/footer bila list kosong
+            if (list.isEmpty()) {
+                list += ajaxHelper.getChapterList(mangaId, chapterId)
+            }
+
+            // 7) Dedup & kembalikan
+            list.distinctBy { it.url }
+        }
+    }
+
+    // Stub abstract
+    override fun chapterListRequest(manga: SManga): Request =
+        throw UnsupportedOperationException("Unused; use fetchChapterList()")
+    override fun chapterListParse(response: okhttp3.Response): List<SChapter> =
+        throw UnsupportedOperationException("Unused; use fetchChapterList()")
 
     // Popular Manga
     override fun popularMangaRequest(page: Int): Request {
@@ -161,38 +211,6 @@ class Ikiru : HttpSource() {
     override fun mangaDetailsParse(response: Response): SManga {
         val document = Jsoup.parse(response.body?.string() ?: throw IOException("Empty response body"))
         return mangaParser.parseMangaDetails(document)
-    }
-
-    override fun fetchChapterList(manga: SManga): Observable<List<SChapter>> {
-        return Observable.fromCallable {
-            // 1. Load halaman manga
-            val response = client.newCall(GET(baseUrl + manga.url, headers)).execute()
-            val document = response.asJsoup()
-    
-            // 2. Ambil ID untuk AJAX
-            val mangaId = IkiruUtils.findMangaId(document)
-                ?: throw IOException("Tidak dapat menemukan manga_id")
-            val chapterId = IkiruUtils.findChapterId(document)
-                ?: throw IOException("Tidak dapat menemukan chapter_id")
-    
-            // 3. Panggil handler AJAX yang sudah parsing semua chapter
-            return@fromCallable ajaxHandler.getChapterList(mangaId, chapterId)
-        }
-    }
-
-    // Chapter List
-    override fun chapterListRequest(manga: SManga): Request =
-        GET(baseUrl + manga.url, headers)
-
-    override fun chapterListParse(response: Response): List<SChapter> {
-        val document = response.asJsoup()
-        val chapters = mutableListOf<SChapter>()
-
-        // Selector ini menargetkan list item dari respons AJAX
-        document.select("div.eplister > ul > li").forEach {
-            chapters.add(chapterFromElement(it))
-        }
-        return chapters
     }
 
     // Selector untuk detail per chapter dari respons AJAX
