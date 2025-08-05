@@ -26,70 +26,76 @@ class IkiruAjax(
         val chapters = mutableSetOf<SChapter>()
         val timestamp = System.currentTimeMillis()
     
-        // 1) AJAX paginated chapter_list
+        // 1. Ambil dari paginasi chapter_list
         var page = 1
         while (true) {
             val url = "$baseUrl/ajax-call?action=chapter_list&manga_id=$mangaId&page=$page&t=$timestamp"
-            val resp = try {
+            val response = try {
                 client.newCall(Request.Builder().url(url).headers(headers).build()).execute()
             } catch (_: Exception) { break }
     
-            if (!resp.isSuccessful) break
-            val body = resp.body?.string().orEmpty()
+            if (!response.isSuccessful) break
+    
+            val body = response.body?.string().orEmpty()
             if (body.isBlank() || body.contains("Tidak ada chapter", true)) break
     
             val parsed = parseChaptersFromAjax(Jsoup.parse(body))
             if (parsed.isEmpty()) break
+    
             chapters += parsed
             page++
         }
     
-        // 2) Fallback: chapter_selects (head/footer)
-        listOf("head", "footer").forEach { loc ->
-            val url = "$baseUrl/ajax-call?action=chapter_selects&manga_id=$mangaId&chapter_id=$chapterId&loc=$loc&t=$timestamp"
-            val resp = try {
-                client.newCall(Request.Builder().url(url).headers(headers).build()).execute()
-            } catch (_: Exception) { return@forEach }
-            if (!resp.isSuccessful) return@forEach
-            val body = resp.body?.string().orEmpty()
-            if (body.isBlank()) return@forEach
-            chapters += parseChaptersFromAjax(Jsoup.parse(body))
+        // 2. Fallback: Ambil dari head/footer (jika list kosong)
+        if (chapters.isEmpty()) {
+            listOf("head", "footer").forEach { loc ->
+                val url = "$baseUrl/ajax-call?action=chapter_selects&manga_id=$mangaId&chapter_id=$chapterId&loc=$loc&t=$timestamp"
+                val response = try {
+                    client.newCall(Request.Builder().url(url).headers(headers).build()).execute()
+                } catch (_: Exception) { return@forEach }
+    
+                if (!response.isSuccessful) return@forEach
+                val body = response.body?.string().orEmpty()
+                if (body.isBlank()) return@forEach
+    
+                chapters += parseChaptersFromAjax(Jsoup.parse(body))
+            }
         }
     
-        // 3) Fallback: Telusuri halaman baca dari chapterId via tombol >
+        // 3. Fallback terakhir: crawl halaman baca via tombol "next"
         val visited = mutableSetOf<String>()
         var nextUrl = "$baseUrl/chapter-$chapterId"
+    
         while (true) {
             if (nextUrl in visited) break
             visited += nextUrl
     
-            val resp = try {
+            val response = try {
                 client.newCall(Request.Builder().url(nextUrl).headers(headers).build()).execute()
             } catch (_: Exception) { break }
     
-            if (!resp.isSuccessful) break
-            val doc = resp.body?.string()?.let { Jsoup.parse(it) } ?: break
+            if (!response.isSuccessful) break
+            val doc = response.body?.string()?.let { Jsoup.parse(it) } ?: break
     
-            // Tambah chapter dari tombol title di halaman ini
-            doc.select("a.text-text[href*=/chapter-]").firstOrNull()?.let { a ->
-                val url = a.absUrl("href")
-                val name = cleanChapterName(a.text())
-                if (url.isNotBlank() && name.isNotBlank() && chapters.none { it.url == url.removePrefix(baseUrl) }) {
+            // Tambahkan chapter dari halaman ini
+            doc.select("a[href*=/chapter-]").firstOrNull()?.let { link ->
+                val url = link.attr("href")
+                val name = cleanChapterName(link.text())
+                if (url.contains("/chapter-") && chapters.none { it.url == url.removePrefix(baseUrl) }) {
                     chapters += SChapter.create().apply {
                         this.url = url.removePrefix(baseUrl)
                         this.name = name
-                        this.date_upload = System.currentTimeMillis()
+                        this.date_upload = System.currentTimeMillis() // fallback date
                     }
                 }
             }
     
-            // Klik tombol '>' = next chapter
+            // Ambil tombol next: <a aria-label="Go to next chapter">
             val next = doc.selectFirst("a[aria-label='Go to next chapter']")?.absUrl("href") ?: break
             if (next in visited) break
             nextUrl = next
         }
     
-        // Finalize: urutkan & hilangkan duplikat
         return chapters.distinctBy { it.url }.sortedByDescending { extractChapterNumber(it.name) }
     }
 
