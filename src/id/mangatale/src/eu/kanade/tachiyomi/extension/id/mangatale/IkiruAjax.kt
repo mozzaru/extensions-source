@@ -26,7 +26,7 @@ class IkiruAjax(
         val chapters = mutableSetOf<SChapter>()
         val timestamp = System.currentTimeMillis()
     
-        // 1. Ambil semua dari paginasi chapter_list AJAX
+        // 1. Ambil dari paginasi chapter_list AJAX
         var page = 1
         while (true) {
             val url = "$baseUrl/ajax-call?action=chapter_list&manga_id=$mangaId&page=$page&t=$timestamp"
@@ -45,7 +45,23 @@ class IkiruAjax(
             page++
         }
     
-        // 2. Ambil dari reader navigation (next chapter) jika masih ada yang terlewat
+        // 2. Fallback ke chapter_selects jika kosong
+        if (chapters.isEmpty()) {
+            listOf("head", "footer").forEach { loc ->
+                val url = "$baseUrl/ajax-call?action=chapter_selects&manga_id=$mangaId&chapter_id=$chapterId&loc=$loc&t=$timestamp"
+                val resp = try {
+                    client.newCall(Request.Builder().url(url).headers(headers).build()).execute()
+                } catch (_: Exception) { return@forEach }
+    
+                if (!resp.isSuccessful) return@forEach
+                val body = resp.body?.string().orEmpty()
+                if (body.isBlank()) return@forEach
+    
+                chapters += parseChaptersFromAjax(Jsoup.parse(body))
+            }
+        }
+    
+        // 3. Fallback crawling via halaman baca reader (next chapter)
         val visited = mutableSetOf<String>()
         val already = chapters.map { it.url }.toMutableSet()
         var nextUrl = "$baseUrl/chapter-$chapterId"
@@ -60,13 +76,15 @@ class IkiruAjax(
                 Jsoup.parse(resp.body?.string().orEmpty())
             } catch (_: Exception) { break }
     
-            // Ambil link chapter saat ini dari URL halaman
+            // Ambil URL canonical
             val canonicalUrl = doc.selectFirst("link[rel=canonical]")?.attr("href")
             if (canonicalUrl != null && canonicalUrl.contains("/chapter-")) {
                 val chapterHref = canonicalUrl.removePrefix(baseUrl)
                 if (chapterHref !in already) {
-                    val chapterName = doc.selectFirst("button > span")?.text()?.takeIf { it.contains("Chapter") }
+                    val chapterName = doc.selectFirst("button span")
+                        ?.text()?.takeIf { it.contains("Chapter", true) }
                         ?: "Chapter ${extractChapterNumber(chapterHref)}"
+    
                     chapters += SChapter.create().apply {
                         url = chapterHref
                         name = cleanChapterName(chapterName)
@@ -76,12 +94,15 @@ class IkiruAjax(
                 }
             }
     
-            // Ambil tombol next
-            val next = doc.selectFirst("a[aria-label='Next'], a:containsOwn(Next)")?.absUrl("href") ?: break
+            // Cari tombol Next (aria-label & text)
+            val next = doc.selectFirst("a[aria-label=Next], a:containsOwn(Next)")?.absUrl("href") ?: break
+            if (next in visited) break
             nextUrl = next
         }
     
-        return chapters.distinctBy { it.url }.sortedByDescending { extractChapterNumber(it.name) }
+        return chapters
+            .distinctBy { it.url }
+            .sortedByDescending { extractChapterNumber(it.name) }
     }
 
     private fun parseChaptersFromAjax(document: Document): List<SChapter> {
