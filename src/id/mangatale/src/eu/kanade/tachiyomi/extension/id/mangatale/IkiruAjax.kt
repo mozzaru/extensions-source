@@ -11,7 +11,6 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
-import java.util.concurrent.TimeUnit
 
 class IkiruAjax(
     private val client: OkHttpClient,
@@ -28,7 +27,9 @@ class IkiruAjax(
         var page = 1
         while (true) {
             val url = "$baseUrl/ajax-call?action=chapter_list&manga_id=$mangaId&page=$page&t=$timestamp"
-            val resp = try { client.newCall(Request.Builder().url(url).headers(headers).build()).execute() } catch (_: Exception) { break }
+            val resp = try {
+                client.newCall(Request.Builder().url(url).headers(headers).build()).execute()
+            } catch (_: Exception) { break }
             if (!resp.isSuccessful) break
             val body = resp.body?.string().orEmpty()
             if (body.contains("Tidak ada chapter", true)) break
@@ -42,7 +43,9 @@ class IkiruAjax(
         if (chapters.isEmpty()) {
             listOf("head", "footer").forEach { loc ->
                 val url = "$baseUrl/ajax-call?action=chapter_selects&manga_id=$mangaId&chapter_id=$chapterId&loc=$loc&t=$timestamp"
-                val resp = try { client.newCall(Request.Builder().url(url).headers(headers).build()).execute() } catch (_: Exception) { return@forEach }
+                val resp = try {
+                    client.newCall(Request.Builder().url(url).headers(headers).build()).execute()
+                } catch (_: Exception) { return@forEach }
                 if (!resp.isSuccessful) return@forEach
                 val body = resp.body?.string().orEmpty()
                 if (body.isBlank()) return@forEach
@@ -57,9 +60,10 @@ class IkiruAjax(
 
         while (true) {
             if (!visited.add(nextUrl)) break
-            val doc = try { client.newCall(Request.Builder().url(nextUrl).headers(headers).build()).execute().asJsoup() } catch (_: Exception) { break }
+            val doc = try {
+                client.newCall(Request.Builder().url(nextUrl).headers(headers).build()).execute().asJsoup()
+            } catch (_: Exception) { break }
 
-            // Deteksi halaman chapter via URL canonical
             val canonical = doc.selectFirst("link[rel=canonical]")?.attr("href") ?: doc.location()
             if (canonical.contains("/chapter-")) {
                 val chapterHref = canonical.removePrefix(baseUrl)
@@ -77,7 +81,6 @@ class IkiruAjax(
                 }
             }
 
-            // Tombol Next
             val nextBtn = doc.selectFirst(
                 "a[aria-label=\"Next\"],a:has(span[data-lucide=chevron-right])"
             ) ?: break
@@ -91,16 +94,14 @@ class IkiruAjax(
 
     private fun parseChaptersFromAjax(document: Document): List<SChapter> {
         return document.select("a[href*=/chapter-]").mapNotNull { el ->
-            el.takeIf { it.hasAttr("href") }?.let {
-                val href = it.absUrl("href").removePrefix(baseUrl)
-                val chapterName = cleanChapterName(it.text())
-                val dateText = it.parent()?.selectFirst(".chapter-date")?.text().orEmpty()
-                val dateUpload = parseFriendlyDate(dateText)
-                SChapter.create().apply {
-                    url = href
-                    name = chapterName
-                    date_upload = dateUpload
-                }
+            val href = el.absUrl("href").removePrefix(baseUrl)
+            val chapterName = cleanChapterName(el.text())
+            val dateText = el.parent()?.selectFirst(".chapter-date")?.text().orEmpty()
+            val dateUpload = parseFriendlyDate(dateText)
+            SChapter.create().apply {
+                url = href
+                name = chapterName
+                date_upload = dateUpload
             }
         }
     }
@@ -120,16 +121,12 @@ class IkiruAjax(
                 val days = Regex("\\d+").find(lower)?.value?.toLongOrNull() ?: 0L
                 now.apply { add(Calendar.DAY_OF_MONTH, -days.toInt()) }.timeInMillis
             }
-            else -> runCatching {
+            text.matches(Regex("\\d{2}/\\d{2}/\\d{2}")) -> runCatching {
                 SimpleDateFormat("dd/MM/yy", Locale("id")).parse(text)!!.time
             }.getOrDefault(now.timeInMillis)
+            else -> 0L
         }
     }
-
-    private fun formatDateDateOnly(timestamp: Long): String =
-        SimpleDateFormat("dd/MM/yy", Locale("id")).apply {
-            timeZone = jakartaTimeZone
-        }.format(Date(timestamp))
 
     private fun extractChapterNumber(name: String): Float =
         Regex("chapter\\s*(\\d+(?:\\.\\d+)?)", RegexOption.IGNORE_CASE)
