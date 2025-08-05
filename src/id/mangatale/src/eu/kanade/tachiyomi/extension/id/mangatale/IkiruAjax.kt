@@ -33,7 +33,7 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
                     if (body.isBlank() || body.contains("Tidak ada chapter", true)) return@use
     
                     val doc = Jsoup.parse(body)
-                    val parsed = parseChapters(doc)
+                    val parsed = parseChaptersFromAjax(doc)
                     if (parsed.isEmpty()) return@use
                     chapters += parsed
                     page++
@@ -55,7 +55,7 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
                         val body = response.body?.string().orEmpty()
                         if (body.isBlank()) return@use
                         val doc = Jsoup.parse(body)
-                        chapters += parseChapters(doc)
+                        chapters += parseChaptersFromAjax(doc)
                     }
                 } catch (_: Exception) {}
             }
