@@ -206,7 +206,10 @@ class Ikiru : HttpSource() {
     }
 
     // Manga Details
-    override fun mangaDetailsRequest(manga: SManga): Request = GET(baseUrl + manga.url, headers)
+    override fun mangaDetailsRequest(manga: SManga): Request {
+        val url = "$baseUrl${manga.url}?t=${System.currentTimeMillis()}"
+        return GET(url, headers)
+    }
 
     override fun mangaDetailsParse(response: Response): SManga {
         val document = Jsoup.parse(response.body?.string() ?: throw IOException("Empty response body"))

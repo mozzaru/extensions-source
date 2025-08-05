@@ -148,10 +148,14 @@ class IkiruAjax(
     private fun formatDateForDisplay(timestamp: Long): String {
         val now = Calendar.getInstance(jakartaTimeZone)
         val date = Calendar.getInstance(jakartaTimeZone).apply { timeInMillis = timestamp }
-
+    
+        val diffInMillis = now.timeInMillis - date.timeInMillis
+        val daysDiff = (diffInMillis / (1000 * 60 * 60 * 24)).toInt()
+    
         return when {
-            isSameDay(now, date) -> "Hari Ini"
-            isYesterday(now, date) -> "Kemarin"
+            daysDiff == 0 -> "Hari Ini"
+            daysDiff == 1 -> "1 hari yang lalu"
+            daysDiff in 2..6 -> "$daysDiff hari yang lalu"
             else -> SimpleDateFormat("dd/MM/yy", Locale.ENGLISH).apply {
                 timeZone = jakartaTimeZone
             }.format(Date(timestamp))
