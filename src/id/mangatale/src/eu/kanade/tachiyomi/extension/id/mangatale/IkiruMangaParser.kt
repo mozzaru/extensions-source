@@ -71,11 +71,10 @@ class IkiruMangaParser {
      * Fungsi bantuan untuk mengambil informasi dari blok detail manga.
      * `key` adalah label yang dicari, contoh: "Type", "Released", "Author".
      */
-    private fun getInfo(element: org.jsoup.nodes.Element?, key: String): String? {
+    private fun getInfo(element: Element?, key: String): String? {
         if (element == null) return null
-        return element.select("div.flex:has(h4 > span:contains($key))")
-            .firstOrNull()
-            ?.select("div.inline p, a") // Bisa berupa <p> atau <a>
-            ?.text()?.trim()
+        return element.select("div.flex").firstOrNull { block ->
+            block.select("h4 span").any { it.text().contains(key, ignoreCase = true) }
+        }?.selectFirst("div.inline p, div.inline a")?.text()?.trim()
     }
 }

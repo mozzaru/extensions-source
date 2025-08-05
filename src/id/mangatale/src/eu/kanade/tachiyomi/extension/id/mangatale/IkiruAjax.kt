@@ -28,9 +28,7 @@ class IkiruAjax(
         var page = 1
         while (true) {
             val url = "$baseUrl/ajax-call?action=chapter_list&manga_id=$mangaId&page=$page&t=$timestamp"
-            val resp = try {
-                client.newCall(Request.Builder().url(url).headers(headers).build()).execute()
-            } catch (_: Exception) { break }
+            val resp = try { client.newCall(Request.Builder().url(url).headers(headers).build()).execute() } catch (_: Exception) { break }
             if (!resp.isSuccessful) break
             val body = resp.body?.string().orEmpty()
             if (body.contains("Tidak ada chapter", true)) break
@@ -44,9 +42,7 @@ class IkiruAjax(
         if (chapters.isEmpty()) {
             listOf("head", "footer").forEach { loc ->
                 val url = "$baseUrl/ajax-call?action=chapter_selects&manga_id=$mangaId&chapter_id=$chapterId&loc=$loc&t=$timestamp"
-                val resp = try {
-                    client.newCall(Request.Builder().url(url).headers(headers).build()).execute()
-                } catch (_: Exception) { return@forEach }
+                val resp = try { client.newCall(Request.Builder().url(url).headers(headers).build()).execute() } catch (_: Exception) { return@forEach }
                 if (!resp.isSuccessful) return@forEach
                 val body = resp.body?.string().orEmpty()
                 if (body.isBlank()) return@forEach
@@ -61,25 +57,22 @@ class IkiruAjax(
 
         while (true) {
             if (!visited.add(nextUrl)) break
-            val doc = try {
-                client.newCall(Request.Builder().url(nextUrl).headers(headers).build()).execute().asJsoup()
-            } catch (_: Exception) { break }
+            val doc = try { client.newCall(Request.Builder().url(nextUrl).headers(headers).build()).execute().asJsoup() } catch (_: Exception) { break }
 
             // Deteksi halaman chapter via URL canonical
             val canonical = doc.selectFirst("link[rel=canonical]")?.attr("href") ?: doc.location()
             if (canonical.contains("/chapter-")) {
                 val chapterHref = canonical.removePrefix(baseUrl)
                 if (chapterHref !in already) {
-                    // Parse nama
                     val rawName = doc.selectFirst("div.font-semibold.text-gray-50.text-sm")?.text().orEmpty()
                     val chapterName = cleanChapterName(rawName)
-                    // Parse tanggal
                     val dateEl = doc.selectFirst("time[itemprop=dateCreated], time[itemprop=datePublished]")
                     val dateUpload = dateEl?.let { parseDateFromDatetime(it) } ?: System.currentTimeMillis()
                     chapters += SChapter.create().apply {
                         url = chapterHref
                         name = chapterName
                         date_upload = dateUpload
+                        scanlator = formatDateDateOnly(dateUpload)
                     }
                     already += chapterHref
                 }
@@ -87,8 +80,7 @@ class IkiruAjax(
 
             // Tombol Next
             val nextBtn = doc.selectFirst(
-                "a[aria-label=\"Next\"]," +
-                "a:has(span[data-lucide=chevron-right])"
+                "a[aria-label=\"Next\"],a:has(span[data-lucide=chevron-right])"
             ) ?: break
             nextUrl = nextBtn.absUrl("href")
         }
@@ -102,31 +94,30 @@ class IkiruAjax(
         return document.select("a[href*=/chapter-]").mapNotNull { el ->
             el.takeIf { it.hasAttr("href") }?.let {
                 val href = it.absUrl("href").removePrefix(baseUrl)
-                val name = cleanChapterName(it.text())
+                val chapterName = cleanChapterName(it.text())
                 val dateText = it.parent()?.selectFirst(".chapter-date")?.text().orEmpty()
                 val dateUpload = parseFriendlyDate(dateText)
                 SChapter.create().apply {
                     url = href
-                    this.name = name
+                    name = chapterName
                     date_upload = dateUpload
+                    scanlator = formatDateDateOnly(dateUpload)
                 }
             }
         }
     }
 
-    private fun parseDateFromDatetime(el: Element): Long {
-        return runCatching {
-            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.ENGLISH)
-                .parse(el.attr("datetime"))!!.time
-        }.getOrDefault(System.currentTimeMillis())
-    }
+    private fun parseDateFromDatetime(el: Element): Long = runCatching {
+        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.ENGLISH)
+            .parse(el.attr("datetime"))!!.time
+    }.getOrDefault(System.currentTimeMillis())
 
     private fun parseFriendlyDate(text: String): Long {
         val now = Calendar.getInstance(jakartaTimeZone)
         val lower = text.lowercase(Locale("id"))
         return when {
-            "hari ini" in lower -> now.timeInMillis
-            "kemarin" in lower -> now.apply { add(Calendar.DAY_OF_MONTH, -1) }.timeInMillis
+            "hari ini" in lower   -> now.timeInMillis
+            "kemarin" in lower    -> now.apply { add(Calendar.DAY_OF_MONTH, -1) }.timeInMillis
             lower.matches(Regex(".*\\d+\\s+hari\\s+lalu.*")) -> {
                 val days = Regex("\\d+").find(lower)?.value?.toLongOrNull() ?: 0L
                 now.apply { add(Calendar.DAY_OF_MONTH, -days.toInt()) }.timeInMillis
@@ -137,12 +128,15 @@ class IkiruAjax(
         }
     }
 
-    private fun extractChapterNumber(name: String): Float {
-        return Regex("chapter\\s*(\\d+(?:\\.\\d+)?)", RegexOption.IGNORE_CASE)
-            .find(name)?.groups?.get(1)?.value?.toFloatOrNull() ?: 0f
-    }
+    private fun formatDateDateOnly(timestamp: Long): String =
+        SimpleDateFormat("dd/MM/yy", Locale("id")).apply {
+            timeZone = jakartaTimeZone
+        }.format(Date(timestamp))
 
-    private fun cleanChapterName(name: String): String {
-        return name.trim().replace(Regex("(?i)^chapter\\s*"), "Chapter ")
-    }
+    private fun extractChapterNumber(name: String): Float =
+        Regex("chapter\\s*(\\d+(?:\\.\\d+)?)", RegexOption.IGNORE_CASE)
+            .find(name)?.groups?.get(1)?.value?.toFloatOrNull() ?: 0f
+
+    private fun cleanChapterName(name: String): String =
+        name.trim().replace(Regex("(?i)^chapter\\s*"), "Chapter ")
 }
