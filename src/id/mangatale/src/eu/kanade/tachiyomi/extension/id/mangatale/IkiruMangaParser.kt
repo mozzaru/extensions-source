@@ -5,30 +5,30 @@ import org.jsoup.nodes.Document
 import java.util.Locale
 
 class IkiruMangaParser {
-    
+
     fun parseMangaDetails(document: Document): SManga {
         return SManga.create().apply {
             title = document.selectFirst("h1[itemprop=name]")?.text()?.trim().orEmpty()
             thumbnail_url = document.selectFirst("div[itemprop=image] img")?.absUrl("src") ?: ""
-            
             description = buildDescription(document)
-            author = extractAuthor(document)
-            genre = extractGenres(document)
-            status = extractStatus(document)
+
+            // Menggunakan fungsi bantuan untuk mengambil info
+            val infoContainer = document.selectFirst("div.space-y-2")
+
+            author = getInfo(infoContainer, "Author") ?: "Tidak diketahui"
+            genre = extractGenres(document, infoContainer)
+            status = extractStatus(infoContainer)
         }
     }
-    
+
     private fun buildDescription(document: Document): String {
-        val altTitle = document.selectFirst("div.block.text-sm.text-text.line-clamp-1")
-            ?.text()?.trim()
-        
-        val desc = document.select("div[itemprop=description][data-show=false]")
-            .joinToString("\n") { it.text().trim() }
-            .ifBlank {
-                document.select("div[itemprop=description]")
-                    .joinToString("\n") { it.text().trim() }
-            }.ifBlank { "Tidak ada deskripsi." }
-        
+        val altTitle = getInfo(document.selectFirst("div.flex.w-full.flex-col"), "Alternative")
+            ?: document.selectFirst("div.block.text-sm.text-text.line-clamp-1")?.text()?.trim()
+
+        val desc = document.select("div[itemprop=description]")
+            .firstOrNull()?.text()?.trim()
+            ?: "Tidak ada deskripsi."
+
         return buildString {
             append(desc)
             if (!altTitle.isNullOrEmpty()) {
@@ -36,40 +36,46 @@ class IkiruMangaParser {
             }
         }
     }
-    
-    private fun extractAuthor(document: Document): String {
-        return document.selectFirst("div:has(h4:contains(Author)) > div > p")
-            ?.text()?.takeIf { it.isNotBlank() }
-            ?: document.selectFirst("[itemprop=author]")?.text()
-            ?: "Tidak diketahui"
-    }
-    
-    private fun extractGenres(document: Document): String {
+
+    private fun extractGenres(document: Document, infoContainer: org.jsoup.nodes.Element?): String {
         val genres = document.select("a[href*='/genre/']")
             .map { it.text().trim() }
             .toMutableList()
-        
-        // Add type (manhwa/manhua/manga) to genres
-        document.selectFirst("div:has(h4:contains(Type)) > div > p")
-            ?.text()?.trim()?.let { type ->
-                if (type.isNotEmpty() && !genres.contains(type)) {
-                    genres.add(0, type)
-                }
+
+        // Menambahkan 'Type' (Manhwa/Manhua/Manga) ke dalam daftar genre
+        getInfo(infoContainer, "Type")?.let { type ->
+            if (type.isNotEmpty() && !genres.contains(type)) {
+                genres.add(0, type)
             }
-        
+        }
+
         return genres.joinToString()
     }
-    
-    private fun extractStatus(document: Document): Int {
-        val rawStatus = document.selectFirst("div:has(h4:matches(Status))")
-            ?.selectFirst("div, p, span")
-            ?.text()?.trim()?.lowercase(Locale.ROOT) ?: ""
-        
+
+    private fun extractStatus(infoContainer: org.jsoup.nodes.Element?): Int {
+        // Mencari status di dua tempat yang memungkinkan
+        val statusString = getInfo(infoContainer, "Status")
+            ?: infoContainer?.parent()?.select("small:contains(Favorites)")?.firstOrNull()
+                ?.parent()?.parent()?.select("span.font-bold")?.lastOrNull()?.text()
+            ?: ""
+
         return when {
-            rawStatus.contains("ongoing") || rawStatus.contains("berlanjut") -> SManga.ONGOING
-            rawStatus.contains("completed") || rawStatus.contains("selesai") || rawStatus.contains("tamat") -> SManga.COMPLETED
-            rawStatus.contains("hiatus") -> SManga.ON_HIATUS
+            statusString.equals("Ongoing", true) -> SManga.ONGOING
+            statusString.equals("Completed", true) -> SManga.COMPLETED
+            statusString.equals("Hiatus", true) -> SManga.ON_HIATUS
             else -> SManga.UNKNOWN
         }
+    }
+
+    /**
+     * Fungsi bantuan untuk mengambil informasi dari blok detail manga.
+     * `key` adalah label yang dicari, contoh: "Type", "Released", "Author".
+     */
+    private fun getInfo(element: org.jsoup.nodes.Element?, key: String): String? {
+        if (element == null) return null
+        return element.select("div.flex:has(h4 > span:contains($key))")
+            .firstOrNull()
+            ?.select("div.inline p, a") // Bisa berupa <p> atau <a>
+            ?.text()?.trim()
     }
 }

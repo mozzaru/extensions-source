@@ -96,6 +96,17 @@ object IkiruUtils {
     }
     
     fun isValidMangaUrl(url: String): Boolean {
-        return url.isNotBlank() && url.contains("/manga/") && !url.contains("javascript:")
+        return url.isNotBlank() && 
+               url.contains("/manga/") && 
+               !url.contains("javascript:") &&
+               !url.contains("data:") &&
+               !url.contains("file:") &&
+               url.startsWith("http")
+    }
+    
+    private fun validateMangaUrl(url: String): String {
+        require(url.isNotBlank()) { "Manga URL cannot be blank" }
+        require(url.startsWith("/manga/")) { "Invalid manga URL format" }
+        return url
     }
 }

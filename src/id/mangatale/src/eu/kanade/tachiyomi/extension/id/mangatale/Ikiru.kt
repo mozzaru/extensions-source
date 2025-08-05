@@ -8,10 +8,17 @@ import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
+import eu.kanade.tachiyomi.util.asJsoup
 import okhttp3.FormBody
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.Jsoup
+import org.jsoup.nodes.Element
+import rx.Observable
+import java.io.IOException
+import java.text.ParseException
+import java.text.SimpleDateFormat
+import java.util.Locale
 
 class Ikiru : HttpSource() {
     override val name = "Ikiru"
@@ -64,18 +71,45 @@ class Ikiru : HttpSource() {
             .add("page", page.toString())
             .add("query", query)
             .add("orderby", "popular")
-            .build()
-        return POST("$baseUrl/ajax-call?action=advanced_search", headers, formBody)
+
+        // Process filters
+        filters.forEach { filter ->
+            when (filter) {
+                is TypeFilter -> {
+                    val type = filter.toUriPart()
+                    if (type.isNotEmpty()) {
+                        formBody.add("type", type)
+                    }
+                }
+                is StatusFilter -> {
+                    val status = filter.toUriPart()
+                    if (status.isNotEmpty()) {
+                        formBody.add("status", status)
+                    }
+                }
+                is GenreFilterList -> {
+                    val genres = filter.state
+                        .filter { it.state }
+                        .joinToString(",") { it.id }
+                    if (genres.isNotEmpty()) {
+                        formBody.add("genres", genres)
+                    }
+                }
+                else -> { /* Handle other filter types or ignore */ }
+            }
+        }
+        
+        return POST("$baseUrl/ajax-call?action=advanced_search", headers, formBody.build())
     }
 
     override fun searchMangaParse(response: Response): MangasPage = parseMangaResponse(response)
 
     // Common manga parsing
     private fun parseMangaResponse(response: Response): MangasPage {
-        val raw = response.body!!.string()
+        val raw = response.body?.string() ?: throw IOException("Empty response body")
         
         if (IkiruUtils.checkCloudflareBlock(raw)) {
-            throw Exception("Diblokir Cloudflare - Silakan coba lagi nanti")
+            throw IOException("Diblokir Cloudflare - Silakan coba lagi nanti")
         }
 
         val document = Jsoup.parse(raw)
@@ -125,30 +159,65 @@ class Ikiru : HttpSource() {
     override fun mangaDetailsRequest(manga: SManga): Request = GET(baseUrl + manga.url, headers)
 
     override fun mangaDetailsParse(response: Response): SManga {
-        val document = Jsoup.parse(response.body!!.string())
+        val document = Jsoup.parse(response.body?.string() ?: throw IOException("Empty response body"))
         return mangaParser.parseMangaDetails(document)
+    }
+    
+    override fun fetchChapterList(manga: SManga): Observable<List<SChapter>> {
+        return Observable.fromCallable {
+            val response = client.newCall(GET(baseUrl + manga.url, headers)).execute()
+            val document = response.asJsoup()
+            val ajaxUrl = document.selectFirst("#chapter-list")?.attr("abs:hx-get")
+            if (ajaxUrl.isNullOrEmpty()) {
+                throw IOException("Tidak dapat menemukan URL AJAX untuk chapter list")
+            }
+            // Lakukan request kedua ke URL AJAX dan parse hasilnya
+            val chapterResponse = client.newCall(GET(ajaxUrl, headers)).execute()
+            chapterListParse(chapterResponse)
+        }
     }
 
     // Chapter List
     override fun chapterListRequest(manga: SManga): Request =
-    GET(baseUrl + manga.url, headers)
+        GET(baseUrl + manga.url, headers)
 
     override fun chapterListParse(response: Response): List<SChapter> {
-        val document = Jsoup.parse(response.body!!.string())
-        
-        val mangaId = IkiruUtils.findMangaId(document) 
-            ?: throw Exception("Manga ID tidak ditemukan")
-        val chapterId = IkiruUtils.findChapterId(document) 
-            ?: throw Exception("Chapter ID tidak ditemukan")
-        
-        return ajaxHandler.getChapterList(mangaId, chapterId)
+        val document = response.asJsoup()
+        val chapters = mutableListOf<SChapter>()
+
+        // Selector ini menargetkan list item dari respons AJAX
+        document.select("div.eplister > ul > li").forEach {
+            chapters.add(chapterFromElement(it))
+        }
+        return chapters
+    }
+
+    // Selector untuk detail per chapter dari respons AJAX
+    private fun chapterFromElement(element: Element): SChapter {
+        return SChapter.create().apply {
+            setUrlWithoutDomain(element.selectFirst("a")!!.attr("href"))
+            name = element.selectFirst("span.chapternum")!!.text()
+            date_upload = parseChapterDate(element.selectFirst("span.chapterdate")?.text())
+        }
+    }
+
+    // Fungsi untuk parsing tanggal, pastikan formatnya sesuai
+    private fun parseChapterDate(date: String?): Long {
+        if (date == null) return 0L
+        return try {
+            // Contoh format: "August 5, 2025". Sesuaikan jika berbeda.
+            // Anda mungkin perlu menambahkan logika untuk menangani "X hours ago" atau "Kemarin"
+            SimpleDateFormat("MMMM d, yyyy", Locale.ENGLISH).parse(date)?.time ?: 0L
+        } catch (e: ParseException) {
+            0L
+        }
     }
 
     // Page List
     override fun pageListRequest(chapter: SChapter): Request = GET(baseUrl + chapter.url, headers)
 
     override fun pageListParse(response: Response): List<Page> {
-        val document = Jsoup.parse(response.body!!.string())
+        val document = Jsoup.parse(response.body?.string() ?: throw IOException("Empty response body"))
         return document.select("""
             section.mx-auto img, 
             section.w-full img, 
@@ -165,5 +234,6 @@ class Ikiru : HttpSource() {
     }
 
     override fun imageUrlParse(response: Response): String = throw UnsupportedOperationException("Not used")
-    override fun getFilterList(): FilterList = FilterList()
+    
+    override fun getFilterList(): FilterList = getFilterListInternal()
 }
