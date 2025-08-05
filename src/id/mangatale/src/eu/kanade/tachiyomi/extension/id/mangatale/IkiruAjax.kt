@@ -28,61 +28,56 @@ class IkiruAjax(
         val chapters = mutableSetOf<SChapter>()
         val timestamp = System.currentTimeMillis()
     
-        // 1. Ambil dari paginasi chapter_list AJAX
+        // 1. AJAX chapter_list
         var page = 1
         while (true) {
             val url = "$baseUrl/ajax-call?action=chapter_list&manga_id=$mangaId&page=$page&t=$timestamp"
             val resp = try {
                 client.newCall(Request.Builder().url(url).headers(headers).build()).execute()
             } catch (_: Exception) { break }
-    
             if (!resp.isSuccessful) break
             val body = resp.body?.string().orEmpty()
             if (body.contains("Tidak ada chapter", true)) break
-    
-            val parsed = parseChaptersFromAjax(Jsoup.parse(body))
+            val parsed = parseChaptersFromAjax(resp.asJsoup())
             if (parsed.isEmpty()) break
-    
             chapters += parsed
             page++
         }
     
-        // 2. Fallback ke chapter_selects jika kosong
+        // 2. Fallback chapter_selects
         if (chapters.isEmpty()) {
             listOf("head", "footer").forEach { loc ->
                 val url = "$baseUrl/ajax-call?action=chapter_selects&manga_id=$mangaId&chapter_id=$chapterId&loc=$loc&t=$timestamp"
                 val resp = try {
                     client.newCall(Request.Builder().url(url).headers(headers).build()).execute()
                 } catch (_: Exception) { return@forEach }
-    
                 if (!resp.isSuccessful) return@forEach
                 val body = resp.body?.string().orEmpty()
                 if (body.isBlank()) return@forEach
-    
-                chapters += parseChaptersFromAjax(Jsoup.parse(body))
+                chapters += parseChaptersFromAjax(resp.asJsoup())
             }
         }
     
-        // 3. Fallback crawling via halaman baca reader (next chapter)
-        // … sebelum loop sudah tarik `chapters` dari AJAX/fallback …
-
-        var nextUrl = "$baseUrl/chapter-$chapterId"
+        // 3. Crawl reader next
         val visited = mutableSetOf<String>()
         val already = chapters.map { it.url }.toMutableSet()
-        
+        var nextUrl = "$baseUrl/chapter-$chapterId"
+    
         while (true) {
             if (!visited.add(nextUrl)) break
-            val doc = client.newCall(Request.Builder().url(nextUrl).headers(headers).build())
-                .execute().asJsoup()
-        
-            // 1) DETEKSI HALAMAN CHAPTER
+            val doc = try {
+                client.newCall(Request.Builder().url(nextUrl).headers(headers).build()).execute().asJsoup()
+            } catch (_: Exception) { break }
+    
+            // Deteksi halaman chapter via URL canonical
             val canonical = doc.selectFirst("link[rel=canonical]")?.attr("href") ?: doc.location()
             if (canonical.contains("/chapter-")) {
                 val chapterHref = canonical.removePrefix(baseUrl)
                 if (chapterHref !in already) {
-                    // Ambil nama & tanggal
+                    // Parse nama
                     val rawName = doc.selectFirst("div.font-semibold.text-gray-50.text-sm")?.text().orEmpty()
                     val chapterName = cleanChapterName(rawName)
+                    // Parse tanggal
                     val dateEl = doc.selectFirst("time[itemprop=dateCreated], time[itemprop=datePublished]")
                     val dateUpload = dateEl?.let { parseDateFromDatetime(it) } ?: System.currentTimeMillis()
                     chapters += SChapter.create().apply {
@@ -93,11 +88,10 @@ class IkiruAjax(
                     already += chapterHref
                 }
             }
-        
-            // 2) CARI LINK NEXT
+    
+            // Tombol Next
             val nextBtn = doc.selectFirst(
-                "a[aria-label=Next]," +
-                "a[aria-label='下一章']," +
+                "a[aria-label=\"Next\"]," +
                 "a:has(span[data-lucide=chevron-right])"
             ) ?: break
             nextUrl = nextBtn.absUrl("href")
@@ -264,14 +258,11 @@ class IkiruAjax(
         }, date)
     }
     
-    private fun parseDateFromDatetime(element: Element): Long? {
-        return element.selectFirst("time[itemprop=dateCreated]")?.attr("datetime")?.let { dateStr ->
-            try {
-                SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.ENGLISH).parse(dateStr)?.time
-            } catch (e: Exception) {
-                null
-            }
-        }
+    private fun parseDateFromDatetime(el: Element): Long {
+        return runCatching {
+            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.ENGLISH)
+                .parse(el.attr("datetime"))!!.time
+        }.getOrDefault(System.currentTimeMillis())
     }
     
     private fun parseDateText(dateText: String): Long {
@@ -290,6 +281,22 @@ class IkiruAjax(
                     0L
                 }
             }
+        }
+    }
+    
+    private fun parseFriendlyDate(text: String): Long {
+        val now = Calendar.getInstance(jakartaTimeZone)
+        val lower = text.lowercase(Locale("id"))
+        return when {
+            "hari ini" in lower -> now.timeInMillis
+            "kemarin" in lower -> now.apply { add(Calendar.DAY_OF_MONTH, -1) }.timeInMillis
+            lower.matches(Regex(".*\\d+\\s+hari\\s+lalu.*")) -> {
+                val days = Regex("\\d+").find(lower)?.value?.toLongOrNull() ?: 0L
+                now.apply { add(Calendar.DAY_OF_MONTH, -days.toInt()) }.timeInMillis
+            }
+            else -> runCatching {
+                SimpleDateFormat("dd/MM/yy", Locale("id")).parse(text)!!.time
+            }.getOrDefault(now.timeInMillis)
         }
     }
 }
