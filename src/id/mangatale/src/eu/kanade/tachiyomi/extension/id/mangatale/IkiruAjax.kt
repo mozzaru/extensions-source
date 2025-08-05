@@ -73,11 +73,11 @@ class IkiruAjax(
         val chapterLink = element.select("a[href*=/chapter-]").firstOrNull() ?: return null
         val href = chapterLink.attr("href").takeIf { it.isNotBlank() } ?: return null
         val name = cleanChapterName(chapterLink.text()).takeIf { it.isNotBlank() } ?: return null
-        val (uploadTime, displayDate) = extractUploadDateFromElement(element)
-
+        val (uploadTime, _) = extractUploadDateFromElement(element) // displayDate diabaikan
+    
         return SChapter.create().apply {
             url = href.removePrefix(baseUrl)
-            this.name = "$name\n$displayDate"
+            this.name = name
             this.date_upload = uploadTime
         }
     }
