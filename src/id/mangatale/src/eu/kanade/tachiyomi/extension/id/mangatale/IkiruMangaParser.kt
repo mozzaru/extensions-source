@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.extension.id.mangatale
 
 import eu.kanade.tachiyomi.source.model.SManga
 import org.jsoup.nodes.Document
+import org.jsoup.nodes.Element
 import java.util.Locale
 
 class IkiruMangaParser {
@@ -52,17 +53,16 @@ class IkiruMangaParser {
         return genres.joinToString()
     }
 
-    private fun extractStatus(infoContainer: org.jsoup.nodes.Element?): Int {
-        // Mencari status di dua tempat yang memungkinkan
+    private fun extractStatus(infoContainer: Element?): Int {
         val statusString = getInfo(infoContainer, "Status")
-            ?: infoContainer?.parent()?.select("small:contains(Favorites)")?.firstOrNull()
-                ?.parent()?.parent()?.select("span.font-bold")?.lastOrNull()?.text()
-            ?: ""
-
+            ?.lowercase(Locale.ENGLISH)
+            ?: return SManga.UNKNOWN
+    
         return when {
-            statusString.equals("Ongoing", true) -> SManga.ONGOING
-            statusString.equals("Completed", true) -> SManga.COMPLETED
-            statusString.equals("Hiatus", true) -> SManga.ON_HIATUS
+            "ongoing" in statusString -> SManga.ONGOING
+            "completed" in statusString -> SManga.COMPLETED
+            "hiatus" in statusString -> SManga.ON_HIATUS
+            "dropped" in statusString -> SManga.CANCELLED
             else -> SManga.UNKNOWN
         }
     }

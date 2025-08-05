@@ -119,7 +119,7 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             
             return SChapter.create().apply {
                 url = href.removePrefix(baseUrl)
-                this.name = name
+                this.name = "$name\n${formatDateForDisplay(uploadTime, dateStr)}"
                 this.scanlator = null
                 this.date_upload = uploadTime
             }
@@ -145,7 +145,7 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             
             return SChapter.create().apply {
                 url = href.removePrefix(baseUrl)
-                this.name = name
+                this.name = "$name\n${formatDateForDisplay(uploadTime, dateStr)}"
                 this.scanlator = null
                 this.date_upload = uploadTime
             }
@@ -171,7 +171,7 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             
             return SChapter.create().apply {
                 url = href.removePrefix(baseUrl)
-                this.name = name
+                this.name = "$name\n${formatDateForDisplay(uploadTime, dateStr)}"
                 this.scanlator = null
                 this.date_upload = uploadTime
             }
@@ -198,7 +198,7 @@ class IkiruAjax(private val client: OkHttpClient, private val baseUrl: String, p
             
             return SChapter.create().apply {
                 url = href.removePrefix(baseUrl)
-                this.name = name
+                this.name = "$name\n${formatDateForDisplay(uploadTime, dateStr)}"
                 this.scanlator = null
                 this.date_upload = uploadTime
             }
