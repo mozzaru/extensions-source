@@ -25,7 +25,7 @@ class IkiruAjax(
     fun getChapterList(mangaId: String, chapterId: String): List<SChapter> {
         val chapters = mutableSetOf<SChapter>()
         val timestamp = System.currentTimeMillis()
-
+    
         // 1. AJAX chapter_list
         var page = 1
         while (true) {
@@ -33,15 +33,14 @@ class IkiruAjax(
             val resp = try {
                 client.newCall(Request.Builder().url(url).headers(headers).build()).execute()
             } catch (_: Exception) { break }
-            if (!resp.isSuccessful) break
-            if (resp.body?.string().orEmpty().contains("Tidak ada chapter", true)) break
-
+            if (!resp.isSuccessful || resp.body?.string().orEmpty().contains("Tidak ada chapter", true)) break
+    
             val parsed = parseChaptersFromAjax(resp.asJsoup())
             if (parsed.isEmpty()) break
             chapters += parsed
             page++
         }
-
+    
         // 2. Fallback chapter_selects
         if (chapters.isEmpty()) {
             listOf("head", "footer").forEach { loc ->
@@ -53,20 +52,15 @@ class IkiruAjax(
                 chapters += parseChaptersFromAjax(resp.asJsoup())
             }
         }
-
-        // 3. Crawl reader next (termasuk halaman awal manga detail jika chapter tersembunyi)
-        val visited = mutableSetOf<String>()
+    
+        // 3. Coba crawl dari halaman detail
         val already = chapters.map { it.url }.toMutableSet()
-        val chapterPaths = mutableSetOf<String>()
-        var nextUrl = "$baseUrl/chapter-$chapterId"
-
-        // Coba juga halaman manga detail, bisa jadi ada chapter di sana yg tidak muncul di reader
         val detailDoc = try {
             client.newCall(Request.Builder().url("$baseUrl/manga/$mangaId").headers(headers).build()).execute().asJsoup()
         } catch (_: Exception) { null }
         detailDoc?.select("a[href*=/chapter-]")?.forEach { el ->
             val href = el.absUrl("href").removePrefix(baseUrl)
-            if (href !in already && href !in chapterPaths) {
+            if (href !in already) {
                 val name = cleanChapterName(el.text())
                 val dateText = el.parent()?.selectFirst(".chapter-date")?.text().orEmpty()
                 val dateUpload = parseAbsoluteDate(dateText) ?: defaultTimestamp()
@@ -75,47 +69,47 @@ class IkiruAjax(
                     this.name = name
                     this.date_upload = dateUpload
                 }
-                chapterPaths += href
+                already += href
             }
         }
-
+    
+        // 4. Crawl mode reader: dari halaman chapter-XX -> tombol next (>)
+        val visited = mutableSetOf<String>()
+        var nextUrl = "$baseUrl/chapter-$chapterId"
+    
         while (true) {
             if (!visited.add(nextUrl)) break
+    
             val doc = try {
                 client.newCall(Request.Builder().url(nextUrl).headers(headers).build()).execute().asJsoup()
             } catch (_: Exception) { break }
-
-            val canonical = doc.selectFirst("link[rel=canonical]")?.attr("href") ?: doc.location()
-            if (canonical.contains("/chapter-")) {
-                val chapterHref = canonical.removePrefix(baseUrl)
-                if (chapterHref !in already) {
-                    val rawName = doc.selectFirst("div.font-semibold.text-gray-50.text-sm")?.text().orEmpty()
-                    val chapterName = cleanChapterName(rawName)
-                    val dateEl = doc.selectFirst("time[itemprop=dateCreated], time[itemprop=datePublished]")
-                    val dateUpload = parseDateFromDatetime(dateEl) ?: defaultTimestamp()
-                    chapters += SChapter.create().apply {
-                        url = chapterHref
-                        name = chapterName
-                        date_upload = dateUpload
-                    }
-                    already += chapterHref
+    
+            val chapterHref = nextUrl.removePrefix(baseUrl)
+            if (chapterHref !in already) {
+                val rawName = doc.selectFirst("div.font-semibold.text-gray-50.text-sm")?.text().orEmpty()
+                val chapterName = cleanChapterName(rawName)
+                val dateEl = doc.selectFirst("time[itemprop=dateCreated], time[itemprop=datePublished]")
+                val dateUpload = parseDateFromDatetime(dateEl) ?: defaultTimestamp()
+                chapters += SChapter.create().apply {
+                    url = chapterHref
+                    name = chapterName
+                    date_upload = dateUpload
                 }
+                already += chapterHref
             }
-
+    
+            // Selector tombol next (reader navigation >)
             val nextBtn = doc.selectFirst("a[aria-label=Next]")
-                ?: doc.select("a[href*=/chapter-]")
-                    .firstOrNull { it.text().trim().equals("Next", ignoreCase = true) }
+                ?: doc.selectFirst("div.shrink-0.px-4 > a[href*=/chapter-]") // kanan
+                ?: doc.select("a[href*=/chapter-]").firstOrNull { it.text().trim().equals("Next", ignoreCase = true) }
                 ?: doc.selectFirst("span[data-lucide=chevron-right]")?.closest("a")
-
-            if (nextBtn == null) break
-        
-            nextUrl = nextBtn.absUrl("href")
+    
+            nextUrl = nextBtn?.absUrl("href") ?: break
         }
-
+    
         return chapters
             .distinctBy { it.url }
             .sortedByDescending { extractChapterNumber(it.name) }
-    
     }
 
     private fun parseChaptersFromAjax(document: Document): List<SChapter> {
