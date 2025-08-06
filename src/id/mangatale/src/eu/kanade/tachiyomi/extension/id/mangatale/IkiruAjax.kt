@@ -54,10 +54,30 @@ class IkiruAjax(
             }
         }
 
-        // 3. Crawl reader next
+        // 3. Crawl reader next (termasuk halaman awal manga detail jika chapter tersembunyi)
         val visited = mutableSetOf<String>()
         val already = chapters.map { it.url }.toMutableSet()
+        val chapterPaths = mutableSetOf<String>()
         var nextUrl = "$baseUrl/chapter-$chapterId"
+
+        // Coba juga halaman manga detail, bisa jadi ada chapter di sana yg tidak muncul di reader
+        val detailDoc = try {
+            client.newCall(Request.Builder().url("$baseUrl/manga/$mangaId").headers(headers).build()).execute().asJsoup()
+        } catch (_: Exception) { null }
+        detailDoc?.select("a[href*=/chapter-]")?.forEach { el ->
+            val href = el.absUrl("href").removePrefix(baseUrl)
+            if (href !in already && href !in chapterPaths) {
+                val name = cleanChapterName(el.text())
+                val dateText = el.parent()?.selectFirst(".chapter-date")?.text().orEmpty()
+                val dateUpload = parseAbsoluteDate(dateText) ?: defaultTimestamp()
+                chapters += SChapter.create().apply {
+                    url = href
+                    this.name = name
+                    this.date_upload = dateUpload
+                }
+                chapterPaths += href
+            }
+        }
 
         while (true) {
             if (!visited.add(nextUrl)) break
@@ -82,13 +102,20 @@ class IkiruAjax(
                 }
             }
 
-            val nextBtn = doc.selectFirst("a[aria-label=\"Next\"], a:has(span[data-lucide=chevron-right])") ?: break
+            val nextBtn = doc.selectFirst("a[aria-label=Next]")
+                ?: doc.select("a[href*=/chapter-]")
+                    .firstOrNull { it.text().trim().equals("Next", ignoreCase = true) }
+                ?: doc.selectFirst("span[data-lucide=chevron-right]")?.closest("a")
+
+            if (nextBtn == null) break
+        
             nextUrl = nextBtn.absUrl("href")
         }
 
         return chapters
             .distinctBy { it.url }
             .sortedByDescending { extractChapterNumber(it.name) }
+    
     }
 
     private fun parseChaptersFromAjax(document: Document): List<SChapter> {
