@@ -2,7 +2,7 @@ ext {
     extName = 'Ikiru'
     extClass = '.Ikiru'
     baseUrl = 'https://01.ikiru.wtf'
-    ExtVersionCode = 8
+    extVersionCode = 8
     isNsfw = true
 }
 
