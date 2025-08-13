@@ -30,7 +30,7 @@ class MGKomik : Madara(
         add("Sec-Fetch-Mode", "navigate")
         add("Sec-Fetch-Site", "same-origin")
         add("Upgrade-Insecure-Requests", "1")
-        add("X-Requested-With", randomString((1..20).random())) // added for webview, and removed in interceptor for normal use
+        add("X-Requested-With", randomString((1..20).random()))
     }
 
     override val client = network.cloudflareClient.newBuilder()
@@ -66,7 +66,7 @@ class MGKomik : Madara(
 
     // ================================ Chapters ================================
 
-    override val chapterListSelector = "li.wp-manga-chapter:has(a[href*=/chapter])"
+    override fun chapterListSelector() = "li.wp-manga-chapter:has(a[href*=/chapter])"
 
     override val chapterUrlSuffix = ""
 
