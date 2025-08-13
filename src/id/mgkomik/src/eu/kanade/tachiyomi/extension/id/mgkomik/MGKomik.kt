@@ -54,7 +54,7 @@ class MGKomik : Madara(
         // Try several selectors that match MGKomik HTML and similar Madara sites.
         // Don't use !! to avoid NullPointerException if structure changes.
         val link = element.selectFirst(
-            "div.item-thumb a, div.popular-img a, a[href*='/$mangaSubString/'], a[href*='$mangaSubString/'], a"
+            "div.item-thumb a, div.popular-img a, a[href*='/$mangaSubString/']"
         )
 
         if (link != null) {
