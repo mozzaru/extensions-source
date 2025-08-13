@@ -18,12 +18,8 @@ class MGKomik : Madara(
     SimpleDateFormat("dd MMM yy", Locale.US),
 ) {
     override val useLoadMoreRequest = LoadMoreStrategy.Always
-
     override val useNewChapterEndpoint = false
-
     override val mangaSubString = "komik"
-
-    override val id = 5845004992097969882
 
     override fun headersBuilder() = super.headersBuilder().apply {
         add("Sec-Fetch-Dest", "document")
@@ -39,7 +35,6 @@ class MGKomik : Madara(
             val headers = request.headers.newBuilder().apply {
                 removeAll("X-Requested-With")
             }.build()
-
             chain.proceed(request.newBuilder().headers(headers).build())
         }
         .rateLimit(9, 2)
@@ -51,9 +46,16 @@ class MGKomik : Madara(
         val manga = SManga.create()
 
         with(element) {
+            // Aman dari NPE
             selectFirst("div.item-thumb a")?.let {
                 manga.setUrlWithoutDomain(it.attr("abs:href"))
-                manga.title = it.attr("title")
+                manga.title = it.attr("title") ?: "Untitled"
+            } ?: run {
+                // fallback kalau struktur berubah
+                selectFirst("a")?.let {
+                    manga.setUrlWithoutDomain(it.attr("abs:href"))
+                    manga.title = it.attr("title") ?: "Untitled"
+                }
             }
 
             selectFirst("img")?.let {
@@ -66,33 +68,40 @@ class MGKomik : Madara(
 
     // ================================ Chapters ================================
 
-    override fun chapterListSelector() = "li.wp-manga-chapter:has(a[href*=/chapter])"
-
     override val chapterUrlSuffix = ""
 
     // ================================ Filters ================================
 
     override fun getFilterList(): FilterList {
-        launchIO { fetchGenres() }
+        return try {
+            launchIO { fetchGenres() }
 
-        val filters = super.getFilterList().list.toMutableList()
+            val filters = super.getFilterList().list.toMutableList()
 
-        filters += if (genresList.isNotEmpty()) {
-            listOf(
-                Filter.Separator(),
-                GenreContentFilter(
-                    title = intl["genre_filter_title"],
-                    options = genresList.map { it.name to it.id },
-                ),
-            )
-        } else {
-            listOf(
-                Filter.Separator(),
-                Filter.Header(intl["genre_missing_warning"]),
+            if (genresList.isNotEmpty()) {
+                filters += listOf(
+                    Filter.Separator(),
+                    GenreContentFilter(
+                        title = intl["genre_filter_title"],
+                        options = genresList.map { it.name to it.id },
+                    ),
+                )
+            } else {
+                filters += listOf(
+                    Filter.Separator(),
+                    Filter.Header(intl["genre_missing_warning"]),
+                )
+            }
+
+            FilterList(filters)
+        } catch (e: Exception) {
+            FilterList(
+                super.getFilterList().list + listOf(
+                    Filter.Separator(),
+                    Filter.Header("Error loading genres"),
+                )
             )
         }
-
-        return FilterList(filters)
     }
 
     private class GenreContentFilter(title: String, options: List<Pair<String, String>>) : UriPartFilter(
@@ -105,16 +114,20 @@ class MGKomik : Madara(
     override fun parseGenres(document: Document): List<Genre> {
         val genres = mutableListOf<Genre>()
         genres += Genre("All", "")
-        genres += document.select(".row.genres li a").map { a ->
-            Genre(a.text(), a.absUrl("href"))
+
+        document.select(".row.genres li a").forEach { a ->
+            val name = a.text().ifBlank { "Unknown" }
+            val url = a.absUrl("href").ifBlank { "" }
+            genres += Genre(name, url)
         }
+
         return genres
     }
 
     // =============================== Utilities ==============================
 
     private fun randomString(length: Int): String {
-        val charPool = ('a'..'z') + ('A'..'Z') + ('.')
+        val charPool = ('a'..'z') + ('A'..'Z') + '.'
         return List(length) { charPool.random() }.joinToString("")
     }
 }
