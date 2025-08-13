@@ -1,9 +1,9 @@
 ext {
     extName = 'MG Komik'
     extClass = '.MGKomik'
-    themePkg = 'madarav2'
+    themePkg = 'madara'
     baseUrl = 'https://id.mgkomik.cc'
-    overrideVersionCode = 17
+    overrideVersionCode = 18
     isNsfw = false
 }
 
