@@ -30,10 +30,10 @@ class Ikiru : HttpSource() {
 
     override val client: OkHttpClient = network.client
 
-    private val headersBuilder = Headers.Builder()
+    private val defaultHeaders: Headers = Headers.Builder()
         .add("User-Agent", "Mozilla/5.0 (Android) Tachiyomi")
         .add("Referer", baseUrl)
-    private val defaultHeaders: Headers = headersBuilder.build()
+        .build()
 
     // ===========================
     // Popular
@@ -163,14 +163,16 @@ class Ikiru : HttpSource() {
             }
         }
 
-        return chapters.distinctBy { it.url }.sortedByDescending { it.chapter_number ?: -1f }
+        return chapters
+            .distinctBy { it.url }
+            .sortedByDescending { ch -> if (ch.chapter_number.isNaN()) -1f else ch.chapter_number }
     }
 
     private fun addChapter(el: Element, list: MutableList<SChapter>) {
         val ch = SChapter.create()
         ch.url = cleanUrl(el.attr("href"))
         ch.name = el.text().trim()
-        ch.chapter_number = parseChapterNumber(ch.name) ?: parseChapterNumberFromUrl(el.attr("href"))
+        ch.chapter_number = parseChapterNumber(ch.name) ?: parseChapterNumberFromUrl(el.attr("href")) ?: Float.NaN
         ch.date_upload = el.parent()?.selectFirst(".date, span.date, time")?.text()?.let { parseDate(it) } ?: 0L
         list.add(ch)
     }
