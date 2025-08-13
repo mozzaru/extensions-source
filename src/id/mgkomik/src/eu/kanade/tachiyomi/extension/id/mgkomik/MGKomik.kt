@@ -47,34 +47,18 @@ class MGKomik : Madara(
 
     // ================================== Popular ======================================
 
-    // overriding to change title selector and manga url selector
     override fun popularMangaFromElement(element: Element): SManga {
         val manga = SManga.create()
 
-        // Try several selectors that match MGKomik HTML and similar Madara sites.
-        // Don't use !! to avoid NullPointerException if structure changes.
-        val link = element.selectFirst(
-            "div.item-thumb a, div.popular-img a, a[href*='/$mangaSubString/']"
-        )
+        with(element) {
+            selectFirst("div.item-thumb a")?.let {
+                manga.setUrlWithoutDomain(it.attr("abs:href"))
+                manga.title = it.attr("title")
+            }
 
-        if (link != null) {
-            // Prefer absolute href, but setUrlWithoutDomain expects a path without domain.
-            val absHref = link.attr("abs:href").ifEmpty { link.attr("href") }
-            val cleanedHref = if (absHref.startsWith(baseUrl)) absHref.removePrefix(baseUrl) else absHref
-            manga.setUrlWithoutDomain(cleanedHref)
-
-            // Prefer title attribute, fallback to link text
-            val title = link.attr("title").ifEmpty { link.text().trim() }
-            manga.title = if (title.isNotBlank()) title else "Unknown"
-        } else {
-            // Fallback safe defaults
-            manga.setUrlWithoutDomain("/")
-            manga.title = "Unknown"
-        }
-
-        // Thumbnail: pick nearest img inside the element (if any). Wrap in runCatching to avoid crashing on odd attributes.
-        element.selectFirst("img")?.let { img ->
-            manga.thumbnail_url = runCatching { imageFromElement(img) }.getOrNull()
+            selectFirst("img")?.let {
+                manga.thumbnail_url = imageFromElement(it)
+            }
         }
 
         return manga
@@ -82,19 +66,14 @@ class MGKomik : Madara(
 
     // ================================ Chapters ================================
 
+    override val chapterListSelector = "li.wp-manga-chapter:has(a[href*=/chapter])"
+
     override val chapterUrlSuffix = ""
 
     // ================================ Filters ================================
 
     override fun getFilterList(): FilterList {
-        // Try to populate genres in background if empty (keep original behavior but guarded)
-        try {
-            if (genresList.isEmpty()) {
-                launchIO { fetchGenres() }
-            }
-        } catch (_: Throwable) {
-            // ignore - if launchIO is not available or fails, we still return base filters
-        }
+        launchIO { fetchGenres() }
 
         val filters = super.getFilterList().list.toMutableList()
 
@@ -126,22 +105,9 @@ class MGKomik : Madara(
     override fun parseGenres(document: Document): List<Genre> {
         val genres = mutableListOf<Genre>()
         genres += Genre("All", "")
-
-        // Try multiple selectors — sites can place genres in different widgets.
-        val candidates = document.select(
-            "a[href*='/genres/'], a[href*='/tags/'], .genres a, .tags a, .genre-list a, .tagscloud a, .genres_wrap a"
-        )
-
-        val seen = mutableSetOf<String>()
-        candidates.forEach { a ->
-            val href = a.absUrl("href").ifEmpty { a.attr("href") }.trim()
-            if (href.isNotEmpty() && seen.add(href)) {
-                val name = a.text().trim().ifEmpty { href.substringAfterLast("/").removeSuffix("/") }
-                // Keep the id as the absolute or relative href (Madara base expects a string id)
-                genres += Genre(name, href)
-            }
+        genres += document.select(".row.genres li a").map { a ->
+            Genre(a.text(), a.absUrl("href"))
         }
-
         return genres
     }
 
