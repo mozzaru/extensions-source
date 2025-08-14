@@ -2,8 +2,8 @@ package eu.kanade.tachiyomi.extension.id.mgkomik
 
 import eu.kanade.tachiyomi.multisrc.madarav2.Madarav3
 import okhttp3.Headers
-import kotlin.random.Random
 import java.util.Locale
+import kotlin.random.Random
 
 class MGKomik : Madarav3(
     name = "MgKomik",
