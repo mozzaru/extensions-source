@@ -171,6 +171,7 @@ class Ikiru : ParsedHttpSource {
                         formBodyBuilder.add("series-author", authorArray.toString())
                     }
                 }
+                else -> {}
             }
         }
 
