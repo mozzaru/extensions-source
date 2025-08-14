@@ -41,42 +41,47 @@ class MGKomik : Madara(
         .rateLimit(9, 2)
         .build()
 
-    // Regex untuk deteksi teks "Baca di Web" di elemen apapun (case-insensitive, toleransi spasi)
-    private val bacaDiWebPattern = Regex("(?i)baca\\s*di\\s*web")
+    // ================== Hilangkan "Baca di Web" dari list ==================
+    private val bacaDiWebRegex = "(?i)baca\\s*di\\s*web"
 
-    // Parsing aman & filter "Baca di Web"
-    private fun parseMangaElement(element: Element): SManga {
-        // Cek jika teks di elemen mengandung "Baca di Web"
-        if (element.text().contains(bacaDiWebPattern)) {
-            return SManga.create().apply { url = "" } // Kosongkan agar tidak terbaca
-        }
+    private fun excludeBacaDiWeb(selector: String) =
+        "$selector:not(:has(a.read-on-site)):not(:has(*:matchesOwn($bacaDiWebRegex)))"
 
+    override fun popularMangaSelector() = excludeBacaDiWeb(super.popularMangaSelector())
+    override fun latestUpdatesSelector() = excludeBacaDiWeb(super.latestUpdatesSelector())
+    override fun searchMangaSelector() = excludeBacaDiWeb(super.searchMangaSelector())
+
+    // ================== Parsing aman (Popular / Latest / Search) ==================
+    private fun mangaFromElementSafe(element: Element): SManga {
         val manga = SManga.create()
-        val link = element.selectFirst("div.item-thumb a") ?: element.selectFirst("a")
-        if (link != null) {
-            manga.setUrlWithoutDomain(link.attr("abs:href"))
-            manga.title = link.attr("title").ifBlank { link.text().ifBlank { "Untitled" } }
-        }
-        element.selectFirst("img")?.let {
-            manga.thumbnail_url = imageFromElement(it)
+        with(element) {
+            val linkElement = selectFirst("div.item-thumb a") ?: selectFirst("a")
+            if (linkElement != null) {
+                manga.setUrlWithoutDomain(linkElement.attr("abs:href"))
+                manga.title = linkElement.attr("title").ifBlank { linkElement.text().ifBlank { "Untitled" } }
+            } else {
+                manga.url = ""
+                manga.title = "Untitled"
+            }
+            selectFirst("img")?.let {
+                manga.thumbnail_url = imageFromElement(it)
+            }
         }
         return manga
     }
 
-    // Gunakan parser yang sama untuk semua list
-    override fun popularMangaFromElement(element: Element) = parseMangaElement(element)
-    override fun latestUpdatesFromElement(element: Element) = parseMangaElement(element)
-    override fun searchMangaFromElement(element: Element) = parseMangaElement(element)
+    override fun popularMangaFromElement(element: Element) = mangaFromElementSafe(element)
+    override fun latestUpdatesFromElement(element: Element) = mangaFromElementSafe(element)
+    override fun searchMangaFromElement(element: Element) = mangaFromElementSafe(element)
 
+    // ================== Chapters ==================
     override val chapterUrlSuffix = ""
 
-    // ================================ Filters ================================
+    // ================== Filters ==================
     override fun getFilterList(): FilterList {
         return try {
             launchIO { fetchGenres() }
-
             val filters = super.getFilterList().list.toMutableList()
-
             if (genresList.isNotEmpty()) {
                 filters += listOf(
                     Filter.Separator(),
@@ -91,7 +96,6 @@ class MGKomik : Madara(
                     Filter.Header(intl["genre_missing_warning"]),
                 )
             }
-
             FilterList(filters)
         } catch (e: Exception) {
             FilterList(
@@ -111,7 +115,6 @@ class MGKomik : Madara(
     override fun parseGenres(document: Document): List<Genre> {
         val genres = mutableListOf<Genre>()
         genres += Genre("All", "")
-
         document.select(".row.genres li a").forEach { a ->
             val name = a.text().ifBlank { "Unknown" }
             val url = a.absUrl("href").ifBlank { "" }
@@ -120,6 +123,7 @@ class MGKomik : Madara(
         return genres
     }
 
+    // ================== Utilities ==================
     private fun randomString(length: Int): String {
         val charPool = ('a'..'z') + ('A'..'Z') + '.'
         return List(length) { charPool.random() }.joinToString("")
