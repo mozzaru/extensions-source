@@ -5,7 +5,7 @@ import kotlin.random.Random
 import java.util.Locale
 import eu.kanade.tachiyomi.multisrc.madarav2.Madarav3
 
-class MgKomik : Madara(
+class MgKomik : Madarav3(
     name = "MgKomik",
     baseUrl = "https://id.mgkomik.cc",
     lang = "id",
