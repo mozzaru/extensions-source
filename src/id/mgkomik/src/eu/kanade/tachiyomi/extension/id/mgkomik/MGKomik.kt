@@ -44,15 +44,18 @@ class MGKomik : Madara(
     // ================================== Selector Override (hilangkan Baca di Web) ======================================
 
     override fun popularMangaSelector(): String {
-        return super.popularMangaSelector() + ":not(:has(a.read-on-site))"
+        val base = super.popularMangaSelector()
+        return "$base:not(:has(a.read-on-site)):not(:has(a:matchesOwn((?i)baca\\s+di\\s+web)))"
     }
 
     override fun latestUpdatesSelector(): String {
-        return super.latestUpdatesSelector() + ":not(:has(a.read-on-site))"
+        val base = super.latestUpdatesSelector()
+        return "$base:not(:has(a.read-on-site)):not(:has(a:matchesOwn((?i)baca\\s+di\\s+web)))"
     }
 
     override fun searchMangaSelector(): String {
-        return super.searchMangaSelector() + ":not(:has(a.read-on-site))"
+        val base = super.searchMangaSelector()
+        return "$base:not(:has(a.read-on-site)):not(:has(a:matchesOwn((?i)baca\\s+di\\s+web)))"
     }
 
     // ================================== Popular ======================================
