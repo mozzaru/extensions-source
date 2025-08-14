@@ -6,6 +6,7 @@ import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.SManga
+import eu.kanade.tachiyomi.util.ignore
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.text.SimpleDateFormat
@@ -41,32 +42,24 @@ class MGKomik : Madara(
         .rateLimit(9, 2)
         .build()
 
-    // ==================== Filter "Baca di Web" dari semua daftar ====================
-
-    override fun popularMangaSelector(): String {
-        return "div.page-item-detail:not(:has(a:matchesOwn(Baca di Web)))"
-    }
-
-    override fun latestUpdatesSelector(): String {
-        return "div.page-item-detail:not(:has(a:matchesOwn(Baca di Web)))"
-    }
-
-    override fun searchMangaSelector(): String {
-        return "div.page-item-detail:not(:has(a:matchesOwn(Baca di Web)))"
-    }
-
-    // ================================== Popular ======================================
+    // ================================== Popular / Latest / Search ======================================
 
     override fun popularMangaFromElement(element: Element): SManga {
-        val manga = SManga.create()
+        // Skip jika ada tombol "Baca di Web" (class read-on-site)
+        if (element.selectFirst("a.read-on-site") != null) {
+            throw ignore() // Resmi di Tachiyomi untuk skip item
+        }
 
+        val manga = SManga.create()
         with(element) {
             selectFirst("div.item-thumb a")?.let {
                 manga.setUrlWithoutDomain(it.attr("abs:href"))
                 manga.title = it.attr("title").ifBlank { it.text() }
-            } ?: selectFirst("a")?.let {
-                manga.setUrlWithoutDomain(it.attr("abs:href"))
-                manga.title = it.attr("title").ifBlank { it.text() }
+            } ?: run {
+                selectFirst("a")?.let {
+                    manga.setUrlWithoutDomain(it.attr("abs:href"))
+                    manga.title = it.attr("title").ifBlank { it.text() }
+                }
             }
 
             selectFirst("img")?.let {
