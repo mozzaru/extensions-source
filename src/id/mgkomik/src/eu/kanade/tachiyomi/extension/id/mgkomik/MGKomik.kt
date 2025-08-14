@@ -41,33 +41,40 @@ class MGKomik : Madara(
         .rateLimit(9, 2)
         .build()
 
-    // ================================== Popular / Latest / Search ======================================
+    // ================================== Selector Override (hilangkan Baca di Web) ======================================
+
+    override fun popularMangaSelector(): String {
+        return super.popularMangaSelector() + ":not(:has(a.read-on-site))"
+    }
+
+    override fun latestUpdatesSelector(): String {
+        return super.latestUpdatesSelector() + ":not(:has(a.read-on-site))"
+    }
+
+    override fun searchMangaSelector(): String {
+        return super.searchMangaSelector() + ":not(:has(a.read-on-site))"
+    }
+
+    // ================================== Popular ======================================
 
     override fun popularMangaFromElement(element: Element): SManga {
-        // Skip jika ada tombol "Baca di Web" (class read-on-site)
-        if (element.selectFirst("a.read-on-site") != null) {
-            return SManga.create().apply {
-                title = ""
-                url = ""
-                thumbnail_url = ""
-            }
-        }
-
-        // Parsing manga normal
-        return SManga.create().apply {
-            element.selectFirst("div.item-thumb a")?.let {
-                setUrlWithoutDomain(it.attr("abs:href"))
-                title = it.attr("title").ifBlank { it.text() }
+        val manga = SManga.create()
+        with(element) {
+            selectFirst("div.item-thumb a")?.let {
+                manga.setUrlWithoutDomain(it.attr("abs:href"))
+                manga.title = it.attr("title").ifBlank { it.text() }
             } ?: run {
-                element.selectFirst("a")?.let {
-                    setUrlWithoutDomain(it.attr("abs:href"))
-                    title = it.attr("title").ifBlank { it.text() }
+                selectFirst("a")?.let {
+                    manga.setUrlWithoutDomain(it.attr("abs:href"))
+                    manga.title = it.attr("title").ifBlank { it.text() }
                 }
             }
-            element.selectFirst("img")?.let {
-                thumbnail_url = imageFromElement(it)
+
+            selectFirst("img")?.let {
+                manga.thumbnail_url = imageFromElement(it)
             }
         }
+        return manga
     }
 
     // ================================ Chapters ================================
