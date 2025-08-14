@@ -387,7 +387,7 @@ class Ikiru : ParsedHttpSource {
 
     // Filter classes
     class SortFilter : Filter.Sort(
-        "Sort by", 
+        "Sort by",
         arrayOf("Popular", "Latest", "A-Z", "Rating"),
         Selection(0, false)
     )
