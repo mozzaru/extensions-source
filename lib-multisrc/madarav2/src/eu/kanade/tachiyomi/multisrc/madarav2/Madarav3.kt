@@ -21,6 +21,15 @@ import java.util.Date
 import java.util.Locale
 import kotlin.random.Random
 
+/**
+ * Madara base for madarav2 (final).
+ *
+ * - No wildcard imports
+ * - Exhaustive Filter handling (when + else)
+ * - GenreFilter properly overrides values
+ * - Single asDocument() helper
+ * - Uses headersBuilder().build() consistently
+ */
 abstract class Madarav3(
     override val name: String,
     override val baseUrl: String,
@@ -50,13 +59,13 @@ abstract class Madarav3(
             .add("X-Requested-With", randomString)
     }
 
-    // Popular manga
+    // Popular
     override fun popularMangaRequest(page: Int): Request {
         val url = baseUrl.toHttpUrl().newBuilder()
-            .addPathSegment(listUrl.trimEnd('/'))
+            .addPathSegments(listUrl.trim('/'))
             .addQueryParameter("page", page.toString())
             .build()
-        return GET(url, headers)
+        return GET(url.toString(), headersBuilder().build())
     }
 
     override fun popularMangaParse(response: Response): MangasPage {
@@ -76,13 +85,13 @@ abstract class Madarav3(
         return manga
     }
 
-    // Latest manga
+    // Latest
     override fun latestUpdatesRequest(page: Int): Request {
         val url = baseUrl.toHttpUrl().newBuilder()
             .addPathSegment("page")
             .addQueryParameter("page", page.toString())
             .build()
-        return GET(url, headers)
+        return GET(url.toString(), headersBuilder().build())
     }
 
     override fun latestUpdatesParse(response: Response): MangasPage = popularMangaParse(response)
@@ -92,29 +101,41 @@ abstract class Madarav3(
         val urlBuilder = baseUrl.toHttpUrl().newBuilder()
 
         if (query.isNotBlank()) {
-            urlBuilder.addPathSegment(listUrl.trimEnd('/'))
+            urlBuilder.addPathSegments(listUrl.trim('/'))
             urlBuilder.addQueryParameter("s", query)
         } else {
             filters.forEach { filter ->
                 when (filter) {
                     is GenreFilter -> {
                         if (filter.state > 0) {
-                            val genreUrl = "$tagPrefix${filter.values[filter.state]}"
-                            urlBuilder.addPathSegment(genreUrl)
+                            val genreValue = filter.values[filter.state]
+                            if (genreValue.isNotBlank()) {
+                                val genreUrl = "$tagPrefix$genreValue"
+                                urlBuilder.addPathSegments(genreUrl.trim('/'))
+                            }
                         }
                     }
+                    // Exhaustive handling: explicitly ignore or handle other known Filter subtypes
+                    is Filter.Header -> { /* ignore */ }
+                    is Filter.Separator -> { /* ignore */ }
+                    is Filter.CheckBox -> { /* ignore */ }
+                    is Filter.Text -> { /* ignore */ }
+                    is Filter.Group<*> -> { /* ignore */ }
+                    is Filter.Sort -> { /* ignore */ }
+                    is Filter.Select<*> -> { /* ignore */ }
+                    else -> { /* fallback: ignore unknown filter types */ }
                 }
             }
         }
 
         urlBuilder.addQueryParameter("page", page.toString())
-        return GET(urlBuilder.build(), headers)
+        return GET(urlBuilder.build().toString(), headersBuilder().build())
     }
 
     override fun searchMangaParse(response: Response): MangasPage = popularMangaParse(response)
 
-    // Manga details
-    override fun mangaDetailsRequest(manga: SManga): Request = GET(manga.url, headers)
+    // Details
+    override fun mangaDetailsRequest(manga: SManga): Request = GET(manga.url, headersBuilder().build())
 
     override fun mangaDetailsParse(response: Response): SManga {
         val document = response.asDocument()
@@ -130,74 +151,118 @@ abstract class Madarav3(
     }
 
     private fun parseStatus(document: Document): Int {
-        return when (document.select("div.post-status div.summary-content").text().lowercase()) {
-            "ongoing", "berlanjut" -> SManga.ONGOING
-            "completed", "tamat" -> SManga.COMPLETED
+        val text = document.select("div.post-status div.summary-content").text().lowercase(Locale.ROOT)
+        return when {
+            text.contains("ongoing") || text.contains("berlanjut") -> SManga.ONGOING
+            text.contains("completed") || text.contains("tamat") -> SManga.COMPLETED
             else -> SManga.UNKNOWN
         }
     }
 
     // Chapters
-    override fun chapterListRequest(manga: SManga): Request = GET(manga.url, headers)
+    override fun chapterListRequest(manga: SManga): Request = GET(manga.url, headersBuilder().build())
 
     override fun chapterListParse(response: Response): List<SChapter> {
         val document = response.asDocument()
         val chapters = mutableListOf<SChapter>()
 
-        // Dari HTML utama
-        document.select("li.wp-manga-chapter").forEach {
+        // HTML chapter list
+        document.select("li.wp-manga-chapter, .chapter, .wp-manga-chapter").forEach {
             chapters.add(chapterFromElement(it))
         }
 
-        // Fallback AJAX jika kosong
+        // AJAX fallback if empty
         if (chapters.isEmpty()) {
-            val mangaId = document.selectFirst("input#manga_id")?.attr("value")
-            if (!mangaId.isNullOrBlank()) {
-                val ajaxUrl = "$baseUrl/wp-admin/admin-ajax.php?action=manga_get_chapters&manga=$mangaId"
-                val ajaxResponse = client.newCall(GET(ajaxUrl, headers)).execute()
-                val ajaxDoc = ajaxResponse.asDocument()
-                ajaxDoc.select("li.wp-manga-chapter").forEach {
-                    chapters.add(chapterFromElement(it))
+            val mangaId = document.selectFirst("#manga-chapters-holder")?.attr("data-id")
+                ?: document.selectFirst("input#manga_id")?.attr("value")
+                ?: document.selectFirst("[data-id]")?.attr("data-id")
+                ?: ""
+            if (mangaId.isNotBlank()) {
+                val ajaxUrl = "$baseUrl/wp-admin/admin-ajax.php"
+                val bodyUrl = "$ajaxUrl?action=manga_get_chapters&manga=$mangaId"
+                client.newCall(GET(bodyUrl, headersBuilder().build())).execute().use { ajaxResp ->
+                    val ajaxDoc = ajaxResp.asDocument()
+                    ajaxDoc.select("li.wp-manga-chapter, .chapter, .wp-manga-chapter").forEach {
+                        chapters.add(chapterFromElement(it))
+                    }
+                }
+            } else {
+                // try /ajax/chapters/ endpoint
+                val ajaxUrl2 = response.request.url.toString().trimEnd('/') + "/ajax/chapters/"
+                client.newCall(GET(ajaxUrl2, headersBuilder().build())).execute().use { ajaxResp2 ->
+                    if (ajaxResp2.isSuccessful) {
+                        val ajaxDoc2 = ajaxResp2.asDocument()
+                        ajaxDoc2.select("li.wp-manga-chapter, .chapter, .wp-manga-chapter").forEach {
+                            chapters.add(chapterFromElement(it))
+                        }
+                    }
                 }
             }
         }
 
-        return chapters
+        // Sort chapters by date (oldest first)
+        return chapters.sortedBy { it.date_upload }
     }
 
     protected open fun chapterFromElement(element: Element): SChapter {
         val chapter = SChapter.create()
-        chapter.setUrlWithoutDomain(element.selectFirst("a")!!.attr("href"))
-        chapter.name = element.selectFirst("a")!!.text()
+        val a = element.selectFirst("a") ?: element
+        chapter.setUrlWithoutDomain(a.attr("href"))
+        chapter.name = a.text().ifBlank { a.attr("title") }
         chapter.date_upload = parseChapterDate(element.selectFirst("span.chapter-release-date")?.text())
+        // try to set chapter_number
+        chapter.chapter_number = parseChapterNumber(chapter.name)
         return chapter
     }
 
     // Pages
-    override fun pageListRequest(chapter: SChapter): Request = GET(chapter.url, headers)
+    override fun pageListRequest(chapter: SChapter): Request = GET(chapter.url, headersBuilder().build())
 
     override fun pageListParse(response: Response): List<Page> {
         val document = response.asDocument()
-        return document.select("div.page-break img").mapIndexed { i, img ->
-            Page(i, "", img.absUrl("src"))
+
+        // 1) Try script-based arrays / atob / chapter_data
+        extractImagesFromScripts(document).takeIf { it.isNotEmpty() }?.let { list ->
+            return list.mapIndexed { i, url -> Page(i, "", url) }
         }
+
+        // 2) Reader container imgs
+        val container = document.selectFirst("div.reading-content, div.main-col-inner") ?: document
+        val imgs = container.select("img")
+            .mapNotNull { img ->
+                val raw = img.attr("data-src").ifBlank { img.attr("src") }
+                raw.takeIf { it.isNotBlank() }?.let { it.toAbsoluteUrl(baseUrl) }
+            }
+        if (imgs.isNotEmpty()) return imgs.mapIndexed { i, url -> Page(i, "", url) }
+
+        // 3) data:text/javascript;base64 inline protector
+        tryDecryptProtector(document).takeIf { it.isNotEmpty() }?.let { list ->
+            return list.mapIndexed { i, url -> Page(i, "", url) }
+        }
+
+        throw Exception("No pages found")
     }
 
-    override fun imageRequest(page: Page): Request = GET(page.imageUrl!!, headers)
+    override fun imageRequest(page: Page): Request = GET(page.imageUrl!!, headersBuilder().build())
 
-    // Helpers
-    protected fun Response.asDocument(): Document = Jsoup.parse(body.string(), request.url.toString())
+    // Utilities
+    protected fun Response.asDocument(): Document = Jsoup.parse(body?.string().orEmpty(), request.url.toString())
 
-    private fun parseChapterDate(dateStr: String?): Long {
+    protected fun parseChapterNumber(name: String?): Float {
+        if (name.isNullOrBlank()) return 0f
+        val rx = Regex("""([0-9]+(?:[.,][0-9]+)?)""")
+        val m = rx.find(name) ?: return 0f
+        return m.groupValues[1].replace(",", ".").toFloatOrNull() ?: 0f
+    }
+
+    protected fun parseChapterDate(dateStr: String?): Long {
         if (dateStr.isNullOrBlank()) return 0L
+        val lc = dateStr.trim().lowercase(sourceLocale)
         return try {
-            val lc = dateStr.lowercase(sourceLocale)
             when {
-                lc.contains("ago") || lc.contains("lalu") -> parseRelativeDate(lc)
                 lc.contains("today") || lc.contains("hari ini") -> Date().time
-                lc.contains("yesterday") || lc.contains("kemarin") -> Calendar.getInstance().apply {
-                    add(Calendar.DAY_OF_MONTH, -1)
-                }.timeInMillis
+                lc.contains("yesterday") || lc.contains("kemarin") -> Calendar.getInstance().apply { add(Calendar.DAY_OF_MONTH, -1) }.timeInMillis
+                lc.contains("ago") || lc.contains("lalu") -> parseRelativeDate(lc)
                 else -> SimpleDateFormat(dateFormat, sourceLocale).parse(dateStr)?.time ?: 0L
             }
         } catch (_: Exception) {
@@ -205,18 +270,126 @@ abstract class Madarav3(
         }
     }
 
-    private fun parseRelativeDate(date: String): Long {
+    protected fun parseRelativeDate(date: String): Long {
         val parts = date.split(" ")
         if (parts.size < 2) return 0L
         val number = parts[0].toIntOrNull() ?: return 0L
         val cal = Calendar.getInstance()
-        when (parts[1].first()) {
-            'd', 'h' -> cal.add(Calendar.DATE, -number)
-            'w' -> cal.add(Calendar.DATE, -number * 7)
-            'm' -> cal.add(Calendar.MONTH, -number)
-            'y' -> cal.add(Calendar.YEAR, -number)
+        when (parts[1].firstOrNull() ?: 'd') {
+            'd', 'D' -> cal.add(Calendar.DATE, -number)
+            'h', 'H' -> cal.add(Calendar.HOUR_OF_DAY, -number)
+            'w', 'W' -> cal.add(Calendar.DATE, -number * 7)
+            'm', 'M' -> cal.add(Calendar.MONTH, -number)
+            'y', 'Y' -> cal.add(Calendar.YEAR, -number)
+            else -> cal.add(Calendar.DATE, -number)
         }
         return cal.timeInMillis
+    }
+
+    private fun extractImagesFromScripts(doc: Document): List<String> {
+        val scripts = doc.select("script").mapNotNull { it.data() }
+        if (scripts.isEmpty()) return emptyList()
+
+        // 1) var images = [...]
+        val arrRegex = Regex("""var\s+images\s*=\s*(\[(?:.|\n|\r)*?])""", RegexOption.IGNORE_CASE)
+        scripts.forEach { s ->
+            val m = arrRegex.find(s) ?: return@forEach
+            runCatching {
+                val arr = m.groupValues[1]
+                val jsonArr = org.json.JSONArray(arr)
+                val out = mutableListOf<String>()
+                for (i in 0 until jsonArr.length()) {
+                    val u = jsonArr.optString(i)
+                    if (u.isNotBlank()) out.add(u.toAbsoluteUrl(baseUrl))
+                }
+                if (out.isNotEmpty()) return out
+            }
+        }
+
+        // 2) chapter_data = '...'
+        val chapRegex = Regex("""chapter_data\s*=\s*['"](.+?)['"]""", RegexOption.IGNORE_CASE or RegexOption.DOT_MATCHES_ALL)
+        scripts.forEach { s ->
+            val m = chapRegex.find(s) ?: return@forEach
+            runCatching {
+                val raw = m.groupValues[1].replace("\\/", "/").replace("\\\"", "\"").replace("\\'", "'")
+                val jsonArr = org.json.JSONArray(raw)
+                val out = mutableListOf<String>()
+                for (i in 0 until jsonArr.length()) {
+                    val u = jsonArr.optString(i)
+                    if (u.isNotBlank()) out.add(u.toAbsoluteUrl(baseUrl))
+                }
+                if (out.isNotEmpty()) return out
+            }
+        }
+
+        // 3) atob("base64")
+        val atobRx = Regex("""atob\(['"]([A-Za-z0-9+/=]+)['"]\)""")
+        scripts.forEach { s ->
+            val m = atobRx.find(s) ?: return@forEach
+            runCatching {
+                val decoded = String(java.util.Base64.getDecoder().decode(m.groupValues[1]))
+                val jsonArr = org.json.JSONArray(decoded)
+                val out = mutableListOf<String>()
+                for (i in 0 until jsonArr.length()) {
+                    val u = jsonArr.optString(i)
+                    if (u.isNotBlank()) out.add(u.toAbsoluteUrl(baseUrl))
+                }
+                if (out.isNotEmpty()) return out
+            }
+        }
+
+        return emptyList()
+    }
+
+    private fun tryDecryptProtector(doc: Document): List<String> {
+        val out = mutableListOf<String>()
+
+        // data:text/javascript;base64,...
+        doc.select("script[src^=\"data:text/javascript;base64,\"]").forEach { s ->
+            val src = s.attr("src")
+            val b64 = src.substringAfter("data:text/javascript;base64,", "")
+            if (b64.isNotBlank()) {
+                runCatching {
+                    val decoded = String(java.util.Base64.getDecoder().decode(b64))
+                    val arrRx = Regex("""\[(?:\s*"(?:\\.|[^"])*"\s*(?:,\s*)?)+]""", RegexOption.DOT_MATCHES_ALL)
+                    val arr = arrRx.find(decoded)?.value
+                    if (!arr.isNullOrBlank()) {
+                        val jsonArr = org.json.JSONArray(arr)
+                        for (i in 0 until jsonArr.length()) {
+                            val u = jsonArr.optString(i)
+                            if (u.isNotBlank()) out.add(u.toAbsoluteUrl(baseUrl))
+                        }
+                    }
+                }
+            }
+        }
+
+        // chapter_data = "base64..."
+        doc.select("script").mapNotNull { it.data() }.forEach { s ->
+            val m = Regex("""chapter_data\s*=\s*['"]([A-Za-z0-9+/=]+)['"]""").find(s)
+            val enc = m?.groupValues?.getOrNull(1)
+            if (!enc.isNullOrBlank()) {
+                runCatching {
+                    val decoded = String(java.util.Base64.getDecoder().decode(enc))
+                    val jsonArr = org.json.JSONArray(decoded)
+                    for (i in 0 until jsonArr.length()) {
+                        val u = jsonArr.optString(i)
+                        if (u.isNotBlank()) out.add(u.toAbsoluteUrl(baseUrl))
+                    }
+                }
+            }
+        }
+
+        return out
+    }
+
+    private fun String.toAbsoluteUrl(base: String): String {
+        return when {
+            startsWith("http://") || startsWith("https://") -> this
+            startsWith("//") -> "https:$this"
+            startsWith("/") -> base.trimEnd('/') + this
+            else -> "$base/$this"
+        }
     }
 
     private fun generateRandomString(length: Int): String {
@@ -225,8 +398,7 @@ abstract class Madarav3(
     }
 
     // Filters
-    open class GenreFilter(name: String, val values: Array<String>) :
-        Filter.Select<String>(name, values)
+    open class GenreFilter(name: String, override val values: Array<String>) : Filter.Select<String>(name, values)
 
     override fun getFilterList(): FilterList {
         val genres = fetchGenres()
@@ -239,19 +411,13 @@ abstract class Madarav3(
     private fun fetchGenres(): Array<String> {
         return try {
             val url = "$baseUrl/$listUrl"
-            val resp = client.newCall(GET(url, headers)).execute()
-            val doc = resp.asDocument()
-
-            // Coba ambil dari menu genre
-            val genreElements = doc.select("ul.genres li a, div.genres-content a, div.filter-item a")
-            if (genreElements.isNotEmpty()) {
-                return genreElements.map { it.text().trim() }
-                    .filter { it.isNotEmpty() }
-                    .distinct()
-                    .toTypedArray()
+            client.newCall(GET(url, headersBuilder().build())).execute().use { resp ->
+                val doc = resp.asDocument()
+                val el = doc.select("ul.genres li a, div.genres-content a, div.filter-item a")
+                if (el.isNotEmpty()) {
+                    return el.map { it.text().trim() }.filter { it.isNotEmpty() }.distinct().toTypedArray()
+                }
             }
-
-            // Fallback kosong
             emptyArray()
         } catch (_: Exception) {
             emptyArray()
