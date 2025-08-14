@@ -261,7 +261,7 @@ class Ikiru : ParsedHttpSource() {
 
     private fun loadAllChapters(mangaId: String, refererUrl: String): List<SChapter> {
         val chapters = mutableListOf<SChapter>()
-        var currentPage = 1
+        var page = 1
 
         val requestHeaders = Headers.Builder()
             .add("hx-request", "true")
@@ -270,7 +270,7 @@ class Ikiru : ParsedHttpSource() {
 
         while (true) {
             try {
-                val url = "$baseUrl/ajax-call?manga_id=$mangaId&page=$currentPage&action=chapter_list"
+                val url = "$baseUrl/ajax-call?manga_id=$mangaId&page=$page&action=chapter_list"
                 val response = client.newCall(GET(url, requestHeaders)).execute()
                 val document = response.asJsoup()
 
@@ -296,8 +296,8 @@ class Ikiru : ParsedHttpSource() {
                     )
                 }
 
-                currentPage++
-                if (currentPage > 100) break // Safety limit
+                page++
+                if (page > 100) break // Safety limit
             } catch (e: Exception) {
                 e.printStackTrace()
                 break
