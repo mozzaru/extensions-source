@@ -28,7 +28,7 @@ class Ikiru : ParsedHttpSource() {
     override val baseUrl = "https://01.ikiru.wtf"
     override val lang = "id"
     override val supportsLatest = true
-    override val id = 1532456597012176985
+    override val id = 1532456597012176985L
 
     override val client: OkHttpClient = network.cloudflareClient.newBuilder()
         .connectTimeout(10, TimeUnit.SECONDS)
