@@ -7,7 +7,7 @@ import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
-import eu.kanade.tachiyomi.source.online.HttpSource
+import eu.kanade.tachiyomi.source.online.ParsedHttpSource
 import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
@@ -22,20 +22,20 @@ import java.util.Locale
 import kotlin.random.Random
 
 /**
- * Madara base for madarav2 (final).
+ * Madarav3 final for madarav2 (extends ParsedHttpSource).
  *
  * - No wildcard imports
- * - Exhaustive Filter handling (when + else)
- * - GenreFilter properly overrides values
- * - Single asDocument() helper
- * - Uses headersBuilder().build() consistently
+ * - Fixed lambda/return & Regex handling
+ * - GenreFilter no longer overrides final 'values'
+ * - Explicit org.json.JSONArray usage
+ * - Consistent headersBuilder().build()
  */
 abstract class Madarav3(
     override val name: String,
     override val baseUrl: String,
     override val lang: String,
     private val dateFormat: String
-) : HttpSource() {
+) : ParsedHttpSource() {
 
     open val tagPrefix: String = "genres/"
     open val listUrl: String = ""
@@ -61,11 +61,13 @@ abstract class Madarav3(
 
     // Popular
     override fun popularMangaRequest(page: Int): Request {
-        val url = baseUrl.toHttpUrl().newBuilder()
-            .addPathSegments(listUrl.trim('/'))
-            .addQueryParameter("page", page.toString())
-            .build()
-        return GET(url.toString(), headersBuilder().build())
+        val builder = baseUrl.toHttpUrl().newBuilder()
+        if (listUrl.isNotBlank()) {
+            val trimmed = listUrl.trim('/').split('/').filter { it.isNotBlank() }
+            for (seg in trimmed) builder.addPathSegment(seg)
+        }
+        if (page > 1) builder.addQueryParameter("page", page.toString())
+        return GET(builder.build().toString(), headersBuilder().build())
     }
 
     override fun popularMangaParse(response: Response): MangasPage {
@@ -87,11 +89,10 @@ abstract class Madarav3(
 
     // Latest
     override fun latestUpdatesRequest(page: Int): Request {
-        val url = baseUrl.toHttpUrl().newBuilder()
-            .addPathSegment("page")
-            .addQueryParameter("page", page.toString())
-            .build()
-        return GET(url.toString(), headersBuilder().build())
+        val builder = baseUrl.toHttpUrl().newBuilder()
+        builder.addPathSegment("page")
+        if (page > 1) builder.addQueryParameter("page", page.toString())
+        return GET(builder.build().toString(), headersBuilder().build())
     }
 
     override fun latestUpdatesParse(response: Response): MangasPage = popularMangaParse(response)
@@ -101,21 +102,24 @@ abstract class Madarav3(
         val urlBuilder = baseUrl.toHttpUrl().newBuilder()
 
         if (query.isNotBlank()) {
-            urlBuilder.addPathSegments(listUrl.trim('/'))
+            if (listUrl.isNotBlank()) {
+                val trimmed = listUrl.trim('/').split('/').filter { it.isNotBlank() }
+                for (seg in trimmed) urlBuilder.addPathSegment(seg)
+            }
             urlBuilder.addQueryParameter("s", query)
         } else {
-            filters.forEach { filter ->
+            for (filter in filters) {
                 when (filter) {
                     is GenreFilter -> {
                         if (filter.state > 0) {
-                            val genreValue = filter.values[filter.state]
+                            val genreValue = filter.genreValues.getOrNull(filter.state) ?: ""
                             if (genreValue.isNotBlank()) {
                                 val genreUrl = "$tagPrefix$genreValue"
-                                urlBuilder.addPathSegments(genreUrl.trim('/'))
+                                val trimmed = genreUrl.trim('/').split('/').filter { it.isNotBlank() }
+                                for (seg in trimmed) urlBuilder.addPathSegment(seg)
                             }
                         }
                     }
-                    // Exhaustive handling: explicitly ignore or handle other known Filter subtypes
                     is Filter.Header -> { /* ignore */ }
                     is Filter.Separator -> { /* ignore */ }
                     is Filter.CheckBox -> { /* ignore */ }
@@ -123,12 +127,12 @@ abstract class Madarav3(
                     is Filter.Group<*> -> { /* ignore */ }
                     is Filter.Sort -> { /* ignore */ }
                     is Filter.Select<*> -> { /* ignore */ }
-                    else -> { /* fallback: ignore unknown filter types */ }
+                    else -> { /* ignore unknown filter types */ }
                 }
             }
         }
 
-        urlBuilder.addQueryParameter("page", page.toString())
+        if (page > 1) urlBuilder.addQueryParameter("page", page.toString())
         return GET(urlBuilder.build().toString(), headersBuilder().build())
     }
 
@@ -177,17 +181,17 @@ abstract class Madarav3(
                 ?: document.selectFirst("input#manga_id")?.attr("value")
                 ?: document.selectFirst("[data-id]")?.attr("data-id")
                 ?: ""
+
             if (mangaId.isNotBlank()) {
                 val ajaxUrl = "$baseUrl/wp-admin/admin-ajax.php"
-                val bodyUrl = "$ajaxUrl?action=manga_get_chapters&manga=$mangaId"
-                client.newCall(GET(bodyUrl, headersBuilder().build())).execute().use { ajaxResp ->
+                val payload = "$ajaxUrl?action=manga_get_chapters&manga=$mangaId"
+                client.newCall(GET(payload, headersBuilder().build())).execute().use { ajaxResp ->
                     val ajaxDoc = ajaxResp.asDocument()
                     ajaxDoc.select("li.wp-manga-chapter, .chapter, .wp-manga-chapter").forEach {
                         chapters.add(chapterFromElement(it))
                     }
                 }
             } else {
-                // try /ajax/chapters/ endpoint
                 val ajaxUrl2 = response.request.url.toString().trimEnd('/') + "/ajax/chapters/"
                 client.newCall(GET(ajaxUrl2, headersBuilder().build())).execute().use { ajaxResp2 ->
                     if (ajaxResp2.isSuccessful) {
@@ -200,7 +204,6 @@ abstract class Madarav3(
             }
         }
 
-        // Sort chapters by date (oldest first)
         return chapters.sortedBy { it.date_upload }
     }
 
@@ -210,7 +213,6 @@ abstract class Madarav3(
         chapter.setUrlWithoutDomain(a.attr("href"))
         chapter.name = a.text().ifBlank { a.attr("title") }
         chapter.date_upload = parseChapterDate(element.selectFirst("span.chapter-release-date")?.text())
-        // try to set chapter_number
         chapter.chapter_number = parseChapterNumber(chapter.name)
         return chapter
     }
@@ -221,12 +223,9 @@ abstract class Madarav3(
     override fun pageListParse(response: Response): List<Page> {
         val document = response.asDocument()
 
-        // 1) Try script-based arrays / atob / chapter_data
-        extractImagesFromScripts(document).takeIf { it.isNotEmpty() }?.let { list ->
-            return list.mapIndexed { i, url -> Page(i, "", url) }
-        }
+        val scriptImgs = extractImagesFromScripts(document)
+        if (scriptImgs.isNotEmpty()) return scriptImgs.mapIndexed { i, url -> Page(i, "", url) }
 
-        // 2) Reader container imgs
         val container = document.selectFirst("div.reading-content, div.main-col-inner") ?: document
         val imgs = container.select("img")
             .mapNotNull { img ->
@@ -235,10 +234,8 @@ abstract class Madarav3(
             }
         if (imgs.isNotEmpty()) return imgs.mapIndexed { i, url -> Page(i, "", url) }
 
-        // 3) data:text/javascript;base64 inline protector
-        tryDecryptProtector(document).takeIf { it.isNotEmpty() }?.let { list ->
-            return list.mapIndexed { i, url -> Page(i, "", url) }
-        }
+        val prot = tryDecryptProtector(document)
+        if (prot.isNotEmpty()) return prot.mapIndexed { i, url -> Page(i, "", url) }
 
         throw Exception("No pages found")
     }
@@ -261,7 +258,9 @@ abstract class Madarav3(
         return try {
             when {
                 lc.contains("today") || lc.contains("hari ini") -> Date().time
-                lc.contains("yesterday") || lc.contains("kemarin") -> Calendar.getInstance().apply { add(Calendar.DAY_OF_MONTH, -1) }.timeInMillis
+                lc.contains("yesterday") || lc.contains("kemarin") -> Calendar.getInstance().apply {
+                    add(Calendar.DAY_OF_MONTH, -1)
+                }.timeInMillis
                 lc.contains("ago") || lc.contains("lalu") -> parseRelativeDate(lc)
                 else -> SimpleDateFormat(dateFormat, sourceLocale).parse(dateStr)?.time ?: 0L
             }
@@ -290,10 +289,9 @@ abstract class Madarav3(
         val scripts = doc.select("script").mapNotNull { it.data() }
         if (scripts.isEmpty()) return emptyList()
 
-        // 1) var images = [...]
         val arrRegex = Regex("""var\s+images\s*=\s*(\[(?:.|\n|\r)*?])""", RegexOption.IGNORE_CASE)
-        scripts.forEach { s ->
-            val m = arrRegex.find(s) ?: return@forEach
+        for (s in scripts) {
+            val m = arrRegex.find(s) ?: continue
             runCatching {
                 val arr = m.groupValues[1]
                 val jsonArr = org.json.JSONArray(arr)
@@ -306,10 +304,9 @@ abstract class Madarav3(
             }
         }
 
-        // 2) chapter_data = '...'
         val chapRegex = Regex("""chapter_data\s*=\s*['"](.+?)['"]""", RegexOption.IGNORE_CASE or RegexOption.DOT_MATCHES_ALL)
-        scripts.forEach { s ->
-            val m = chapRegex.find(s) ?: return@forEach
+        for (s in scripts) {
+            val m = chapRegex.find(s) ?: continue
             runCatching {
                 val raw = m.groupValues[1].replace("\\/", "/").replace("\\\"", "\"").replace("\\'", "'")
                 val jsonArr = org.json.JSONArray(raw)
@@ -322,10 +319,9 @@ abstract class Madarav3(
             }
         }
 
-        // 3) atob("base64")
         val atobRx = Regex("""atob\(['"]([A-Za-z0-9+/=]+)['"]\)""")
-        scripts.forEach { s ->
-            val m = atobRx.find(s) ?: return@forEach
+        for (s in scripts) {
+            val m = atobRx.find(s) ?: continue
             runCatching {
                 val decoded = String(java.util.Base64.getDecoder().decode(m.groupValues[1]))
                 val jsonArr = org.json.JSONArray(decoded)
@@ -344,8 +340,8 @@ abstract class Madarav3(
     private fun tryDecryptProtector(doc: Document): List<String> {
         val out = mutableListOf<String>()
 
-        // data:text/javascript;base64,...
-        doc.select("script[src^=\"data:text/javascript;base64,\"]").forEach { s ->
+        val dataScripts = doc.select("script[src^=\"data:text/javascript;base64,\"]")
+        for (s in dataScripts) {
             val src = s.attr("src")
             val b64 = src.substringAfter("data:text/javascript;base64,", "")
             if (b64.isNotBlank()) {
@@ -364,8 +360,8 @@ abstract class Madarav3(
             }
         }
 
-        // chapter_data = "base64..."
-        doc.select("script").mapNotNull { it.data() }.forEach { s ->
+        val scriptData = doc.select("script").mapNotNull { it.data() }
+        for (s in scriptData) {
             val m = Regex("""chapter_data\s*=\s*['"]([A-Za-z0-9+/=]+)['"]""").find(s)
             val enc = m?.groupValues?.getOrNull(1)
             if (!enc.isNullOrBlank()) {
@@ -398,7 +394,7 @@ abstract class Madarav3(
     }
 
     // Filters
-    open class GenreFilter(name: String, override val values: Array<String>) : Filter.Select<String>(name, values)
+    open class GenreFilter(name: String, val genreValues: Array<String>) : Filter.Select<String>(name, genreValues)
 
     override fun getFilterList(): FilterList {
         val genres = fetchGenres()
@@ -415,7 +411,7 @@ abstract class Madarav3(
                 val doc = resp.asDocument()
                 val el = doc.select("ul.genres li a, div.genres-content a, div.filter-item a")
                 if (el.isNotEmpty()) {
-                    return el.map { it.text().trim() }.filter { it.isNotEmpty() }.distinct().toTypedArray()
+                    return el.map { it.text().trim() }.filter { it.isNotBlank() }.distinct().toTypedArray()
                 }
             }
             emptyArray()
