@@ -41,38 +41,38 @@ class MGKomik : Madara(
         .rateLimit(9, 2)
         .build()
 
-    // ================================== Selector Override (hilangkan Baca di Web) ======================================
+    // ================== Hilangkan "Baca di Web" dari list ==================
+    private fun excludeBacaDiWeb(base: String): String {
+        return "$base:not(:has(a.read-on-site))" +
+            ":not(:has(.manga-title-badges:matchesOwn((?i)\\s*baca\\s+di\\s+web\\s*)))" +
+            ":not(:has(.badge:matchesOwn((?i)\\s*baca\\s+di\\s+web\\s*)))" +
+            ":not(:has(span:matchesOwn((?i)\\s*baca\\s+di\\s+web\\s*)))"
+    }
 
     override fun popularMangaSelector(): String {
-        val base = super.popularMangaSelector()
-        return "$base:not(:has(a.read-on-site)):not(:has(a:matchesOwn((?i)baca\\s+di\\s+web)))"
+        return excludeBacaDiWeb(super.popularMangaSelector())
     }
 
     override fun latestUpdatesSelector(): String {
-        val base = super.latestUpdatesSelector()
-        return "$base:not(:has(a.read-on-site)):not(:has(a:matchesOwn((?i)baca\\s+di\\s+web)))"
+        return excludeBacaDiWeb(super.latestUpdatesSelector())
     }
 
     override fun searchMangaSelector(): String {
-        val base = super.searchMangaSelector()
-        return "$base:not(:has(a.read-on-site)):not(:has(a:matchesOwn((?i)baca\\s+di\\s+web)))"
+        return excludeBacaDiWeb(super.searchMangaSelector())
     }
 
-    // ================================== Popular ======================================
-
-    override fun popularMangaFromElement(element: Element): SManga {
+    // ================== Parsing aman (Popular / Latest / Search) ==================
+    private fun mangaFromElementSafe(element: Element): SManga {
         val manga = SManga.create()
         with(element) {
-            selectFirst("div.item-thumb a")?.let {
-                manga.setUrlWithoutDomain(it.attr("abs:href"))
-                manga.title = it.attr("title").ifBlank { it.text() }
-            } ?: run {
-                selectFirst("a")?.let {
-                    manga.setUrlWithoutDomain(it.attr("abs:href"))
-                    manga.title = it.attr("title").ifBlank { it.text() }
-                }
+            val linkElement = selectFirst("div.item-thumb a") ?: selectFirst("a")
+            if (linkElement != null) {
+                manga.setUrlWithoutDomain(linkElement.attr("abs:href"))
+                manga.title = linkElement.attr("title").ifBlank { linkElement.text().ifBlank { "Untitled" } }
+            } else {
+                manga.url = ""
+                manga.title = "Untitled"
             }
-
             selectFirst("img")?.let {
                 manga.thumbnail_url = imageFromElement(it)
             }
@@ -80,18 +80,18 @@ class MGKomik : Madara(
         return manga
     }
 
-    // ================================ Chapters ================================
+    override fun popularMangaFromElement(element: Element) = mangaFromElementSafe(element)
+    override fun latestUpdatesFromElement(element: Element) = mangaFromElementSafe(element)
+    override fun searchMangaFromElement(element: Element) = mangaFromElementSafe(element)
 
+    // ================== Chapters ==================
     override val chapterUrlSuffix = ""
 
-    // ================================ Filters ================================
-
+    // ================== Filters ==================
     override fun getFilterList(): FilterList {
         return try {
             launchIO { fetchGenres() }
-
             val filters = super.getFilterList().list.toMutableList()
-
             if (genresList.isNotEmpty()) {
                 filters += listOf(
                     Filter.Separator(),
@@ -106,7 +106,6 @@ class MGKomik : Madara(
                     Filter.Header(intl["genre_missing_warning"]),
                 )
             }
-
             FilterList(filters)
         } catch (e: Exception) {
             FilterList(
@@ -119,28 +118,22 @@ class MGKomik : Madara(
     }
 
     private class GenreContentFilter(title: String, options: List<Pair<String, String>>) :
-        UriPartFilter(
-            title,
-            options.toTypedArray(),
-        )
+        UriPartFilter(title, options.toTypedArray())
 
     override fun genresRequest() = GET("$baseUrl/$mangaSubString", headers)
 
     override fun parseGenres(document: Document): List<Genre> {
         val genres = mutableListOf<Genre>()
         genres += Genre("All", "")
-
         document.select(".row.genres li a").forEach { a ->
             val name = a.text().ifBlank { "Unknown" }
             val url = a.absUrl("href").ifBlank { "" }
             genres += Genre(name, url)
         }
-
         return genres
     }
 
-    // =============================== Utilities ==============================
-
+    // ================== Utilities ==================
     private fun randomString(length: Int): String {
         val charPool = ('a'..'z') + ('A'..'Z') + '.'
         return List(length) { charPool.random() }.joinToString("")
