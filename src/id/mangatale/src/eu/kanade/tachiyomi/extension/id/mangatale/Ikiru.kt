@@ -1,10 +1,9 @@
-package eu.kanade.tachiyomi.extension.id.mangatale
+package eu.kanade.tachiyomi.extension.id.ikiru
 
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
-import eu.kanade.tachiyomi.source.ConfigurableSource
+import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
-import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
@@ -12,29 +11,24 @@ import eu.kanade.tachiyomi.source.online.ParsedHttpSource
 import eu.kanade.tachiyomi.util.asJsoup
 import okhttp3.FormBody
 import okhttp3.Headers
-import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import org.json.JSONArray
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
-import rx.Observable
-import uy.kohesive.injekt.Injectkt
-import uy.kohesive.injekt.api.get
 import java.text.SimpleDateFormat
-import java.text.SimpleDateFormat
-import java.util.Date
+import java.util.Calendar
 import java.util.Locale
-import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 
-class Ikiru : ParsedHttpSource {
+class Ikiru : ParsedHttpSource() {
 
     override val name = "Ikiru"
     override val baseUrl = "https://01.ikiru.wtf"
     override val lang = "id"
     override val supportsLatest = true
+    override val id = 1532456597012176985
 
     override val client: OkHttpClient = network.cloudflareClient.newBuilder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -80,12 +74,6 @@ class Ikiru : ParsedHttpSource {
             title = element.selectFirst("a.text-base, a.text-white, h1")?.text()?.trim()
                 ?: linkElement.attr("title").ifEmpty { linkElement.text() }
             thumbnail_url = element.selectFirst("img")?.attr("src")
-
-            // Parse rating
-            val ratingText = element.selectFirst(".numscore, span.text-yellow-400")?.text()
-            rating = ratingText?.toFloatOrNull()?.let {
-                if (it > 5) it / 10f else it / 5f
-            }
 
             // Parse status
             val statusText = element.selectFirst("span.bg-accent, p:contains(Ongoing), p:contains(Completed)")
@@ -133,9 +121,10 @@ class Ikiru : ParsedHttpSource {
         filters.forEach { filter ->
             when (filter) {
                 is GenreFilter -> {
-                    if (filter.state.isNotEmpty()) {
+                    val selectedGenres = filter.state.filter { it.state }.map { it.id }
+                    if (selectedGenres.isNotEmpty()) {
                         formBodyBuilder.add("genre-relation", "AND")
-                        val genreArray = JSONArray(filter.state.filter { it.state }.map { it.id })
+                        val genreArray = JSONArray(selectedGenres)
                         formBodyBuilder.add("genre", genreArray.toString())
                     }
                 }
@@ -168,7 +157,7 @@ class Ikiru : ParsedHttpSource {
                     }
                 }
                 is SortFilter -> {
-                    orderBy = when (filter.state) {
+                    orderBy = when (filter.state?.index) {
                         0 -> "popular"
                         1 -> "updated"
                         2 -> "title"
@@ -397,15 +386,18 @@ class Ikiru : ParsedHttpSource {
     }
 
     // Filter classes
-    class SortFilter : Filter.Select<String>("Sort by", arrayOf("Popular", "Latest", "A-Z", "Rating"))
+    class SortFilter : Filter.Sort("Sort by", 
+        arrayOf("Popular", "Latest", "A-Z", "Rating"),
+        Selection(0, false)
+    )
+    
     class StatusFilter : Filter.Select<String>("Status", arrayOf("All", "Ongoing", "Completed", "On Hiatus"))
+    
     class TypeFilter : Filter.Select<String>("Type", arrayOf("All", "Manga", "Manhwa", "Manhua", "Comic", "Novel"))
+    
     class AuthorFilter : Filter.Text("Author")
+    
     class GenreFilter(genres: List<Tag>) : Filter.Group<Tag>("Genres", genres)
     
     class Tag(val id: String, name: String) : Filter.CheckBox(name)
-
-    override fun setupPreferenceScreen(screen: androidx.preference.PreferenceScreen) {
-        // Add any configuration options here if needed
-    }
 }
