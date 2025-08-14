@@ -1,4 +1,4 @@
-package eu.kanade.tachiyomi.extension.id.ikiru
+package eu.kanade.tachiyomi.extension.id.mangatale
 
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
@@ -22,7 +22,7 @@ import java.util.Calendar
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
-class Ikiru : ParsedHttpSource() {
+class Ikiru : ParsedHttpSource {
 
     override val name = "Ikiru"
     override val baseUrl = "https://01.ikiru.wtf"
@@ -386,7 +386,8 @@ class Ikiru : ParsedHttpSource() {
     }
 
     // Filter classes
-    class SortFilter : Filter.Sort("Sort by", 
+    class SortFilter : Filter.Sort(
+        "Sort by", 
         arrayOf("Popular", "Latest", "A-Z", "Rating"),
         Selection(0, false)
     )
