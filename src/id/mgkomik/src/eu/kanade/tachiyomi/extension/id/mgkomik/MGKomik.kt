@@ -6,7 +6,6 @@ import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.SManga
-import eu.kanade.tachiyomi.util.ignore
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.text.SimpleDateFormat
@@ -47,27 +46,28 @@ class MGKomik : Madara(
     override fun popularMangaFromElement(element: Element): SManga {
         // Skip jika ada tombol "Baca di Web" (class read-on-site)
         if (element.selectFirst("a.read-on-site") != null) {
-            throw ignore() // Resmi di Tachiyomi untuk skip item
+            return SManga.create().apply {
+                title = ""
+                url = ""
+                thumbnail_url = ""
+            }
         }
 
-        val manga = SManga.create()
-        with(element) {
-            selectFirst("div.item-thumb a")?.let {
-                manga.setUrlWithoutDomain(it.attr("abs:href"))
-                manga.title = it.attr("title").ifBlank { it.text() }
+        // Parsing manga normal
+        return SManga.create().apply {
+            element.selectFirst("div.item-thumb a")?.let {
+                setUrlWithoutDomain(it.attr("abs:href"))
+                title = it.attr("title").ifBlank { it.text() }
             } ?: run {
-                selectFirst("a")?.let {
-                    manga.setUrlWithoutDomain(it.attr("abs:href"))
-                    manga.title = it.attr("title").ifBlank { it.text() }
+                element.selectFirst("a")?.let {
+                    setUrlWithoutDomain(it.attr("abs:href"))
+                    title = it.attr("title").ifBlank { it.text() }
                 }
             }
-
-            selectFirst("img")?.let {
-                manga.thumbnail_url = imageFromElement(it)
+            element.selectFirst("img")?.let {
+                thumbnail_url = imageFromElement(it)
             }
         }
-
-        return manga
     }
 
     // ================================ Chapters ================================
