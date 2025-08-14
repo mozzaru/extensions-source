@@ -41,55 +41,33 @@ class MGKomik : Madara(
         .rateLimit(9, 2)
         .build()
 
-    // ================================== Selector Override (hilangkan "Baca di Web") ======================================
-    // lebih defensif: exclude any descendant anchor/span/element that matches regex "baca\s*di\s*web" (case-insensitive)
-    private val bacaDiWebRegex = "(?i)baca\\s*di\\s*web"
+    // Regex untuk deteksi teks "Baca di Web" di elemen apapun (case-insensitive, toleransi spasi)
+    private val bacaDiWebPattern = Regex("(?i)baca\\s*di\\s*web")
 
-    override fun popularMangaSelector(): String {
-        val base = super.popularMangaSelector()
-        // exclude items that have a link/span/any descendant that matches the "baca di web" text OR have read-on-site class
-        return "$base:not(:has(a.read-on-site)):not(:has(a:matchesOwn($bacaDiWebRegex))):not(:has(span:matchesOwn($bacaDiWebRegex))):not(:has(*:matchesOwn($bacaDiWebRegex)))"
-    }
+    // Parsing aman & filter "Baca di Web"
+    private fun parseMangaElement(element: Element): SManga {
+        // Cek jika teks di elemen mengandung "Baca di Web"
+        if (element.text().contains(bacaDiWebPattern)) {
+            return SManga.create().apply { url = "" } // Kosongkan agar tidak terbaca
+        }
 
-    override fun latestUpdatesSelector(): String {
-        val base = super.latestUpdatesSelector()
-        return "$base:not(:has(a.read-on-site)):not(:has(a:matchesOwn($bacaDiWebRegex))):not(:has(span:matchesOwn($bacaDiWebRegex))):not(:has(*:matchesOwn($bacaDiWebRegex)))"
-    }
-
-    override fun searchMangaSelector(): String {
-        val base = super.searchMangaSelector()
-        return "$base:not(:has(a.read-on-site)):not(:has(a:matchesOwn($bacaDiWebRegex))):not(:has(span:matchesOwn($bacaDiWebRegex))):not(:has(*:matchesOwn($bacaDiWebRegex)))"
-    }
-
-    // ================================== Popular / Latest element parsing (null-safe) ======================================
-    // Use the same safe parsing for popular/latest/search elements
-    override fun popularMangaFromElement(element: Element): SManga {
         val manga = SManga.create()
-        with(element) {
-            // try the common thumbnail/title path first, fallback to any <a>
-            selectFirst("div.item-thumb a")?.let { a ->
-                manga.setUrlWithoutDomain(a.attr("abs:href"))
-                // prefer title attribute, else anchor text
-                manga.title = a.attr("title").ifBlank { a.text() }
-            } ?: run {
-                selectFirst("a")?.let { a ->
-                    manga.setUrlWithoutDomain(a.attr("abs:href"))
-                    manga.title = a.attr("title").ifBlank { a.text() }
-                }
-            }
-
-            selectFirst("img")?.let { img ->
-                manga.thumbnail_url = imageFromElement(img)
-            }
+        val link = element.selectFirst("div.item-thumb a") ?: element.selectFirst("a")
+        if (link != null) {
+            manga.setUrlWithoutDomain(link.attr("abs:href"))
+            manga.title = link.attr("title").ifBlank { link.text().ifBlank { "Untitled" } }
+        }
+        element.selectFirst("img")?.let {
+            manga.thumbnail_url = imageFromElement(it)
         }
         return manga
     }
 
-    // Latest list in Madara might call a different function internally — override latestUpdatesFromElement too to be safe:
-    override fun latestUpdatesFromElement(element: Element): SManga = popularMangaFromElement(element)
-    override fun searchMangaFromElement(element: Element): SManga = popularMangaFromElement(element)
+    // Gunakan parser yang sama untuk semua list
+    override fun popularMangaFromElement(element: Element) = parseMangaElement(element)
+    override fun latestUpdatesFromElement(element: Element) = parseMangaElement(element)
+    override fun searchMangaFromElement(element: Element) = parseMangaElement(element)
 
-    // ================================ Chapters ================================
     override val chapterUrlSuffix = ""
 
     // ================================ Filters ================================
@@ -126,10 +104,7 @@ class MGKomik : Madara(
     }
 
     private class GenreContentFilter(title: String, options: List<Pair<String, String>>) :
-        UriPartFilter(
-            title,
-            options.toTypedArray(),
-        )
+        UriPartFilter(title, options.toTypedArray())
 
     override fun genresRequest() = GET("$baseUrl/$mangaSubString", headers)
 
@@ -142,11 +117,9 @@ class MGKomik : Madara(
             val url = a.absUrl("href").ifBlank { "" }
             genres += Genre(name, url)
         }
-
         return genres
     }
 
-    // =============================== Utilities ==============================
     private fun randomString(length: Int): String {
         val charPool = ('a'..'z') + ('A'..'Z') + '.'
         return List(length) { charPool.random() }.joinToString("")
