@@ -64,9 +64,6 @@ class MGKomik : Madara(
     }
 
     // ================================ Latest Updates ================================
-
-    // Override selector for latest updates based on the HTML structure
-    override val latestUpdatesSelector = ".page-listing-item .page-item-detail"
     
     // Fix for latest updates parsing - use specific selector for this site
     override fun latestUpdatesFromElement(element: Element): SManga {
@@ -96,6 +93,24 @@ class MGKomik : Madara(
 
     // Override latest updates request to ensure correct URL
     override fun latestUpdatesRequest(page: Int) = GET("$baseUrl/?page=$page", headers)
+    
+    // Override latest updates parsing to use correct selector
+    override fun latestUpdatesParse(response: okhttp3.Response): MangasPage {
+        val document = response.asJsoup()
+        
+        val mangas = document.select(".page-listing-item .page-item-detail").mapNotNull { element ->
+            try {
+                latestUpdatesFromElement(element)
+            } catch (e: Exception) {
+                null
+            }
+        }
+        
+        val hasNextPage = document.select(".wp-pagenavi .page.larger").isNotEmpty() ||
+                         document.select(".wp-pagenavi a[aria-label='Last Page']").isNotEmpty()
+        
+        return MangasPage(mangas, hasNextPage)
+    }
 
     // ================================ Chapters ================================
 
@@ -144,11 +159,36 @@ class MGKomik : Madara(
 
     // =============================== Search ================================
 
-    // Override search manga selector if needed
-    override val searchMangaSelector = ".c-tabs-item .page-listing-item .page-item-detail"
-
+    // Override search manga from element to use same logic as latest updates
     override fun searchMangaFromElement(element: Element): SManga {
         return latestUpdatesFromElement(element) // Use same logic as latest updates
+    }
+    
+    // Override search parsing to use correct selector if needed
+    override fun searchMangaParse(response: okhttp3.Response): MangasPage {
+        val document = response.asJsoup()
+        
+        // Try different selectors based on the search result structure
+        val searchSelector = when {
+            document.select(".c-tabs-item .page-listing-item .page-item-detail").isNotEmpty() -> 
+                ".c-tabs-item .page-listing-item .page-item-detail"
+            document.select(".page-listing-item .page-item-detail").isNotEmpty() -> 
+                ".page-listing-item .page-item-detail"
+            else -> ".page-item-detail" // fallback
+        }
+        
+        val mangas = document.select(searchSelector).mapNotNull { element ->
+            try {
+                searchMangaFromElement(element)
+            } catch (e: Exception) {
+                null
+            }
+        }
+        
+        val hasNextPage = document.select(".wp-pagenavi .page.larger").isNotEmpty() ||
+                         document.select(".wp-pagenavi a[aria-label='Last Page']").isNotEmpty()
+        
+        return MangasPage(mangas, hasNextPage)
     }
 
     // =============================== Utilities ==============================
