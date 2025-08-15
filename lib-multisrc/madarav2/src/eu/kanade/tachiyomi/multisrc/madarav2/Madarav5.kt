@@ -503,4 +503,178 @@ abstract class Madarav5(
     // Filters
     override fun getFilterList(): FilterList {
         val filters = mutableListOf<Filter<*>>()
-       
+        
+        filters.add(Filter.Header("Filters"))
+        filters.add(GenreFilter(getGenreList()))
+        filters.add(StatusFilter(getStatusList()))
+        filters.add(OrderByFilter(getOrderByList()))
+        filters.add(YearFilter())
+        if (authorSearchSupported) {
+            filters.add(AuthorFilter())
+        }
+        filters.add(AdultContentFilter())
+
+        return FilterList(filters)
+    }
+
+    private fun getGenreList(): List<Genre> = emptyList() // Override in implementation
+
+    private fun getStatusList(): Array<String> = arrayOf(
+        "All",
+        "on-going",
+        "end",
+        "canceled",
+        "on-hold",
+        "upcoming"
+    )
+
+    private fun getOrderByList(): Array<String> = arrayOf(
+        "latest",
+        "views",
+        "new-manga", 
+        "alphabet",
+        "rating"
+    )
+
+    // Utility functions
+    private fun parseChapterDate(dateStr: String?): Long {
+        return when {
+            dateStr == null -> 0L
+            dateStr.contains("ago") || dateStr.contains("atrás") -> parseRelativeDate(dateStr)
+            dateStr.contains("yesterday") -> {
+                Calendar.getInstance().apply {
+                    add(Calendar.DAY_OF_MONTH, -1)
+                    set(Calendar.HOUR_OF_DAY, 0)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }.timeInMillis
+            }
+            dateStr.contains("today") -> {
+                Calendar.getInstance().apply {
+                    set(Calendar.HOUR_OF_DAY, 0)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }.timeInMillis
+            }
+            dateStr.contains(Regex("""\d(st|nd|rd|th)""")) -> {
+                val cleanDate = dateStr.split(" ").map {
+                    if (it.contains(Regex("""\d\D\D"""))) {
+                        it.replace(Regex("""\D"""), "")
+                    } else it
+                }.joinToString(" ")
+                try {
+                    dateFormat.parse(cleanDate)?.time ?: 0L
+                } catch (e: ParseException) {
+                    0L
+                }
+            }
+            else -> {
+                try {
+                    dateFormat.parse(dateStr)?.time ?: 0L
+                } catch (e: ParseException) {
+                    0L
+                }
+            }
+        }
+    }
+
+    private fun parseRelativeDate(date: String): Long {
+        val number = Regex("""(\d+)""").find(date)?.value?.toIntOrNull() ?: return 0L
+        val cal = Calendar.getInstance()
+        
+        return when {
+            date.contains("second") || date.contains("segundo") -> 
+                cal.apply { add(Calendar.SECOND, -number) }.timeInMillis
+            date.contains("minute") || date.contains("minuto") || date.contains("min") -> 
+                cal.apply { add(Calendar.MINUTE, -number) }.timeInMillis
+            date.contains("hour") || date.contains("hora") || date.contains("h") -> 
+                cal.apply { add(Calendar.HOUR, -number) }.timeInMillis
+            date.contains("day") || date.contains("día") || date.contains("d") -> 
+                cal.apply { add(Calendar.DAY_OF_MONTH, -number) }.timeInMillis
+            date.contains("month") || date.contains("mes") -> 
+                cal.apply { add(Calendar.MONTH, -number) }.timeInMillis
+            date.contains("year") || date.contains("año") -> 
+                cal.apply { add(Calendar.YEAR, -number) }.timeInMillis
+            else -> 0L
+        }
+    }
+
+    private fun createRequestTemplate(): MutableMap<String, String> {
+        return mutableMapOf(
+            "action" to "madara_load_more",
+            "page" to "0",
+            "template" to "madara-core/content/content-search",
+            "vars[s]" to "",
+            "vars[paged]" to "1",
+            "vars[template]" to "search",
+            "vars[meta_query][0][relation]" to "AND",
+            "vars[meta_query][relation]" to "AND",
+            "vars[post_type]" to "wp-manga",
+            "vars[post_status]" to "publish",
+            "vars[manga_archives_item_layout]" to "default"
+        )
+    }
+
+    private fun String.decodeHex(): ByteArray {
+        check(length % 2 == 0) { "Must have an even length" }
+        return chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+    }
+
+    // Filter classes
+    class GenreFilter(genres: List<Genre>) : Filter.Group<Genre>("Genres", genres)
+    class Genre(name: String, val id: String) : Filter.CheckBox(name)
+
+    class StatusFilter(statuses: Array<String>) : Filter.Select<String>("Status", statuses)
+    class OrderByFilter(orders: Array<String>) : Filter.Select<String>("Order By", orders)
+    class YearFilter : Filter.Text("Year")
+    class AuthorFilter : Filter.Text("Author")
+    class AdultContentFilter : Filter.Select<String>("Adult Content", arrayOf("All", "Non-Adult", "Adult"))
+}
+
+// Crypto helper class
+object CryptoAES {
+    fun decrypt(data: String, password: String): String {
+        val encryptedData = Base64.decode(data, Base64.DEFAULT)
+        
+        // Extract salt (first 8 bytes after "Salted__")
+        val salt = encryptedData.sliceArray(8..15)
+        val ciphertext = encryptedData.sliceArray(16 until encryptedData.size)
+        
+        // Derive key and IV using EVP_BytesToKey equivalent
+        val keyIv = deriveKeyAndIv(password.toByteArray(), salt, 32, 16)
+        val key = keyIv.sliceArray(0..31)
+        val iv = keyIv.sliceArray(32..47)
+        
+        val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+        val secretKey = SecretKeySpec(key, "AES")
+        val ivSpec = IvParameterSpec(iv)
+        
+        cipher.init(Cipher.DECRYPT_MODE, secretKey, ivSpec)
+        val decrypted = cipher.doFinal(ciphertext)
+        
+        return String(decrypted)
+    }
+    
+    private fun deriveKeyAndIv(password: ByteArray, salt: ByteArray, keyLength: Int, ivLength: Int): ByteArray {
+        val md5 = java.security.MessageDigest.getInstance("MD5")
+        val derivedBytes = ByteArray(keyLength + ivLength)
+        var currentHash = byteArrayOf()
+        var currentIndex = 0
+        
+        while (currentIndex < derivedBytes.size) {
+            md5.reset()
+            md5.update(currentHash)
+            md5.update(password)
+            md5.update(salt)
+            currentHash = md5.digest()
+            
+            val bytesToCopy = minOf(currentHash.size, derivedBytes.size - currentIndex)
+            System.arraycopy(currentHash, 0, derivedBytes, currentIndex, bytesToCopy)
+            currentIndex += bytesToCopy
+        }
+        
+        return derivedBytes
+    }
+}
