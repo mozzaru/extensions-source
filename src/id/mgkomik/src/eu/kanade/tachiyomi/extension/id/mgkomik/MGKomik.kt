@@ -105,7 +105,7 @@ class MGKomik : Madara(
     override fun parseGenres(document: Document): List<Genre> {
         val genres = mutableListOf<Genre>()
         genres += Genre("All", "")
-        
+
         try {
             genres += document.select(".row.genres li a").mapNotNull { anchor ->
                 val name = anchor.text().trim()
@@ -119,7 +119,7 @@ class MGKomik : Madara(
         } catch (e: Exception) {
             // Fallback if parsing fails
         }
-        
+
         return genres
     }
 
