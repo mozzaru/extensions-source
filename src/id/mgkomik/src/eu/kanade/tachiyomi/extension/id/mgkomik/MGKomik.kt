@@ -20,11 +20,22 @@ class MGKomik : Madara(
     override val useLoadMoreRequest = LoadMoreStrategy.Always
     override val useNewChapterEndpoint = false
     override val mangaSubString = "komik"
-    overrode val id = 5845004992097969882
 
     override fun headersBuilder() = super.headersBuilder().apply {
+        add(
+            "Accept",
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        )
+        add("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
+        add("Accept-Encoding", "gzip, deflate, br")
+        add("DNT", "1")
+        add("Sec-Fetch-Dest", "document")
+        add("Sec-Fetch-Mode", "navigate")
+        add("Sec-Fetch-Site", "none")
+        add("Sec-Fetch-User", "?1")
         add("Upgrade-Insecure-Requests", "1")
-        add("X-Requested-With", randomString((8..15).random())) // Reduced range for more realistic values
+        add("Cache-Control", "max-age=0")
+        add("X-Requested-With", randomString((8..15).random()))
     }
 
     override val client = network.cloudflareClient.newBuilder()
