@@ -1,10 +1,10 @@
 package eu.kanade.tachiyomi.extension.id.mgkomik
 
-import eu.kanade.tachiyomi.multisrc.madarav2.Madarav4
+import eu.kanade.tachiyomi.multisrc.madarav2.Madarav5
 import okhttp3.Headers
 import kotlin.random.Random
 
-class MGKomik : Madarav4(
+class MGKomik : Madarav5(
     name = "MG Komik",
     baseUrl = "https://id.mgkomik.cc",
     lang = "id"
