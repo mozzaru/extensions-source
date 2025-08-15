@@ -1,22 +1,15 @@
 package eu.kanade.tachiyomi.extension.id.mgkomik
 
-import android.app.Application
 import eu.kanade.tachiyomi.multisrc.madara.Madara
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.SManga
-import okhttp3.Cache
-import okhttp3.brotli.BrotliInterceptor
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
-import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Locale
-import java.util.concurrent.TimeUnit
 
 class MGKomik : Madara(
     "MG Komik",
@@ -24,20 +17,20 @@ class MGKomik : Madara(
     "id",
     SimpleDateFormat("dd MMM yy", Locale.US),
 ) {
+    override val id = 5845004992097969882
+
     override val useLoadMoreRequest = LoadMoreStrategy.Always
 
     override val useNewChapterEndpoint = false
 
     override val mangaSubString = "komik"
 
-    override val id = 5845004992097969882
-
     override fun headersBuilder() = super.headersBuilder().apply {
         add("Sec-Fetch-Dest", "document")
         add("Sec-Fetch-Mode", "navigate")
         add("Sec-Fetch-Site", "same-origin")
         add("Upgrade-Insecure-Requests", "1")
-        add("X-Requested-With", randomString((8..15).random())) // added for webview, and removed in interceptor for normal use
+        add("X-Requested-With", randomString((1..20).random())) // added for webview, and removed in interceptor for normal use
     }
 
     override val client = network.cloudflareClient.newBuilder()
@@ -50,20 +43,6 @@ class MGKomik : Madara(
             chain.proceed(request.newBuilder().headers(headers).build())
         }
         .rateLimit(2, 1)
-        .apply {
-            val index = networkInterceptors().indexOfFirst { it is BrotliInterceptor }
-            if (index >= 0) interceptors().add(networkInterceptors().removeAt(index))
-        }
-        .cache(
-            Cache(
-                directory = File(Injekt.get<Application>().externalCacheDir, "network_cache_mgkomik"),
-                maxSize = 50L * 1024 * 1024, // 50 MiB
-            ),
-        )
-        .build()
-
-    private val pagesClient = client.newBuilder()
-        .readTimeout(2, TimeUnit.MINUTES)
         .build()
 
     // ================================== Popular ======================================
@@ -73,13 +52,14 @@ class MGKomik : Madara(
         val manga = SManga.create()
 
         with(element) {
-            selectFirst("div.item-thumb a")!!.let {
-                manga.setUrlWithoutDomain(it.attr("abs:href"))
-                manga.title = it.attr("title")
+            selectFirst("div.item-thumb a")?.let { anchor ->
+                manga.setUrlWithoutDomain(anchor.attr("abs:href"))
+                manga.title = anchor.attr("title").takeIf { it.isNotBlank() }
+                    ?: anchor.text().trim()
             }
 
-            selectFirst("img")?.let {
-                manga.thumbnail_url = imageFromElement(it)
+            selectFirst("img")?.let { img ->
+                manga.thumbnail_url = imageFromElement(img)
             }
         }
 
@@ -125,9 +105,21 @@ class MGKomik : Madara(
     override fun parseGenres(document: Document): List<Genre> {
         val genres = mutableListOf<Genre>()
         genres += Genre("All", "")
-        genres += document.select(".row.genres li a").map { a ->
-            Genre(a.text(), a.absUrl("href"))
+        
+        try {
+            genres += document.select(".row.genres li a").mapNotNull { anchor ->
+                val name = anchor.text().trim()
+                val url = anchor.absUrl("href")
+                if (name.isNotBlank() && url.isNotBlank()) {
+                    Genre(name, url)
+                } else {
+                    null
+                }
+            }
+        } catch (e: Exception) {
+            // Fallback if parsing fails
         }
+        
         return genres
     }
 
