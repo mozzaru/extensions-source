@@ -37,8 +37,17 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
 
-          git fetch origin keiyoushi
-          git checkout keiyoushi
+          # Check if keiyoushi branch exists, create if it doesn't
+          if git ls-remote --heads origin keiyoushi | grep -q keiyoushi; then
+            echo "Keiyoushi branch exists, fetching..."
+            git fetch origin keiyoushi
+            git checkout keiyoushi
+          else
+            echo "Keiyoushi branch doesn't exist, creating..."
+            git checkout -b keiyoushi
+            git push -u origin keiyoushi
+          fi
+
           echo "Last commit: `git log -1 --oneline`"
           git remote add keiyoushi-upstream https://github.com/keiyoushi/extensions-source
           git fetch keiyoushi-upstream
@@ -57,7 +66,7 @@ jobs:
           git checkout main
           echo "Last commit: `git log -1 --oneline`"
           # Loop through indices in reverse order
-          for (( i=${#upcoming_changes_hash[@]}; i>=0; i-- )); do
+          for (( i=${#upcoming_changes_hash[@]}-1; i>=0; i-- )); do
             if [ ! -z "${upcoming_changes_hash[i]}" -a "${upcoming_changes_hash[i]}" != " " ]; then
               echo "[$i]: Cherry picking '${upcoming_changes_hash[i]}'"
               git cherry-pick --allow-empty "${upcoming_changes_hash[i]}"
@@ -84,23 +93,6 @@ jobs:
 
           echo "Last commit: `git log -1 --oneline`"
 
-      # - name: Merging master to merge-keiyoushi
-      #   run: |
-      #     cd master
-      #     git fetch origin merge-keiyoushi
-      #     git checkout merge-keiyoushi
-      #     echo "Last commit: `git log -1 --oneline`"
-      #     echo "Merging 'master' into merge-keiyoushi"
-      #     git merge --no-edit master
-      #     echo "Last commit: `git log -1 --oneline`"
-
-      # - name: Merging keiyoushi-upstream to merge-keiyoushi
-      #   run: |
-      #     cd master
-      #     echo "Merging 'keiyoushi-upstream/main' into merge-keiyoushi"
-      #     git merge --no-edit keiyoushi-upstream/main
-      #     echo "Last commit: `git log -1 --oneline`"
-
       - name: Pushing to repo
         run: |
           cd main
@@ -112,7 +104,3 @@ jobs:
           echo "Last commit: `git log -1 --oneline`"
           echo "Pushing 'keiyoushi' to repo"
           git push
-          # git checkout merge-keiyoushi
-          # echo "Last commit: `git log -1 --oneline`"
-          # echo "Pushing 'merge-keiyoushi' to repo"
-          # git push
