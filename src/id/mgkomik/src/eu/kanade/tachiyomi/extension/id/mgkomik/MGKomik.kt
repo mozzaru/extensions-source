@@ -46,27 +46,39 @@ class MGKomik : Madara(
 
     // ================================== Popular ======================================
 
-    override fun popularMangaNextPageSelector() = ".wp-pagenavi span.current + a"
+    // Selector untuk manga di halaman popular - coba berbagai kemungkinan
+    override fun popularMangaSelector() = "div.page-item-detail, .item-summary, .post-title, .item-thumb, article.post"
+
+    override fun popularMangaNextPageSelector() = ".wp-pagenavi span.current + a, .nav-previous a, .pagination a.next"
 
     // Fix untuk popular manga element parsing
     override fun popularMangaFromElement(element: Element): SManga {
         val manga = SManga.create()
 
         with(element) {
-            // Coba berbagai selector yang mungkin ada
-            val linkElement = selectFirst("h3 a, h4 a, .post-title a, div.item-thumb a, a[href*=komik]")
+            // Coba berbagai selector yang mungkin ada untuk link
+            val linkElement = selectFirst("h3 a, h4 a, .post-title a, div.item-thumb a, a[href*=komik], a[href*=manga]")
+                ?: selectFirst("a") // fallback ke a tag pertama
             
             if (linkElement != null) {
-                manga.setUrlWithoutDomain(linkElement.attr("abs:href"))
-                manga.title = linkElement.attr("title").ifEmpty { linkElement.text() }
+                val href = linkElement.attr("abs:href")
+                if (href.isNotEmpty()) {
+                    manga.setUrlWithoutDomain(href)
+                }
+                
+                // Coba ambil title dari berbagai sumber
+                manga.title = linkElement.attr("title").ifEmpty { 
+                    linkElement.text().ifEmpty {
+                        selectFirst("h3, h4, .post-title")?.text() ?: "Unknown Title"
+                    }
+                }
             } else {
-                // Fallback jika tidak ada link yang ditemukan
-                val titleElement = selectFirst("h3, h4, .post-title")
-                manga.title = titleElement?.text() ?: "Unknown Title"
-                // Set URL kosong untuk menghindari crash, tapi ini akan menyebabkan error saat dibuka
+                // Jika tidak ada link, cari title saja
+                manga.title = selectFirst("h3, h4, .post-title")?.text() ?: "Unknown Title"
                 manga.url = ""
             }
 
+            // Cari thumbnail
             selectFirst("img")?.let {
                 manga.thumbnail_url = imageFromElement(it)
             }
@@ -76,6 +88,11 @@ class MGKomik : Madara(
     }
 
     // ================================== Latest =======================================
+
+    // Selector untuk manga di halaman latest
+    override fun latestUpdatesSelector() = "div.page-item-detail, .item-summary, .post-title, .item-thumb, article.post"
+
+    override fun latestUpdatesNextPageSelector() = ".wp-pagenavi span.current + a, .nav-previous a, .pagination a.next"
 
     override fun latestUpdatesRequest(page: Int): Request =
         if (useLoadMoreRequest()) {
