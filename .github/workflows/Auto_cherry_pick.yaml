@@ -18,21 +18,21 @@ permissions:
 jobs:
   auto-merge:
     name: Auto cherry-pick Keiyoushi
-    if: github.repository == 'yuzono/tachiyomi-extensions'
+    if: github.repository == 'mozzaru/extensions-source'
     runs-on: ubuntu-latest
 
     steps:
-      - name: Clone master
+      - name: Clone main
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v4
         with:
-          ref: master
-          path: master
+          ref: main
+          path: main
           fetch-depth: 100
           token: ${{ secrets.BOT_PAT }}
 
       - name: Cherry-picking
         run: |
-          cd master
+          cd main
 
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
@@ -54,7 +54,7 @@ jobs:
             upcoming_changes_hash+=("$line")
           done <<< "$upcoming_changes"
 
-          git checkout master
+          git checkout main
           echo "Last commit: `git log -1 --oneline`"
           # Loop through indices in reverse order
           for (( i=${#upcoming_changes_hash[@]}; i>=0; i-- )); do
@@ -73,7 +73,7 @@ jobs:
 
       - name: Merging keiyoushi-upstream to keiyoushi
         run: |
-          cd master
+          cd main
           git checkout keiyoushi
           echo "Last commit: `git log -1 --oneline`"
           latest_commit_hash=${{ env.LATEST_HASH }}
@@ -103,10 +103,10 @@ jobs:
 
       - name: Pushing to repo
         run: |
-          cd master
-          git checkout master
+          cd main
+          git checkout main
           echo "Last commit: `git log -1 --oneline`"
-          echo "Pushing 'master' to repo"
+          echo "Pushing 'main' to repo"
           git push
           git checkout keiyoushi
           echo "Last commit: `git log -1 --oneline`"
