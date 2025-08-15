@@ -24,29 +24,20 @@ class MGKomik : Madara(
     "id",
     SimpleDateFormat("dd MMM yy", Locale.US),
 ) {
-    override val id = 5845004992097969882
-
     override val useLoadMoreRequest = LoadMoreStrategy.Always
 
     override val useNewChapterEndpoint = false
 
     override val mangaSubString = "komik"
 
+    override val id = 5845004992097969882
+
     override fun headersBuilder() = super.headersBuilder().apply {
-        add(
-            "Accept",
-            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-        )
-        add("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
-        add("Accept-Encoding", "gzip, deflate, br")
-        add("DNT", "1")
         add("Sec-Fetch-Dest", "document")
         add("Sec-Fetch-Mode", "navigate")
-        add("Sec-Fetch-Site", "none")
-        add("Sec-Fetch-User", "?1")
+        add("Sec-Fetch-Site", "same-origin")
         add("Upgrade-Insecure-Requests", "1")
-        add("Cache-Control", "max-age=0")
-        add("X-Requested-With", randomString((8..15).random()))
+        add("X-Requested-With", randomString((1..20).random())) // added for webview, and removed in interceptor for normal use
     }
 
     override val client = network.cloudflareClient.newBuilder()
@@ -58,7 +49,7 @@ class MGKomik : Madara(
 
             chain.proceed(request.newBuilder().headers(headers).build())
         }
-        .rateLimit(2, 1)
+        .rateLimit(9, 2)
         .apply {
             val index = networkInterceptors().indexOfFirst { it is BrotliInterceptor }
             if (index >= 0) interceptors().add(networkInterceptors().removeAt(index))
@@ -77,18 +68,18 @@ class MGKomik : Madara(
 
     // ================================== Popular ======================================
 
+    // overriding to change title selector and manga url selector
     override fun popularMangaFromElement(element: Element): SManga {
         val manga = SManga.create()
 
         with(element) {
-            selectFirst("div.item-thumb a")?.let { anchor ->
-                manga.setUrlWithoutDomain(anchor.attr("abs:href"))
-                manga.title = anchor.attr("title").takeIf { it.isNotBlank() }
-                    ?: anchor.text().trim()
+            selectFirst("div.item-thumb a")!!.let {
+                manga.setUrlWithoutDomain(it.attr("abs:href"))
+                manga.title = it.attr("title")
             }
 
-            selectFirst("img")?.let { img ->
-                manga.thumbnail_url = imageFromElement(img)
+            selectFirst("img")?.let {
+                manga.thumbnail_url = imageFromElement(it)
             }
         }
 
@@ -134,28 +125,16 @@ class MGKomik : Madara(
     override fun parseGenres(document: Document): List<Genre> {
         val genres = mutableListOf<Genre>()
         genres += Genre("All", "")
-
-        try {
-            genres += document.select(".row.genres li a").mapNotNull { anchor ->
-                val name = anchor.text().trim()
-                val url = anchor.absUrl("href")
-                if (name.isNotBlank() && url.isNotBlank()) {
-                    Genre(name, url)
-                } else {
-                    null
-                }
-            }
-        } catch (e: Exception) {
-            // Log error if needed, but don't crash the extension
+        genres += document.select(".row.genres li a").map { a ->
+            Genre(a.text(), a.absUrl("href"))
         }
-
         return genres
     }
 
     // =============================== Utilities ==============================
 
     private fun randomString(length: Int): String {
-        val charPool = ('a'..'z') + ('A'..'Z') + ('0'..'9')
+        val charPool = ('a'..'z') + ('A'..'Z') + ('.')
         return List(length) { charPool.random() }.joinToString("")
     }
 }
