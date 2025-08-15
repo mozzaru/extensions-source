@@ -77,18 +77,17 @@ jobs:
           echo "ext=$EXT" >> $GITHUB_OUTPUT
           echo "build_type=$BUILD_TYPE" >> $GITHUB_OUTPUT
 
-      - name: Setup signing key (release builds only)
+      - name: Prepare signing key (release builds only)
         if: steps.detect.outputs.build_type == 'release'
         run: |
-          # Decode base64 signing key from secrets
-          echo "${{ secrets.SIGNING_KEY }}" | base64 -d > signingkey.jks
+          echo ${{ secrets.SIGNING_KEY }} | base64 -d > signingkey.jks
 
       - name: Build extension
         env:
           CI: true
-          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
-          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
-          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          ALIAS: ${{ secrets.ALIAS }}
+          KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           BUILD_TYPE="${{ steps.detect.outputs.build_type }}"
           
