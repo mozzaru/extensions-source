@@ -37,7 +37,7 @@ class MGKomik : Madara(
         add("Sec-Fetch-Mode", "navigate")
         add("Sec-Fetch-Site", "same-origin")
         add("Upgrade-Insecure-Requests", "1")
-        add("X-Requested-With", randomString((1..20).random())) // added for webview, and removed in interceptor for normal use
+        add("X-Requested-With", randomString((8..15).random())) // added for webview, and removed in interceptor for normal use
     }
 
     override val client = network.cloudflareClient.newBuilder()
@@ -49,7 +49,7 @@ class MGKomik : Madara(
 
             chain.proceed(request.newBuilder().headers(headers).build())
         }
-        .rateLimit(9, 2)
+        .rateLimit(2, 1)
         .apply {
             val index = networkInterceptors().indexOfFirst { it is BrotliInterceptor }
             if (index >= 0) interceptors().add(networkInterceptors().removeAt(index))
