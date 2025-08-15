@@ -17,7 +17,6 @@ class MGKomik : Madara(
     "id",
     SimpleDateFormat("dd MMM yy", Locale.US),
 ) {
-    override val id = 5845004992097969882
 
     override val useLoadMoreRequest = LoadMoreStrategy.Always
 
