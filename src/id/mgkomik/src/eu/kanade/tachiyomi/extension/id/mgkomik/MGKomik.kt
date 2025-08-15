@@ -17,6 +17,8 @@ class MGKomik : Madara(
     "id",
     SimpleDateFormat("dd MMM yy", Locale.US),
 ) {
+    override val id = 5845004992097969882
+
     override val useLoadMoreRequest = LoadMoreStrategy.Always
 
     override val useNewChapterEndpoint = false
@@ -40,7 +42,7 @@ class MGKomik : Madara(
 
             chain.proceed(request.newBuilder().headers(headers).build())
         }
-        .rateLimit(9, 2)
+        .rateLimit(2, 1)
         .build()
 
     // ================================== Popular ======================================
@@ -50,13 +52,14 @@ class MGKomik : Madara(
         val manga = SManga.create()
 
         with(element) {
-            selectFirst("div.item-thumb a")!!.let {
-                manga.setUrlWithoutDomain(it.attr("abs:href"))
-                manga.title = it.attr("title")
+            selectFirst("div.item-thumb a")?.let { anchor ->
+                manga.setUrlWithoutDomain(anchor.attr("abs:href"))
+                manga.title = anchor.attr("title").takeIf { it.isNotBlank() }
+                    ?: anchor.text().trim()
             }
 
-            selectFirst("img")?.let {
-                manga.thumbnail_url = imageFromElement(it)
+            selectFirst("img")?.let { img ->
+                manga.thumbnail_url = imageFromElement(img)
             }
         }
 
@@ -102,9 +105,21 @@ class MGKomik : Madara(
     override fun parseGenres(document: Document): List<Genre> {
         val genres = mutableListOf<Genre>()
         genres += Genre("All", "")
-        genres += document.select(".row.genres li a").map { a ->
-            Genre(a.text(), a.absUrl("href"))
+
+        try {
+            genres += document.select(".row.genres li a").mapNotNull { anchor ->
+                val name = anchor.text().trim()
+                val url = anchor.absUrl("href")
+                if (name.isNotBlank() && url.isNotBlank()) {
+                    Genre(name, url)
+                } else {
+                    null
+                }
+            }
+        } catch (e: Exception) {
+            // Fallback if parsing fails
         }
+
         return genres
     }
 
