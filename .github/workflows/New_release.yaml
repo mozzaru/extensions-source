@@ -1,0 +1,146 @@
+name: Build extension release multi
+
+on:
+  workflow_dispatch:
+    inputs:
+      extension:
+        description: 'Extension to build release (format: lang:name, e.g., id:mgkomik)'
+        required: false
+        type: string
+      build_type:
+        description: 'Build type'
+        required: true
+        default: 'release'
+        type: choice
+        options:
+        - release
+        - debug
+  push:
+    branches:
+      - '**'
+    paths:
+      - 'src/*/*/**'
+    
+jobs:
+  build-extension:
+    name: Build extension
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: 21
+          distribution: zulu
+
+      - name: Set permission for gradlew
+        run: chmod +x ./gradlew
+
+      - name: Detect build type and extension
+        id: detect
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            # Manual workflow - build release atau debug sesuai pilihan
+            BUILD_TYPE="${{ github.event.inputs.build_type }}"
+            if [ -n "${{ github.event.inputs.extension }}" ]; then
+              CHANGED="${{ github.event.inputs.extension }}"
+              echo "Building manually specified extension: $CHANGED ($BUILD_TYPE)"
+            else
+              echo "No extension specified for manual build!"
+              exit 1
+            fi
+          else
+            # Auto commit - selalu build debug
+            BUILD_TYPE="debug"
+            CHANGED=$(git diff --name-only HEAD~1 HEAD | grep '^src/' | awk -F'/' '{print $2 ":" $3}' | sort | uniq | head -n 1)
+            if [ -z "$CHANGED" ]; then
+              echo "No changes in src/*/* detected."
+              exit 1
+            fi
+            echo "Auto-detected changed extension: $CHANGED ($BUILD_TYPE)"
+          fi
+          
+          # Validate extension exists
+          LANG=$(echo "$CHANGED" | cut -d':' -f1)
+          EXT=$(echo "$CHANGED" | cut -d':' -f2)
+          if [ ! -d "src/$LANG/$EXT" ]; then
+            echo "Extension src/$LANG/$EXT does not exist!"
+            exit 1
+          fi
+          
+          echo "changed=$CHANGED" >> $GITHUB_OUTPUT
+          echo "lang=$LANG" >> $GITHUB_OUTPUT
+          echo "ext=$EXT" >> $GITHUB_OUTPUT
+          echo "build_type=$BUILD_TYPE" >> $GITHUB_OUTPUT
+
+      - name: Prepare signing key (release builds only)
+        if: steps.detect.outputs.build_type == 'release'
+        run: |
+          echo ${{ secrets.SIGNING_KEY }} | base64 -d > signingkey.jks
+
+      - name: Build extension
+        env:
+          CI: true
+          ALIAS: ${{ secrets.ALIAS }}
+          KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          BUILD_TYPE="${{ steps.detect.outputs.build_type }}"
+          
+          if [ "$BUILD_TYPE" == "release" ]; then
+            echo "Building RELEASE version with signing..."
+            ./gradlew -p src ${{ steps.detect.outputs.changed }}:assembleRelease
+          else
+            echo "Building DEBUG version..."
+            ./gradlew -p src ${{ steps.detect.outputs.changed }}:assembleDebug
+          fi
+
+      - name: Detect APK
+        id: apk
+        run: |
+          LANG="${{ steps.detect.outputs.lang }}"
+          EXT="${{ steps.detect.outputs.ext }}"
+          BUILD_TYPE="${{ steps.detect.outputs.build_type }}"
+          
+          # Find APK based on build type
+          if [ "$BUILD_TYPE" == "release" ]; then
+            APK_PATH=$(find src/$LANG/$EXT/build/outputs/apk/release -name "*.apk" 2>/dev/null | head -n 1)
+          else
+            APK_PATH=$(find src/$LANG/$EXT/build/outputs/apk/debug -name "*.apk" 2>/dev/null | head -n 1)
+          fi
+          
+          if [ -z "$APK_PATH" ] || [ ! -f "$APK_PATH" ]; then
+            echo "No $BUILD_TYPE APK found!"
+            find src/$LANG/$EXT/build -name "*.apk" 2>/dev/null || echo "No APK files found at all"
+            exit 1
+          fi
+          
+          APK_NAME=$(basename "$APK_PATH" .apk)
+          echo "apk_name=$APK_NAME" >> $GITHUB_OUTPUT
+          echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
+          echo "Found $BUILD_TYPE APK: $APK_PATH"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.detect.outputs.ext }}-${{ steps.detect.outputs.build_type }}
+          path: ${{ steps.apk.outputs.apk_path }}
+          retention-days: ${{ steps.detect.outputs.build_type == 'release' && 30 || 3 }}
+
+      - name: Build summary
+        run: |
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Extension**: ${{ steps.detect.outputs.changed }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build Type**: ${{ steps.detect.outputs.build_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **APK**: ${{ steps.apk.outputs.apk_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.detect.outputs.build_type }}" == "release" ]; then
+            echo "- **Signed**: ✅ Yes (Production ready)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Signed**: ⚠️ Debug only" >> $GITHUB_STEP_SUMMARY
+          fi
