@@ -1,15 +1,22 @@
 package eu.kanade.tachiyomi.extension.id.mgkomik
 
+import android.app.Application
 import eu.kanade.tachiyomi.multisrc.madara.Madara
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.SManga
+import okhttp3.Cache
+import okhttp3.brotli.BrotliInterceptor
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 class MGKomik : Madara(
     "MG Komik",
@@ -17,8 +24,12 @@ class MGKomik : Madara(
     "id",
     SimpleDateFormat("dd MMM yy", Locale.US),
 ) {
+    override val id = 5845004992097969882
+
     override val useLoadMoreRequest = LoadMoreStrategy.Always
+
     override val useNewChapterEndpoint = false
+
     override val mangaSubString = "komik"
 
     override fun headersBuilder() = super.headersBuilder().apply {
@@ -47,7 +58,21 @@ class MGKomik : Madara(
 
             chain.proceed(request.newBuilder().headers(headers).build())
         }
-        .rateLimit(2, 1) // More conservative rate limiting
+        .rateLimit(2, 1)
+        .apply {
+            val index = networkInterceptors().indexOfFirst { it is BrotliInterceptor }
+            if (index >= 0) interceptors().add(networkInterceptors().removeAt(index))
+        }
+        .cache(
+            Cache(
+                directory = File(Injekt.get<Application>().externalCacheDir, "network_cache_mgkomik"),
+                maxSize = 50L * 1024 * 1024, // 50 MiB
+            ),
+        )
+        .build()
+
+    private val pagesClient = client.newBuilder()
+        .readTimeout(2, TimeUnit.MINUTES)
         .build()
 
     // ================================== Popular ======================================
@@ -109,26 +134,28 @@ class MGKomik : Madara(
     override fun parseGenres(document: Document): List<Genre> {
         val genres = mutableListOf<Genre>()
         genres += Genre("All", "")
-        
+
         try {
             genres += document.select(".row.genres li a").mapNotNull { anchor ->
                 val name = anchor.text().trim()
                 val url = anchor.absUrl("href")
                 if (name.isNotBlank() && url.isNotBlank()) {
                     Genre(name, url)
-                } else null
+                } else {
+                    null
+                }
             }
         } catch (e: Exception) {
             // Log error if needed, but don't crash the extension
         }
-        
+
         return genres
     }
 
     // =============================== Utilities ==============================
 
     private fun randomString(length: Int): String {
-        val charPool = ('a'..'z') + ('A'..'Z') + ('0'..'9') // Added numbers for more variety
+        val charPool = ('a'..'z') + ('A'..'Z') + ('0'..'9')
         return List(length) { charPool.random() }.joinToString("")
     }
 }
