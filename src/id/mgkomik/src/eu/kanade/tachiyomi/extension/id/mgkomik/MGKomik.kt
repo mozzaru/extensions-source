@@ -6,6 +6,7 @@ import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.SManga
+import okhttp3.Request
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.text.SimpleDateFormat
@@ -28,7 +29,7 @@ class MGKomik : Madara(
         add("Sec-Fetch-Mode", "navigate")
         add("Sec-Fetch-Site", "same-origin")
         add("Upgrade-Insecure-Requests", "1")
-        add("X-Requested-With", randomString((1..20).random())) // added for webview, and removed in interceptor for normal use
+        add("X-Requested-With", randomString((1..20).random()))
     }
 
     override val client = network.cloudflareClient.newBuilder()
@@ -45,44 +46,27 @@ class MGKomik : Madara(
 
     // ================================== Popular ======================================
 
-    // overriding to change title selector and manga url selector
+    override fun popularMangaNextPageSelector() = ".wp-pagenavi span.current + a"
+
+    // Fix untuk popular manga element parsing
     override fun popularMangaFromElement(element: Element): SManga {
         val manga = SManga.create()
 
         with(element) {
-            selectFirst("div.item-thumb a")!!.let {
-                manga.setUrlWithoutDomain(it.attr("abs:href"))
-                manga.title = it.attr("title")
-            }
-
-            selectFirst("img")?.let {
-                manga.thumbnail_url = imageFromElement(it)
-            }
-        }
-
-        return manga
-    }
-
-    // ================================ Latest Updates ================================
-    
-    // Fix for latest updates parsing - use specific selector for this site
-    override fun latestUpdatesFromElement(element: Element): SManga {
-        val manga = SManga.create()
-
-        with(element) {
-            // Find the link with title attribute
-            selectFirst(".item-thumb a")?.let { linkElement ->
+            // Coba berbagai selector yang mungkin ada
+            val linkElement = selectFirst("h3 a, h4 a, .post-title a, div.item-thumb a, a[href*=komik]")
+            
+            if (linkElement != null) {
                 manga.setUrlWithoutDomain(linkElement.attr("abs:href"))
-                manga.title = linkElement.attr("title")
-            } ?: run {
-                // Fallback: try to get from title in .post-title
-                selectFirst(".post-title a")?.let { titleElement ->
-                    manga.setUrlWithoutDomain(titleElement.attr("abs:href"))
-                    manga.title = titleElement.text()
-                }
+                manga.title = linkElement.attr("title").ifEmpty { linkElement.text() }
+            } else {
+                // Fallback jika tidak ada link yang ditemukan
+                val titleElement = selectFirst("h3, h4, .post-title")
+                manga.title = titleElement?.text() ?: "Unknown Title"
+                // Set URL kosong untuk menghindari crash, tapi ini akan menyebabkan error saat dibuka
+                manga.url = ""
             }
 
-            // Get thumbnail
             selectFirst("img")?.let {
                 manga.thumbnail_url = imageFromElement(it)
             }
@@ -91,26 +75,40 @@ class MGKomik : Madara(
         return manga
     }
 
-    // Override latest updates request to ensure correct URL
-    override fun latestUpdatesRequest(page: Int) = GET("$baseUrl/?page=$page", headers)
-    
-    // Override latest updates parsing to use correct selector
-    override fun latestUpdatesParse(response: okhttp3.Response): MangasPage {
-        val document = response.asJsoup()
-        
-        val mangas = document.select(".page-listing-item .page-item-detail").mapNotNull { element ->
-            try {
-                latestUpdatesFromElement(element)
-            } catch (e: Exception) {
-                null
+    // ================================== Latest =======================================
+
+    override fun latestUpdatesRequest(page: Int): Request =
+        if (useLoadMoreRequest()) {
+            loadMoreRequest(page, popular = false)
+        } else {
+            GET("$baseUrl/$mangaSubString/${searchPage(page)}", headers)
+        }
+
+    // Fix untuk latest updates jika menggunakan struktur yang berbeda
+    override fun latestUpdatesFromElement(element: Element): SManga {
+        return popularMangaFromElement(element) // Menggunakan parser yang sama
+    }
+
+    // ================================== Search =======================================
+
+    override fun searchRequest(page: Int, query: String, filters: FilterList): Request {
+        filters.forEach { filter ->
+            when (filter) {
+                is GenreContentFilter -> {
+                    val url = filter.toUriPart()
+                    if (url.isNotBlank()) {
+                        return GET(url, headers)
+                    }
+                }
+                else -> {}
             }
         }
-        
-        val hasNextPage = document.select(".wp-pagenavi .page.larger").isNotEmpty() ||
-                         document.select(".wp-pagenavi a[aria-label='Last Page']").isNotEmpty()
-        
-        return MangasPage(mangas, hasNextPage)
+        return super.searchRequest(page, query, filters)
     }
+
+    override fun searchMangaSelector() = "${super.searchMangaSelector()}, .page-listing-item .page-item-detail"
+
+    override fun searchMangaNextPageSelector() = "a.page.larger"
 
     // ================================ Chapters ================================
 
@@ -155,40 +153,6 @@ class MGKomik : Madara(
             Genre(a.text(), a.absUrl("href"))
         }
         return genres
-    }
-
-    // =============================== Search ================================
-
-    // Override search manga from element to use same logic as latest updates
-    override fun searchMangaFromElement(element: Element): SManga {
-        return latestUpdatesFromElement(element) // Use same logic as latest updates
-    }
-    
-    // Override search parsing to use correct selector if needed
-    override fun searchMangaParse(response: okhttp3.Response): MangasPage {
-        val document = response.asJsoup()
-        
-        // Try different selectors based on the search result structure
-        val searchSelector = when {
-            document.select(".c-tabs-item .page-listing-item .page-item-detail").isNotEmpty() -> 
-                ".c-tabs-item .page-listing-item .page-item-detail"
-            document.select(".page-listing-item .page-item-detail").isNotEmpty() -> 
-                ".page-listing-item .page-item-detail"
-            else -> ".page-item-detail" // fallback
-        }
-        
-        val mangas = document.select(searchSelector).mapNotNull { element ->
-            try {
-                searchMangaFromElement(element)
-            } catch (e: Exception) {
-                null
-            }
-        }
-        
-        val hasNextPage = document.select(".wp-pagenavi .page.larger").isNotEmpty() ||
-                         document.select(".wp-pagenavi a[aria-label='Last Page']").isNotEmpty()
-        
-        return MangasPage(mangas, hasNextPage)
     }
 
     // =============================== Utilities ==============================
