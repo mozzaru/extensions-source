@@ -1,4 +1,4 @@
-name: Build extension multi
+name: Build extension multi release 
 
 on:
   workflow_dispatch:
