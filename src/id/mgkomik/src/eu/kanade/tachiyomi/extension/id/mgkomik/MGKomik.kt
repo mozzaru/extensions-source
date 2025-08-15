@@ -1,8 +1,8 @@
 package eu.kanade.tachiyomi.extension.id.mgkomik
 
 import eu.kanade.tachiyomi.multisrc.madarav2.Madarav5
-import okhttp3.Headers
 import kotlin.random.Random
+import okhttp3.Headers
 
 class MGKomik : Madarav5(
     name = "MG Komik",
