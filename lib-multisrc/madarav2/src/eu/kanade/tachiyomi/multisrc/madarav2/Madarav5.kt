@@ -33,7 +33,7 @@ abstract class Madarav5(
     override val name: String,
     override val baseUrl: String,
     override val lang: String,
-    private val dateFormat: SimpleDateFormat = SimpleDateFormat("MMMM dd, yyyy", Locale.US)
+    private val dateFormat: SimpleDateFormat = SimpleDateFormat("MMMM dd, yyyy", Locale.US),
 ) : ParsedHttpSource() {
 
     override val supportsLatest = true
@@ -191,8 +191,8 @@ abstract class Madarav5(
         manga.url = element.selectFirst("a")!!.attr("href")
         manga.title = (summary?.selectFirst("h3, h4") ?: element.selectFirst(".manga-name, .post-title"))?.text()
             ?: ""
-        manga.thumbnail_url = element.selectFirst("img")?.attr("src") ?: 
-                             element.selectFirst("img")?.attr("data-src")
+        manga.thumbnail_url = element.selectFirst("img")?.attr("src")
+            ?: element.selectFirst("img")?.attr("data-src")
 
         return manga
     }
@@ -396,8 +396,8 @@ abstract class Madarav5(
         manga.genre = genres.joinToString()
 
         // Thumbnail
-        manga.thumbnail_url = document.selectFirst(".summary_image img")?.attr("src") ?:
-                             document.selectFirst(".summary_image img")?.attr("data-src")
+        manga.thumbnail_url = document.selectFirst(".summary_image img")?.attr("src")
+            ?: document.selectFirst(".summary_image img")?.attr("data-src")
 
         return manga
     }
@@ -406,7 +406,7 @@ abstract class Madarav5(
     override fun chapterListParse(response: Response): List<SChapter> {
         val document = response.asJsoup()
         val testCheckAsync = document.select(selectTestAsync)
-        
+
         return if (testCheckAsync.isNullOrEmpty()) {
             loadChapters(response.request.url.toString(), document)
         } else {
@@ -423,8 +423,8 @@ abstract class Madarav5(
         chapter.url = a.attr("href") + stylePage
         chapter.name = a.selectFirst("p")?.text() ?: a.ownText()
 
-        val dateText = element.selectFirst("a.c-new-tag")?.attr("title") 
-                      ?: element.selectFirst(selectDate)?.text()
+        val dateText = element.selectFirst("a.c-new-tag")?.attr("title")
+            ?: element.selectFirst(selectDate)?.text()
         chapter.date_upload = parseChapterDate(dateText)
 
         return chapter
@@ -454,14 +454,14 @@ abstract class Madarav5(
     // Page list
     override fun pageListParse(document: Document): List<Page> {
         val chapterProtector = document.getElementById("chapter-protector-data")
-        
+
         return if (chapterProtector == null) {
             if (document.selectFirst(selectRequiredLogin) != null) {
                 throw Exception("Login required")
             } else {
-                val root = document.selectFirst(selectBodyPage) 
+                val root = document.selectFirst(selectBodyPage)
                     ?: throw Exception("No image found, try to log in")
-                
+
                 val pages = mutableListOf<Page>()
                 root.select(selectPage).forEach { div ->
                     div.select("img").forEachIndexed { index, img ->
@@ -481,9 +481,9 @@ abstract class Madarav5(
 
             val password = chapterProtectorHtml.substringAfter("wpmangaprotectornonce='").substringBefore("';")
             val chapterData = JSONObject(
-                chapterProtectorHtml.substringAfter("chapter_data='").substringBefore("';").replace("\\/", "/")
+                chapterProtectorHtml.substringAfter("chapter_data='").substringBefore("';").replace("\\/", "/"),
             )
-            
+
             val unsaltedCiphertext = Base64.decode(chapterData.getString("ct"), Base64.DEFAULT)
             val salt = chapterData.getString("s").decodeHex()
             val ciphertext = "Salted__".toByteArray() + salt + unsaltedCiphertext
@@ -503,7 +503,7 @@ abstract class Madarav5(
     // Filters
     override fun getFilterList(): FilterList {
         val filters = mutableListOf<Filter<*>>()
-        
+
         filters.add(Filter.Header("Filters"))
         filters.add(GenreFilter(getGenreList()))
         filters.add(StatusFilter(getStatusList()))
@@ -525,15 +525,15 @@ abstract class Madarav5(
         "end",
         "canceled",
         "on-hold",
-        "upcoming"
+        "upcoming",
     )
 
     private fun getOrderByList(): Array<String> = arrayOf(
         "latest",
         "views",
-        "new-manga", 
+        "new-manga",
         "alphabet",
-        "rating"
+        "rating",
     )
 
     // Utility functions
@@ -562,7 +562,9 @@ abstract class Madarav5(
                 val cleanDate = dateStr.split(" ").map {
                     if (it.contains(Regex("""\d\D\D"""))) {
                         it.replace(Regex("""\D"""), "")
-                    } else it
+                    } else {
+                        it
+                    }
                 }.joinToString(" ")
                 try {
                     dateFormat.parse(cleanDate)?.time ?: 0L
@@ -583,19 +585,19 @@ abstract class Madarav5(
     private fun parseRelativeDate(date: String): Long {
         val number = Regex("""(\d+)""").find(date)?.value?.toIntOrNull() ?: return 0L
         val cal = Calendar.getInstance()
-        
+
         return when {
-            date.contains("second") || date.contains("segundo") -> 
+            date.contains("second") || date.contains("segundo") ->
                 cal.apply { add(Calendar.SECOND, -number) }.timeInMillis
-            date.contains("minute") || date.contains("minuto") || date.contains("min") -> 
+            date.contains("minute") || date.contains("minuto") || date.contains("min") ->
                 cal.apply { add(Calendar.MINUTE, -number) }.timeInMillis
-            date.contains("hour") || date.contains("hora") || date.contains("h") -> 
+            date.contains("hour") || date.contains("hora") || date.contains("h") ->
                 cal.apply { add(Calendar.HOUR, -number) }.timeInMillis
-            date.contains("day") || date.contains("día") || date.contains("d") -> 
+            date.contains("day") || date.contains("día") || date.contains("d") ->
                 cal.apply { add(Calendar.DAY_OF_MONTH, -number) }.timeInMillis
-            date.contains("month") || date.contains("mes") -> 
+            date.contains("month") || date.contains("mes") ->
                 cal.apply { add(Calendar.MONTH, -number) }.timeInMillis
-            date.contains("year") || date.contains("año") -> 
+            date.contains("year") || date.contains("año") ->
                 cal.apply { add(Calendar.YEAR, -number) }.timeInMillis
             else -> 0L
         }
@@ -613,7 +615,7 @@ abstract class Madarav5(
             "vars[meta_query][relation]" to "AND",
             "vars[post_type]" to "wp-manga",
             "vars[post_status]" to "publish",
-            "vars[manga_archives_item_layout]" to "default"
+            "vars[manga_archives_item_layout]" to "default",
         )
     }
 
@@ -637,44 +639,44 @@ abstract class Madarav5(
 object CryptoAES {
     fun decrypt(data: String, password: String): String {
         val encryptedData = Base64.decode(data, Base64.DEFAULT)
-        
+
         // Extract salt (first 8 bytes after "Salted__")
         val salt = encryptedData.sliceArray(8..15)
         val ciphertext = encryptedData.sliceArray(16 until encryptedData.size)
-        
+
         // Derive key and IV using EVP_BytesToKey equivalent
         val keyIv = deriveKeyAndIv(password.toByteArray(), salt, 32, 16)
         val key = keyIv.sliceArray(0..31)
         val iv = keyIv.sliceArray(32..47)
-        
+
         val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
         val secretKey = SecretKeySpec(key, "AES")
         val ivSpec = IvParameterSpec(iv)
-        
+
         cipher.init(Cipher.DECRYPT_MODE, secretKey, ivSpec)
         val decrypted = cipher.doFinal(ciphertext)
-        
+
         return String(decrypted)
     }
-    
+
     private fun deriveKeyAndIv(password: ByteArray, salt: ByteArray, keyLength: Int, ivLength: Int): ByteArray {
         val md5 = java.security.MessageDigest.getInstance("MD5")
         val derivedBytes = ByteArray(keyLength + ivLength)
         var currentHash = byteArrayOf()
         var currentIndex = 0
-        
+
         while (currentIndex < derivedBytes.size) {
             md5.reset()
             md5.update(currentHash)
             md5.update(password)
             md5.update(salt)
             currentHash = md5.digest()
-            
+
             val bytesToCopy = minOf(currentHash.size, derivedBytes.size - currentIndex)
             System.arraycopy(currentHash, 0, derivedBytes, currentIndex, bytesToCopy)
             currentIndex += bytesToCopy
         }
-        
+
         return derivedBytes
     }
 }
