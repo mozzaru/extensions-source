@@ -5,7 +5,10 @@ import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
+import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.SManga
+import eu.kanade.tachiyomi.util.asJsoup
+import okhttp3.Response
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.text.SimpleDateFormat
@@ -17,7 +20,6 @@ class MGKomik : Madara(
     "id",
     SimpleDateFormat("dd MMM yy", Locale.US),
 ) {
-
     override val useLoadMoreRequest = LoadMoreStrategy.Always
 
     override val useNewChapterEndpoint = false
@@ -29,7 +31,7 @@ class MGKomik : Madara(
         add("Sec-Fetch-Mode", "navigate")
         add("Sec-Fetch-Site", "same-origin")
         add("Upgrade-Insecure-Requests", "1")
-        add("X-Requested-With", randomString((1..20).random())) // added for webview, and removed in interceptor for normal use
+        add("X-Requested-With", randomString((1..20).random()))
     }
 
     override val client = network.cloudflareClient.newBuilder()
@@ -41,28 +43,64 @@ class MGKomik : Madara(
 
             chain.proceed(request.newBuilder().headers(headers).build())
         }
-        .rateLimit(2, 1)
+        .rateLimit(9, 2)
         .build()
 
-    // ================================== Popular ======================================
+    // ===================== Popular & Latest Manga =====================
 
-    // overriding to change title selector and manga url selector
     override fun popularMangaFromElement(element: Element): SManga {
         val manga = SManga.create()
 
-        with(element) {
-            selectFirst("div.item-thumb a")?.let { anchor ->
-                manga.setUrlWithoutDomain(anchor.attr("abs:href"))
-                manga.title = anchor.attr("title").takeIf { it.isNotBlank() }
-                    ?: anchor.text().trim()
+        val link = element.selectFirst("div.item-thumb a")
+        if (link != null) {
+            val href = link.attr("abs:href")
+            // Skip kalau bukan manga (misal tombol "Baca di Web")
+            if (!href.contains(mangaSubString)) {
+                return manga.apply {
+                    url = "/invalid"
+                    title = "Invalid"
+                }
             }
+            manga.setUrlWithoutDomain(href)
+            manga.title = link.attr("title") ?: "No Title"
+        } else {
+            manga.url = "/invalid"
+            manga.title = "Unknown"
+        }
 
-            selectFirst("img")?.let { img ->
-                manga.thumbnail_url = imageFromElement(img)
-            }
+        element.selectFirst("img")?.let { img ->
+            manga.thumbnail_url = imageFromElement(img)
         }
 
         return manga
+    }
+
+    override fun popularMangaParse(response: Response): MangasPage {
+        val document = response.asJsoup()
+        val mangas = document.select(popularMangaSelector())
+            .mapNotNull { el ->
+                val manga = runCatching { popularMangaFromElement(el) }.getOrNull()
+                if (manga != null && manga.url != "/invalid") manga else null
+            }
+
+        val hasNextPage = document.select(popularMangaNextPageSelector()).first() != null
+        return MangasPage(mangas, hasNextPage)
+    }
+
+    override fun latestUpdatesFromElement(element: Element): SManga {
+        return popularMangaFromElement(element)
+    }
+
+    override fun latestUpdatesParse(response: Response): MangasPage {
+        val document = response.asJsoup()
+        val mangas = document.select(latestUpdatesSelector())
+            .mapNotNull { el ->
+                val manga = runCatching { latestUpdatesFromElement(el) }.getOrNull()
+                if (manga != null && manga.url != "/invalid") manga else null
+            }
+
+        val hasNextPage = document.select(latestUpdatesNextPageSelector()).first() != null
+        return MangasPage(mangas, hasNextPage)
     }
 
     // ================================ Chapters ================================
@@ -104,21 +142,9 @@ class MGKomik : Madara(
     override fun parseGenres(document: Document): List<Genre> {
         val genres = mutableListOf<Genre>()
         genres += Genre("All", "")
-
-        try {
-            genres += document.select(".row.genres li a").mapNotNull { anchor ->
-                val name = anchor.text().trim()
-                val url = anchor.absUrl("href")
-                if (name.isNotBlank() && url.isNotBlank()) {
-                    Genre(name, url)
-                } else {
-                    null
-                }
-            }
-        } catch (e: Exception) {
-            // Fallback if parsing fails
+        genres += document.select(".row.genres li a").map { a ->
+            Genre(a.text(), a.absUrl("href"))
         }
-
         return genres
     }
 
