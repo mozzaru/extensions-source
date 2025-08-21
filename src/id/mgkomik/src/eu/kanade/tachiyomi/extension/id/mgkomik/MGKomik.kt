@@ -7,6 +7,7 @@ import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.SManga
+import eu.kanade.tachiyomi.util.asJsoup
 import okhttp3.Response
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
@@ -77,8 +78,8 @@ class MGKomik : Madara(
     override fun popularMangaParse(response: Response): MangasPage {
         val document = response.asJsoup()
         val mangas = document.select(popularMangaSelector())
-            .mapNotNull {
-                val manga = runCatching { popularMangaFromElement(it) }.getOrNull()
+            .mapNotNull { el ->
+                val manga = runCatching { popularMangaFromElement(el) }.getOrNull()
                 if (manga != null && manga.url != "/invalid") manga else null
             }
 
@@ -87,15 +88,14 @@ class MGKomik : Madara(
     }
 
     override fun latestUpdatesFromElement(element: Element): SManga {
-        // Pakai logic sama seperti popular supaya aman
         return popularMangaFromElement(element)
     }
 
     override fun latestUpdatesParse(response: Response): MangasPage {
         val document = response.asJsoup()
         val mangas = document.select(latestUpdatesSelector())
-            .mapNotNull {
-                val manga = runCatching { latestUpdatesFromElement(it) }.getOrNull()
+            .mapNotNull { el ->
+                val manga = runCatching { latestUpdatesFromElement(el) }.getOrNull()
                 if (manga != null && manga.url != "/invalid") manga else null
             }
 
