@@ -42,15 +42,14 @@ class MGKomik : Madara(
 
             chain.proceed(request.newBuilder().headers(headers).build())
         }
-        .rateLimit(2, 1)
+        .rateLimit(9, 2)
         .build()
 
     // ================================== Popular ======================================
 
     override fun popularMangaFromElement(element: Element): SManga {
-        val manga = SManga.create()
-
         val anchor = element.selectFirst("div.item-thumb a, .tab-thumb a, h3 a, .post-title a, a[href]")
+        val manga = SManga.create()
 
         if (anchor != null) {
             manga.setUrlWithoutDomain(anchor.attr("abs:href"))
@@ -69,10 +68,6 @@ class MGKomik : Madara(
 
     // ================================ Helpers ================================
 
-    /**
-     * Try to build SManga from an element. Return null if no valid anchor/url found.
-     * Use this for parsers that support mapNotNull or when you want to skip invalid items.
-     */
     private fun mangaFromElementOrNull(element: Element): SManga? {
         val anchor = element.selectFirst(
             "div.item-thumb a, .tab-thumb a, .c-image-hover a, .post-title a, h3 a, a[href]",
@@ -92,58 +87,19 @@ class MGKomik : Madara(
 
     // ================================ Latest ================================
 
+    // hanya ambil elemen tile manga, skip link dummy/iklan
+    override val latestUpdatesSelector = "div.item-thumb, .tab-thumb"
+
     override fun latestUpdatesFromElement(element: Element): SManga {
-        // Defensive non-null override (framework expects SManga non-null)
-        val manga = SManga.create()
-
-        val anchor = element.selectFirst(
-            "div.item-thumb a, .tab-thumb a, .c-image-hover a, .post-title a, h3 a, a[href]",
-        )
-
-        if (anchor != null) {
-            val url = anchor.attr("abs:href").trim()
-            manga.setUrlWithoutDomain(if (url.isNotBlank()) url else baseUrl)
-            manga.title = anchor.attr("title").takeIf { it.isNotBlank() } ?: anchor.text().trim()
-        } else {
-            // safe fallback to avoid lateinit crash
-            manga.setUrlWithoutDomain(baseUrl)
-            manga.title = element.text().trim().takeIf { it.isNotBlank() } ?: "Unknown"
-        }
-
-        element.selectFirst("img")?.let { img ->
-            manga.thumbnail_url = imageFromElement(img)
-        }
-
-        return manga
+        return mangaFromElementOrNull(element)
+            ?: throw Exception("Invalid latest item skipped")
     }
 
     // ================================ Search ================================
 
-    /**
-     * Defensive search parser. Uses helper to try a clean parse; if helper returns null,
-     * provide a safe fallback (so framework won't crash). This keeps behavior safe while
-     * allowing future refactor to mapNotNull if desired.
-     */
     override fun searchMangaFromElement(element: Element): SManga {
-        // Prefer clean result from helper
-        mangaFromElementOrNull(element)?.let { return it }
-
-        // Fallback (should be rare): build non-null SManga to avoid crash
-        val manga = SManga.create()
-        val anchor = element.selectFirst("a[href]")
-        if (anchor != null) {
-            val url = anchor.attr("abs:href").trim()
-            manga.setUrlWithoutDomain(if (url.isNotBlank()) url else baseUrl)
-            manga.title = anchor.attr("title").takeIf { it.isNotBlank() } ?: anchor.text().trim()
-        } else {
-            manga.setUrlWithoutDomain(baseUrl)
-            manga.title = element.selectFirst("h2, h3, .post-title")?.text()?.trim()
-                ?: element.text().trim().takeIf { it.isNotBlank() } ?: "Unknown"
-        }
-        element.selectFirst("img")?.let { img ->
-            manga.thumbnail_url = imageFromElement(img)
-        }
-        return manga
+        return mangaFromElementOrNull(element)
+            ?: throw Exception("Invalid search item skipped")
     }
 
     // ================================ Chapters ================================
