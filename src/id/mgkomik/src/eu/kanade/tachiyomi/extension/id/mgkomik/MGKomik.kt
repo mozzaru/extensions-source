@@ -5,7 +5,9 @@ import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
+import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.SManga
+import okhttp3.Response
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.text.SimpleDateFormat
@@ -17,8 +19,6 @@ class MGKomik : Madara(
     "id",
     SimpleDateFormat("dd MMM yy", Locale.US),
 ) {
-    override val id = 5845004992097969882
-
     override val useLoadMoreRequest = LoadMoreStrategy.Always
 
     override val useNewChapterEndpoint = false
@@ -30,7 +30,7 @@ class MGKomik : Madara(
         add("Sec-Fetch-Mode", "navigate")
         add("Sec-Fetch-Site", "same-origin")
         add("Upgrade-Insecure-Requests", "1")
-        add("X-Requested-With", randomString((1..20).random())) // added for webview, and removed in interceptor for normal use
+        add("X-Requested-With", randomString((1..20).random()))
     }
 
     override val client = network.cloudflareClient.newBuilder()
@@ -48,64 +48,42 @@ class MGKomik : Madara(
     // ================================== Popular ======================================
 
     override fun popularMangaFromElement(element: Element): SManga {
-        val anchor = element.selectFirst("div.item-thumb a, .tab-thumb a, h3 a, .post-title a, a[href]")
         val manga = SManga.create()
 
-        if (anchor != null) {
-            manga.setUrlWithoutDomain(anchor.attr("abs:href"))
-            manga.title = anchor.attr("title").takeIf { it.isNotBlank() } ?: anchor.text().trim()
+        val link = element.selectFirst("div.item-thumb a")
+        if (link != null) {
+            val href = link.attr("abs:href")
+            // skip kalau bukan link manga (misal "Baca di Web")
+            if (!href.contains(mangaSubString)) {
+                return manga.apply {
+                    url = "/invalid"
+                    title = "Invalid"
+                }
+            }
+            manga.setUrlWithoutDomain(href)
+            manga.title = link.attr("title") ?: "No Title"
         } else {
-            manga.setUrlWithoutDomain(baseUrl)
-            manga.title = element.selectFirst("h2, h3, .post-title")?.text()?.trim() ?: "Unknown"
+            manga.url = "/invalid"
+            manga.title = "Unknown"
         }
 
-        element.selectFirst("img")?.let { img ->
-            manga.thumbnail_url = imageFromElement(img)
+        element.selectFirst("img")?.let {
+            manga.thumbnail_url = imageFromElement(it)
         }
 
         return manga
     }
 
-    // ================================ Helpers ================================
-
-    private fun mangaFromElementOrNull(element: Element): SManga? {
-        val anchor = element.selectFirst(
-            "div.item-thumb a, .tab-thumb a, .c-image-hover a, .post-title a, h3 a, a[href]",
-        ) ?: return null
-
-        val url = anchor.attr("abs:href").trim()
-        if (url.isBlank()) return null
-
-        val manga = SManga.create()
-        manga.setUrlWithoutDomain(url)
-        manga.title = anchor.attr("title").takeIf { it.isNotBlank() } ?: anchor.text().trim()
-        element.selectFirst("img")?.let { img ->
-            manga.thumbnail_url = imageFromElement(img)
-        }
-        return manga
-    }
-
-    // ================================ Latest ================================
-
-    // hanya ambil elemen tile manga, skip link dummy/iklan
-    override fun latestUpdatesSelector(): String = "div.item-thumb, .tab-thumb"
-
-    override fun latestUpdatesFromElement(element: Element): SManga {
-        return mangaFromElementOrNull(element)
-            ?: SManga.create().apply {
-                setUrlWithoutDomain(baseUrl)
-                title = "Skip"
+    // Override supaya skip entri yang tidak valid
+    override fun popularMangaParse(response: Response): MangasPage {
+        val document = response.asJsoup()
+        val mangas = document.select(popularMangaSelector())
+            .mapNotNull {
+                val manga = runCatching { popularMangaFromElement(it) }.getOrNull()
+                if (manga != null && manga.url != "/invalid") manga else null
             }
-    }
-
-    // ================================ Search ================================
-
-    override fun searchMangaFromElement(element: Element): SManga {
-        return mangaFromElementOrNull(element)
-            ?: SManga.create().apply {
-                setUrlWithoutDomain(baseUrl)
-                title = "Skip"
-            }
+        val hasNextPage = document.select(nextPageSelector()).first() != null
+        return MangasPage(mangas, hasNextPage)
     }
 
     // ================================ Chapters ================================
@@ -137,32 +115,19 @@ class MGKomik : Madara(
         return FilterList(filters)
     }
 
-    private class GenreContentFilter(title: String, options: List<Pair<String, String>>) :
-        UriPartFilter(
-            title,
-            options.toTypedArray(),
-        )
+    private class GenreContentFilter(title: String, options: List<Pair<String, String>>) : UriPartFilter(
+        title,
+        options.toTypedArray(),
+    )
 
     override fun genresRequest() = GET("$baseUrl/$mangaSubString", headers)
 
     override fun parseGenres(document: Document): List<Genre> {
         val genres = mutableListOf<Genre>()
         genres += Genre("All", "")
-
-        try {
-            genres += document.select(".row.genres li a").mapNotNull { anchor ->
-                val name = anchor.text().trim()
-                val url = anchor.absUrl("href")
-                if (name.isNotBlank() && url.isNotBlank()) {
-                    Genre(name, url)
-                } else {
-                    null
-                }
-            }
-        } catch (_: Exception) {
-            // ignore
+        genres += document.select(".row.genres li a").map { a ->
+            Genre(a.text(), a.absUrl("href"))
         }
-
         return genres
     }
 
