@@ -5,8 +5,8 @@ import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
-import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.MangasPage
+import eu.kanade.tachiyomi.source.model.SManga
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.text.SimpleDateFormat
@@ -48,18 +48,15 @@ class MGKomik : Madara(
 
     // ================================== Popular ======================================
 
-    // overriding to change title selector and manga url selector
     override fun popularMangaFromElement(element: Element): SManga {
         val manga = SManga.create()
 
-        // More robust selector set for popular — keep behavior same as before but safer
         val anchor = element.selectFirst("div.item-thumb a, .tab-thumb a, h3 a, .post-title a, a[href]")
 
         if (anchor != null) {
             manga.setUrlWithoutDomain(anchor.attr("abs:href"))
             manga.title = anchor.attr("title").takeIf { it.isNotBlank() } ?: anchor.text().trim()
         } else {
-            // Fallback: try to find title/img so we don't return an empty SManga unexpectedly
             manga.setUrlWithoutDomain(baseUrl)
             manga.title = element.selectFirst("h2, h3, .post-title")?.text()?.trim() ?: "Unknown"
         }
@@ -71,13 +68,11 @@ class MGKomik : Madara(
         return manga
     }
 
-    // ================================ Latest (FIX: skip invalid elements) ================================
+    // ================================ Latest (skip invalid elements) ================================
 
-    // Helper: returns null if no valid anchor/url found — used to avoid UninitializedPropertyAccessException
     private fun latestMangaFromElementOrNull(element: Element): SManga? {
-        // Try multiple common selectors used across Madara themes and MGKomik variants
         val anchor = element.selectFirst(
-            "div.item-thumb a, .tab-thumb a, .c-image-hover a, .post-title a, h3 a, a[href]"
+            "div.item-thumb a, .tab-thumb a, .c-image-hover a, .post-title a, h3 a, a[href]",
         ) ?: return null
 
         val manga = SManga.create()
@@ -92,11 +87,7 @@ class MGKomik : Madara(
         return manga
     }
 
-    // Override the parse for latest to use mapNotNull (skip invalid elements).
-    // NOTE: selector used here is broad — if the site uses a different wrapper for latest-items, adjust the selector.
     override fun latestUpdatesFromElement(element: Element): SManga {
-        // The base signature requires a non-null return, but parsing/collection is done in latestUpdatesParse below.
-        // Provide a best-effort non-crashing SManga for single-element usage (not used by our parse override).
         val anchor = element.selectFirst("a[href]")
         val manga = SManga.create()
         if (anchor != null) {
@@ -104,24 +95,19 @@ class MGKomik : Madara(
             manga.title = anchor.attr("title").takeIf { it.isNotBlank() } ?: anchor.text().trim()
             element.selectFirst("img")?.let { manga.thumbnail_url = imageFromElement(it) }
         } else {
-            // safe fallback (shouldn't be used because we override parse), but keep non-null
             manga.setUrlWithoutDomain(baseUrl)
             manga.title = element.text().trim().takeIf { it.isNotBlank() } ?: "Unknown"
         }
         return manga
     }
 
-    // Override the parse method that builds the MangasPage for "latest" so we can use mapNotNull.
-    // This override uses a broad selector to collect candidate items and then skips those without anchors.
     override fun latestUpdatesParse(document: Document): MangasPage {
-        // Candidate selectors — tuned to common MGKomik / Madara markup. Adjust if needed.
         val items = document.select(
-            "div.item-thumb, .tab-thumb, .c-image-hover, .bs, .swiper-slide, article, .post"
+            "div.item-thumb, .tab-thumb, .c-image-hover, .bs, .swiper-slide, article, .post",
         )
 
         val mangas = items.mapNotNull { latestMangaFromElementOrNull(it) }
 
-        // Heuristic to detect next page — try to find pagination "next" link (common pattern)
         val hasNext = document.selectFirst(".navigation a.next, .pagination a.next, a.next") != null
 
         return MangasPage(mangas, hasNext)
@@ -177,8 +163,8 @@ class MGKomik : Madara(
                     null
                 }
             }
-        } catch (e: Exception) {
-            // Fallback if parsing fails
+        } catch (_: Exception) {
+            // ignore
         }
 
         return genres
