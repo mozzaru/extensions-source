@@ -88,18 +88,24 @@ class MGKomik : Madara(
     // ================================ Latest ================================
 
     // hanya ambil elemen tile manga, skip link dummy/iklan
-    override val latestUpdatesSelector = "div.item-thumb, .tab-thumb"
+    override fun latestUpdatesSelector(): String = "div.item-thumb, .tab-thumb"
 
     override fun latestUpdatesFromElement(element: Element): SManga {
         return mangaFromElementOrNull(element)
-            ?: throw Exception("Invalid latest item skipped")
+            ?: SManga.create().apply {
+                setUrlWithoutDomain(baseUrl)
+                title = "Skip"
+            }
     }
 
     // ================================ Search ================================
 
     override fun searchMangaFromElement(element: Element): SManga {
         return mangaFromElementOrNull(element)
-            ?: throw Exception("Invalid search item skipped")
+            ?: SManga.create().apply {
+                setUrlWithoutDomain(baseUrl)
+                title = "Skip"
+            }
     }
 
     // ================================ Chapters ================================
@@ -131,10 +137,11 @@ class MGKomik : Madara(
         return FilterList(filters)
     }
 
-    private class GenreContentFilter(title: String, options: List<Pair<String, String>>) : UriPartFilter(
-        title,
-        options.toTypedArray(),
-    )
+    private class GenreContentFilter(title: String, options: List<Pair<String, String>>) :
+        UriPartFilter(
+            title,
+            options.toTypedArray(),
+        )
 
     override fun genresRequest() = GET("$baseUrl/$mangaSubString", headers)
 
