@@ -45,7 +45,7 @@ class MGKomik : Madara(
         .rateLimit(9, 2)
         .build()
 
-    // ================================== Popular ======================================
+    // ===================== Popular & Latest Manga =====================
 
     override fun popularMangaFromElement(element: Element): SManga {
         val manga = SManga.create()
@@ -53,7 +53,7 @@ class MGKomik : Madara(
         val link = element.selectFirst("div.item-thumb a")
         if (link != null) {
             val href = link.attr("abs:href")
-            // skip kalau bukan link manga (misal "Baca di Web")
+            // Skip kalau bukan manga (misal tombol "Baca di Web")
             if (!href.contains(mangaSubString)) {
                 return manga.apply {
                     url = "/invalid"
@@ -67,14 +67,13 @@ class MGKomik : Madara(
             manga.title = "Unknown"
         }
 
-        element.selectFirst("img")?.let {
-            manga.thumbnail_url = imageFromElement(it)
+        element.selectFirst("img")?.let { img ->
+            manga.thumbnail_url = imageFromElement(img)
         }
 
         return manga
     }
 
-    // Override supaya skip entri yang tidak valid
     override fun popularMangaParse(response: Response): MangasPage {
         val document = response.asJsoup()
         val mangas = document.select(popularMangaSelector())
@@ -82,7 +81,25 @@ class MGKomik : Madara(
                 val manga = runCatching { popularMangaFromElement(it) }.getOrNull()
                 if (manga != null && manga.url != "/invalid") manga else null
             }
-        val hasNextPage = document.select(nextPageSelector()).first() != null
+
+        val hasNextPage = document.select(popularMangaNextPageSelector()).first() != null
+        return MangasPage(mangas, hasNextPage)
+    }
+
+    override fun latestUpdatesFromElement(element: Element): SManga {
+        // Pakai logic sama seperti popular supaya aman
+        return popularMangaFromElement(element)
+    }
+
+    override fun latestUpdatesParse(response: Response): MangasPage {
+        val document = response.asJsoup()
+        val mangas = document.select(latestUpdatesSelector())
+            .mapNotNull {
+                val manga = runCatching { latestUpdatesFromElement(it) }.getOrNull()
+                if (manga != null && manga.url != "/invalid") manga else null
+            }
+
+        val hasNextPage = document.select(latestUpdatesNextPageSelector()).first() != null
         return MangasPage(mangas, hasNextPage)
     }
 
