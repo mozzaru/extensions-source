@@ -10,7 +10,7 @@
     "*.gradle.kts",
     ".github/**"
   ],
-  "ignoreDeps": ["keiyoushi/issue-moderator-action"],
+  "ignoreDeps": ["mozzaru/issue-moderator-action"],
   "packageRules": [
     {
       "matchManagers": ["github-actions"],
