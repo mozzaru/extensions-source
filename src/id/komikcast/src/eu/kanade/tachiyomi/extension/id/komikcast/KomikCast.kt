@@ -15,7 +15,6 @@ import okhttp3.Request
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.util.Calendar
-import java.util.concurrent.TimeUnit
 import java.util.Locale
 
 class KomikCast : MangaThemesia("Komik Cast", "https://komikcast03.com", "id", "/daftar-komik") {
@@ -24,11 +23,7 @@ class KomikCast : MangaThemesia("Komik Cast", "https://komikcast03.com", "id", "
     override val id = 972717448578983812
 
     override val client: OkHttpClient = super.client.newBuilder()
-        .rateLimit(2)
-        .connectTimeout(60, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .callTimeout(60, TimeUnit.SECONDS)
-        .retryOnConnectionFailure(true)
+        .rateLimit(3)
         .build()
 
     override fun headersBuilder(): Headers.Builder = super.headersBuilder()
@@ -36,26 +31,16 @@ class KomikCast : MangaThemesia("Komik Cast", "https://komikcast03.com", "id", "
         .add("Accept-language", "en-US,en;q=0.9,id;q=0.8")
 
     override fun imageRequest(page: Page): Request {
-        val imageUrl = page.imageUrl!!
-        val referer = when {
-            imageUrl.contains("img.komikcast.to") -> "https://komikcast03.com/"
-            else -> baseUrl
-        }
-
-        val headers = headersBuilder()
+        val newHeaders = headersBuilder()
             .set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
-            .set("Referer", referer)
-            .add("Cache-Control", "public, max-age=86400")
+            .set("Referer", "$baseUrl/")
             .build()
 
-        return GET(imageUrl, headers)
+        return GET(page.imageUrl!!, newHeaders)
     }
 
-    override fun popularMangaRequest(page: Int) =
-    GET("$baseUrl$mangaUrlDirectory/page/$page/?orderby=popular", headers)
-
-    override fun latestUpdatesRequest(page: Int) =
-        GET("$baseUrl$mangaUrlDirectory/page/$page/?sortby=update", headers)
+    override fun popularMangaRequest(page: Int) = customPageRequest(page, "orderby", "popular")
+    override fun latestUpdatesRequest(page: Int) = customPageRequest(page, "sortby", "update")
 
     private fun customPageRequest(page: Int, filterKey: String, filterValue: String): Request {
         val pagePath = if (page > 1) "page/$page/" else ""
@@ -65,8 +50,12 @@ class KomikCast : MangaThemesia("Komik Cast", "https://komikcast03.com", "id", "
 
     override fun searchMangaSelector() = "div.list-update_item"
 
-    override fun searchMangaFromElement(element: Element) = super.searchMangaFromElement(element).apply {
-        title = element.selectFirst("h3.title")!!.ownText()
+    override fun searchMangaFromElement(element: Element): SManga {
+        return SManga.create().apply {
+            title = element.selectFirst("h3.title")!!.ownText()
+            setUrlWithoutDomain(element.selectFirst("a")!!.attr("href"))
+            thumbnail_url = element.selectFirst(".list-update_item-image img")?.imgAttr()
+        }
     }
 
     override val seriesDetailsSelector = "div.komik_info:has(.komik_info-content)"
