@@ -15,6 +15,7 @@ import okhttp3.Request
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.util.Calendar
+import java.util.concurrent.TimeUnit
 import java.util.Locale
 
 class KomikCast : MangaThemesia("Komik Cast", "https://komikcast03.com", "id", "/daftar-komik") {
@@ -23,7 +24,11 @@ class KomikCast : MangaThemesia("Komik Cast", "https://komikcast03.com", "id", "
     override val id = 972717448578983812
 
     override val client: OkHttpClient = super.client.newBuilder()
-        .rateLimit(3)
+        .rateLimit(2)
+        .connectTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .callTimeout(60, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
         .build()
 
     override fun headersBuilder(): Headers.Builder = super.headersBuilder()
@@ -31,16 +36,26 @@ class KomikCast : MangaThemesia("Komik Cast", "https://komikcast03.com", "id", "
         .add("Accept-language", "en-US,en;q=0.9,id;q=0.8")
 
     override fun imageRequest(page: Page): Request {
-        val newHeaders = headersBuilder()
+        val imageUrl = page.imageUrl!!
+        val referer = when {
+            imageUrl.contains("img.komikcast.to") -> "https://komikcast03.com/"
+            else -> baseUrl
+        }
+
+        val headers = headersBuilder()
             .set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
-            .set("Referer", "$baseUrl/")
+            .set("Referer", referer)
+            .add("Cache-Control", "public, max-age=86400")
             .build()
 
-        return GET(page.imageUrl!!, newHeaders)
+        return GET(imageUrl, headers)
     }
 
-    override fun popularMangaRequest(page: Int) = customPageRequest(page, "orderby", "popular")
-    override fun latestUpdatesRequest(page: Int) = customPageRequest(page, "sortby", "update")
+    override fun popularMangaRequest(page: Int) =
+    GET("$baseUrl$mangaUrlDirectory/page/$page/?orderby=popular", headers)
+
+    override fun latestUpdatesRequest(page: Int) =
+        GET("$baseUrl$mangaUrlDirectory/page/$page/?sortby=update", headers)
 
     private fun customPageRequest(page: Int, filterKey: String, filterValue: String): Request {
         val pagePath = if (page > 1) "page/$page/" else ""
