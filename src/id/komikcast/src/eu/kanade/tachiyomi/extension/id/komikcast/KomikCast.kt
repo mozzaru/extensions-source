@@ -17,7 +17,7 @@ import org.jsoup.nodes.Element
 import java.util.Calendar
 import java.util.Locale
 
-class KomikCast : MangaThemesia("Komik Cast", "https://komikcast.li", "id", "/daftar-komik") {
+class KomikCast : MangaThemesia("Komik Cast", "https://komikcast03.com", "id", "/daftar-komik") {
 
     // Formerly "Komik Cast (WP Manga Stream)"
     override val id = 972717448578983812
@@ -34,6 +34,8 @@ class KomikCast : MangaThemesia("Komik Cast", "https://komikcast.li", "id", "/da
         val newHeaders = headersBuilder()
             .set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
             .set("Referer", "$baseUrl/")
+            .set("User-Agent", "Mozilla/5.0 (Android 11; Mobile; rv:117.0) Gecko/20100101 Firefox/117.0")
+            .set("Cache-Control", "no-cache")
             .build()
 
         return GET(page.imageUrl!!, newHeaders)
@@ -59,7 +61,7 @@ class KomikCast : MangaThemesia("Komik Cast", "https://komikcast.li", "id", "/da
     override val seriesDescriptionSelector = ".komik_info-description-sinopsis"
     override val seriesAltNameSelector = ".komik_info-content-native"
     override val seriesGenreSelector = ".komik_info-content-genre a"
-    override val seriesThumbnailSelector = ".komik_info-content-thumbnail img"
+    override val seriesThumbnailSelector = ".komik_info-cover-image img, .komik_info-content-thumbnail img"
     override val seriesStatusSelector = ".komik_info-content-info:contains(Status)"
 
     override fun mangaDetailsParse(document: Document) = SManga.create().apply {
@@ -89,7 +91,7 @@ class KomikCast : MangaThemesia("Komik Cast", "https://komikcast.li", "id", "/da
                 .joinToString { it.trim() }
 
             status = seriesDetails.selectFirst(seriesStatusSelector)?.text().parseStatus()
-            thumbnail_url = seriesDetails.select(seriesThumbnailSelector).imgAttr()
+            thumbnail_url = seriesDetails.select(seriesThumbnailSelector).firstOrNull()?.imgAttr()
         }
     }
 
@@ -139,7 +141,7 @@ class KomikCast : MangaThemesia("Komik Cast", "https://komikcast.li", "id", "/da
 
     override fun pageListParse(document: Document): List<Page> {
         return document.select("div#chapter_body .main-reading-area img.size-full")
-            .distinctBy { img -> img.imgAttr() }
+            .distinctBy { it.imgAttr() }
             .mapIndexed { i, img -> Page(i, document.location(), img.imgAttr()) }
     }
 
@@ -234,4 +236,8 @@ class KomikCast : MangaThemesia("Komik Cast", "https://komikcast.li", "id", "/da
         )
         return FilterList(filters)
     }
+}
+
+private fun Element.imgAttr(): String {
+    return this.attr("src").ifBlank { this.attr("data-src") }
 }
