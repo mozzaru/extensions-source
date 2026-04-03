@@ -1,8 +1,10 @@
 package eu.kanade.tachiyomi.extension.id.inazumanga
 
 import eu.kanade.tachiyomi.multisrc.zeistmanga.ZeistManga
+import eu.kanade.tachiyomi.multisrc.zeistmanga.ZeistMangaDto
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.source.model.MangasPage
+import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.util.asJsoup
@@ -12,30 +14,11 @@ import org.jsoup.nodes.Document
 
 class ReYume : ZeistManga("ReYume", "https://www.re-yume.my.id", "id") {
 
-    // Popular
-    override val popularMangaSelector = "#Side .group"
-
-    override fun popularMangaParse(response: Response): MangasPage {
-        val document = response.asJsoup()
-        val mangas = document.select(popularMangaSelector).map { element ->
-            SManga.create().apply {
-                val thumbnailElement = element.selectFirst("a[style*='background-image']")
-                thumbnail_url = thumbnailElement?.attr("style")?.let {
-                    it.substringAfter("url(").substringBefore(")").trim('"', '\'')
-                }
-                title = element.selectFirst("h3")?.text() ?: ""
-                setUrlWithoutDomain(element.selectFirst("a[href]")?.attr("href") ?: "")
-            }
-        }
-        return MangasPage(mangas, false)
-    }
-
-    override val mangaCategory: String = "Manga"
+    override val mangaCategory: String = "Series"
 
     // Details
     override val mangaDetailsSelector = "#main"
     override val mangaDetailsSelectorDescription = "#syn_bod"
-    override val mangaDetailsSelectorGenres = "a[rel=tag]"
     override val mangaDetailsSelectorAuthor = "span#tauther"
     override val mangaDetailsSelectorArtist = "span#tartist"
     override val mangaDetailsSelectorAltName = "span#talternative"
@@ -45,9 +28,16 @@ class ReYume : ZeistManga("ReYume", "https://www.re-yume.my.id", "id") {
         return SManga.create().apply {
             title = document.selectFirst("h1")?.text() ?: ""
             description = document.selectFirst(mangaDetailsSelectorDescription)?.text()
-            genre = document.select(mangaDetailsSelectorGenres).joinToString { it.text() }
             author = document.selectFirst(mangaDetailsSelectorAuthor)?.text()
             artist = document.selectFirst(mangaDetailsSelectorArtist)?.text()
+
+            val script = document.select("script").joinToString("") { it.html() }
+            val genreMatch = Regex("""filterGenre\s*=\s*\[(.*?)]""").find(script)
+            genre = genreMatch?.groupValues?.get(1)
+                ?.split(",")
+                ?.map { it.trim().trim('\'', '"') }
+                ?.filter { it.isNotBlank() }
+                ?.joinToString()
 
             val altName = document.selectFirst(mangaDetailsSelectorAltName)?.text()
             if (!altName.isNullOrBlank()) {
@@ -61,23 +51,21 @@ class ReYume : ZeistManga("ReYume", "https://www.re-yume.my.id", "id") {
         }
     }
 
-    // Chapters
     override fun chapterListParse(response: Response): List<SChapter> {
         val document = response.asJsoup()
-        val mangaTitle = document.selectFirst("h1")?.text() ?: ""
 
         val url = getChapterFeedUrl(document)
         val res = client.newCall(GET(url, headers)).execute()
 
-        val result = json.decodeFromString<eu.kanade.tachiyomi.multisrc.zeistmanga.ZeistMangaDto>(res.body.string())
-        return result.feed?.entry?.filter { it.category.orEmpty().any { category -> category.term == chapterCategory } }
+        val result = json.decodeFromString<ZeistMangaDto>(res.body.string())
+        return result.feed?.entry
+            ?.filter { it.category.orEmpty().any { cat -> cat.term == chapterCategory } }
             ?.map {
                 it.toSChapter(baseUrl).apply {
-                    if (mangaTitle.isNotBlank()) {
-                        name = name.replace(mangaTitle, "", ignoreCase = true).trim()
-                    }
-                    if (name.startsWith("chapter", ignoreCase = true)) {
-                        name = name.replaceFirst("chapter", "Chapter", ignoreCase = true)
+                    val match = Regex("""(?i)(chapter\s*[\d.]+.*)""").find(name)
+                    if (match != null) {
+                        name = match.groupValues[1].trim()
+                            .replaceFirst(Regex("(?i)^chapter"), "Chapter")
                     }
                 }
             }
@@ -93,5 +81,13 @@ class ReYume : ZeistManga("ReYume", "https://www.re-yume.my.id", "id") {
             .build().toString()
     }
 
-    override val pageListSelector = ".post-body img"
+    override fun pageListParse(response: Response): List<Page> {
+        val document = response.asJsoup()
+        return document.select("div.separator a")
+            .mapIndexed { i, a ->
+                Page(i, "", a.attr("abs:href"))
+            }
+    }
+
+    override fun imageUrlParse(response: Response) = throw UnsupportedOperationException()
 }
