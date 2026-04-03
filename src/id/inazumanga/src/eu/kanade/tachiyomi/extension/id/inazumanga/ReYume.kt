@@ -1,16 +1,19 @@
 package eu.kanade.tachiyomi.extension.id.inazumanga
 
 import eu.kanade.tachiyomi.multisrc.zeistmanga.ZeistManga
+import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.source.model.MangasPage
+import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.util.asJsoup
+import kotlinx.serialization.decodeFromString
 import okhttp3.Response
 import org.jsoup.nodes.Document
 
 class ReYume : ZeistManga("ReYume", "https://www.re-yume.my.id", "id") {
 
     // Popular
-    override val popularMangaSelector = "div.PopularPosts .group"
+    override val popularMangaSelector = "#Side .group"
 
     override fun popularMangaParse(response: Response): MangasPage {
         val document = response.asJsoup()
@@ -26,6 +29,8 @@ class ReYume : ZeistManga("ReYume", "https://www.re-yume.my.id", "id") {
         }
         return MangasPage(mangas, false)
     }
+
+    override val mangaCategory: String = "Manga"
 
     // Details
     override val mangaDetailsSelector = "#main"
@@ -57,6 +62,28 @@ class ReYume : ZeistManga("ReYume", "https://www.re-yume.my.id", "id") {
     }
 
     // Chapters
+    override fun chapterListParse(response: Response): List<SChapter> {
+        val document = response.asJsoup()
+        val mangaTitle = document.selectFirst("h1")?.text() ?: ""
+
+        val url = getChapterFeedUrl(document)
+        val res = client.newCall(GET(url, headers)).execute()
+
+        val result = json.decodeFromString<eu.kanade.tachiyomi.multisrc.zeistmanga.ZeistMangaDto>(res.body.string())
+        return result.feed?.entry?.filter { it.category.orEmpty().any { category -> category.term == chapterCategory } }
+            ?.map {
+                it.toSChapter(baseUrl).apply {
+                    if (mangaTitle.isNotBlank()) {
+                        name = name.replace(mangaTitle, "", ignoreCase = true).trim()
+                    }
+                    if (name.startsWith("chapter", ignoreCase = true)) {
+                        name = name.replaceFirst("chapter", "Chapter", ignoreCase = true)
+                    }
+                }
+            }
+            ?: throw Exception("Failed to parse from chapter API")
+    }
+
     override fun getChapterFeedUrl(doc: Document): String {
         val label = doc.selectFirst(".chapter_get")?.attr("data-labelchapter")
             ?: throw Exception("Failed to find chapter label")
