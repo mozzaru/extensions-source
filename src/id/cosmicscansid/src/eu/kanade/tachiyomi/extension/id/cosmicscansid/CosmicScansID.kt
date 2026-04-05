@@ -101,7 +101,7 @@ class CosmicScansID :
     override fun Elements.imgAttr(): String = this.first()?.imgAttr() ?: ""
 
     // pages
-    override val pageSelector = "div#readerarea img:not(noscript img):not([alt=''])"
+    override val pageSelector = "div#readerarea img:not(noscript img):not([alt='']):not([src*='.gif']):not([src*='kswp_ad']):not([class*='social-distancing'])"
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         screen.addRandomUAPreference()
