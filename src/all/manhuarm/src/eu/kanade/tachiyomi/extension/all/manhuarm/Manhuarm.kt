@@ -1,7 +1,10 @@
 package eu.kanade.tachiyomi.extension.all.manhuarm
 
+import android.app.Application
 import android.content.SharedPreferences
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.widget.Toast
 import androidx.annotation.RequiresApi
 import androidx.preference.EditTextPreference
@@ -37,6 +40,8 @@ import okhttp3.Response
 import okhttp3.brotli.BrotliInterceptor
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 import java.util.Calendar
 import java.util.Date
 import java.util.concurrent.TimeUnit
@@ -304,7 +309,14 @@ class Manhuarm(
             .add("Cache-Control", "no-cache")
             .build()
 
-        val ocrUrl = ocrUrlInterceptor.getUrl(chapterUrl.toString()) ?: return pages
+        val ocrUrl = ocrUrlInterceptor.getUrl(chapterUrl.toString())
+
+        if (ocrUrl == null) {
+            Handler(Looper.getMainLooper()).post {
+                Toast.makeText(Injekt.get<Application>(), i18n["ocr_unavailable_message"], Toast.LENGTH_LONG).show()
+            }
+            return pages
+        }
 
         val dialog = try {
             val response = client.newCall(GET(ocrUrl, jsonHeaders)).execute()

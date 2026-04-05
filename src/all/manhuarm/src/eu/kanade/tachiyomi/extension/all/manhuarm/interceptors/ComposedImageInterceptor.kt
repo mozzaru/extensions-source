@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.extension.all.manhuarm.interceptors
 
+import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -20,16 +21,18 @@ import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
+import uy.kohesive.injekt.injectLazy
 import java.io.ByteArrayOutputStream
-import java.io.File
-import java.io.FileOutputStream
-import java.io.InputStream
 
 // The Interceptor joins the dialogues and pages of the manga.
 @RequiresApi(Build.VERSION_CODES.O)
 class ComposedImageInterceptor(
     val language: Language,
 ) : Interceptor {
+
+    private val context: Application by injectLazy()
+
+    private val fontCache = mutableMapOf<String, Typeface>()
 
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
@@ -116,17 +119,15 @@ class ComposedImageInterceptor(
      * }</pre>
      */
     private fun loadFont(fontName: String): Typeface? = try {
-        this::class.java.classLoader!!
-            .getResourceAsStream("assets/fonts/$fontName")
-            .toTypeface(fontName)
+        if (fontCache.containsKey(fontName)) {
+            fontCache[fontName]
+        } else {
+            Typeface.createFromAsset(context.assets, "fonts/$fontName").also {
+                fontCache[fontName] = it
+            }
+        }
     } catch (e: Exception) {
         null
-    }
-
-    private fun InputStream.toTypeface(fontName: String): Typeface? {
-        val fontFile = File.createTempFile(fontName, fontName.substringAfter("."))
-        this.copyTo(FileOutputStream(fontFile))
-        return Typeface.createFromFile(fontFile)
     }
 
     /**
@@ -148,7 +149,7 @@ class ComposedImageInterceptor(
         var dialogBox = createBoxLayout(dialog, textPaint)
 
         // The best way I've found to adjust the text in the dialog box (Especially in long dialogues)
-        while (dialogBox.height > dialog.height) {
+        while (dialogBox.height > dialog.height && textPaint.textSize >= 1.0f) {
             textPaint.textSize -= 0.5f
             dialogBox = createBoxLayout(dialog, textPaint)
         }
