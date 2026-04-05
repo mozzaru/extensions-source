@@ -36,7 +36,12 @@ data class Dialog(
     val height: Float get() = scale * _height
     val width: Float get() = scale * _width
 
-    val text: String get() = textByLanguage["text"] ?: ""
+    val text: String get() = textByLanguage["text"]
+        ?: textByLanguage["en"]
+        ?: textByLanguage["zh"]
+        ?: textByLanguage.values.firstOrNull { it.isNotBlank() }
+        ?: ""
+
     fun getTextBy(language: Language): String {
         val preferred = if (!language.disableTranslator) {
             textByLanguage[language.target]
@@ -47,6 +52,10 @@ data class Dialog(
         return preferred?.takeIf { it.isNotBlank() }
             ?: textByLanguage[language.target]?.takeIf { it.isNotBlank() }
             ?: textByLanguage[language.origin]?.takeIf { it.isNotBlank() }
+            ?: textByLanguage["en"]?.takeIf { it.isNotBlank() }
+            ?: textByLanguage["zh"]?.takeIf { it.isNotBlank() }
+            // Fallback to the first non-blank value if everything else fails
+            ?: textByLanguage.values.firstOrNull { it.isNotBlank() }
             ?: text
     }
     val centerY get() = height / 2 + y

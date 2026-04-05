@@ -39,9 +39,13 @@ class TranslationInterceptor(
         val translated = runBlocking(Dispatchers.IO) {
             dialogues.map { dialog ->
                 async {
-                    dialog.replaceText(
-                        translator.translate(language.origin, language.target, dialog.text),
-                    )
+                    val (sourceLang, sourceText) = dialog.getBestSource(language.origin)
+                    val translatedText = if (sourceText.isNotBlank()) {
+                        translator.translate(sourceLang, language.target, sourceText)
+                    } else {
+                        ""
+                    }
+                    dialog.replaceText(translatedText)
                 }
             }.awaitAll()
         }
@@ -54,8 +58,21 @@ class TranslationInterceptor(
     }
 
     private fun Dialog.replaceText(value: String) = this.copy(
-        textByLanguage = mutableMapOf(
-            "text" to value,
-        ),
+        textByLanguage = this.textByLanguage + ("text" to value),
     )
+
+    private fun Dialog.getBestSource(defaultOrigin: String): Pair<String, String> {
+        // Try the default origin first
+        textByLanguage[defaultOrigin]?.takeIf { it.isNotBlank() }?.let { return defaultOrigin to it }
+
+        // Then try English
+        textByLanguage["en"]?.takeIf { it.isNotBlank() }?.let { return "en" to it }
+
+        // Then try Chinese (zh)
+        textByLanguage["zh"]?.takeIf { it.isNotBlank() }?.let { return "zh" to it }
+
+        // Finally fallback to any available text
+        val firstAvailable = textByLanguage.entries.firstOrNull { it.value.isNotBlank() }
+        return (firstAvailable?.key ?: defaultOrigin) to (firstAvailable?.value ?: "")
+    }
 }

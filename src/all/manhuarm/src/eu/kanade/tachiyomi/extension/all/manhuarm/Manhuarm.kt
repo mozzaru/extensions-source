@@ -126,7 +126,7 @@ class Manhuarm(
 
     private val warmupInterceptor = CloudflareWarmupInterceptor(baseUrl, headers)
 
-    private val ocrUrlInterceptor by lazy { OcrUrlInterceptor(headers) }
+    private val ocrUrlInterceptor by lazy { OcrUrlInterceptor(client, headers) }
 
     /**
      * This ensures that the `OkHttpClient` instance is only created when required, and it is rebuilt
@@ -309,9 +309,9 @@ class Manhuarm(
             .add("Cache-Control", "no-cache")
             .build()
 
-        val ocrUrl = ocrUrlInterceptor.getUrl(chapterUrl.toString())
+        val ocrData = ocrUrlInterceptor.getOcrData(chapterUrl.toString())
 
-        if (ocrUrl == null) {
+        if (ocrData == null) {
             Handler(Looper.getMainLooper()).post {
                 Toast.makeText(Injekt.get<Application>(), i18n["ocr_unavailable_message"], Toast.LENGTH_LONG).show()
             }
@@ -319,15 +319,7 @@ class Manhuarm(
         }
 
         val dialog = try {
-            val response = client.newCall(GET(ocrUrl, jsonHeaders)).execute()
-
-            // If server returns error (403, etc), skip translations
-            if (!response.isSuccessful) {
-                response.close()
-                emptyList()
-            } else {
-                response.parseAs<List<PageDto>>()
-            }
+            ocrData.parseAs<List<PageDto>>()
         } catch (_: Exception) {
             // If JSON parsing fails, skip translations
             emptyList()

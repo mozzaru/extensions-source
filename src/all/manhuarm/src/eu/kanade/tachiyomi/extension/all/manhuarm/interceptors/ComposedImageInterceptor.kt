@@ -43,11 +43,16 @@ class ComposedImageInterceptor(
         }
 
         val dialogues = request.url.fragment?.parseAs<List<Dialog>>()
+            ?.filter { it.getTextBy(language).isNotBlank() }
             ?: emptyList()
 
         val imageRequest = request.newBuilder()
             .url(url)
             .build()
+
+        if (dialogues.isEmpty()) {
+            return chain.proceed(imageRequest)
+        }
 
         val response = chain.proceed(imageRequest)
 

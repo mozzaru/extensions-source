@@ -1,69 +1,86 @@
 package eu.kanade.tachiyomi.extension.all.manhuarm.interceptors
 
-import android.app.Application
-import android.os.Handler
-import android.os.Looper
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
-import android.webkit.WebView
-import android.webkit.WebViewClient
+import android.util.Base64
+import eu.kanade.tachiyomi.network.GET
+import eu.kanade.tachiyomi.network.POST
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import okhttp3.Headers
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.RequestBody.Companion.toRequestBody
 import uy.kohesive.injekt.injectLazy
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 
-class OcrUrlInterceptor(private val headers: Headers) {
+class OcrUrlInterceptor(
+    private val client: OkHttpClient,
+    private val headers: Headers,
+) {
 
-    private val context: Application by injectLazy()
+    private val json: Json by injectLazy()
 
-    private val handler = Handler(Looper.getMainLooper())
-
-    fun getUrl(url: String): String? {
-        val latch = CountDownLatch(1)
-        var ocrUrl: String? = null
-        var webView: WebView? = null
-
-        handler.post {
-            val webview = WebView(context)
-            webView = webview
-            with(webview.settings) {
-                javaScriptEnabled = true
-                domStorageEnabled = true
-                databaseEnabled = true
-                useWideViewPort = false
-                loadWithOverviewMode = false
-                userAgentString = headers["User-Agent"]
-            }
-
-            webview.webViewClient = object : WebViewClient() {
-                override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
-                    val requestUrl = request?.url?.toString()
-                        ?: return super.shouldInterceptRequest(view, request)
-                    if (ocrUrl == null && requestUrl.contains("fetch-ocr.php")) {
-                        ocrUrl = requestUrl
-                        latch.countDown()
-                        view?.post { view.stopLoading() }
-                    }
-                    return super.shouldInterceptRequest(view, request)
-                }
-            }
-
-            webview.loadUrl(url, headers.toMultimap().mapValues { it.value.first() })
+    fun getOcrData(url: String): String? {
+        val chapterResponse = try {
+            client.newCall(GET(url, headers)).execute()
+        } catch (e: Exception) {
+            return null
         }
 
-        val completed = latch.await(10, TimeUnit.SECONDS)
-
-        handler.post {
-            webView?.apply {
-                stopLoading()
-                removeAllViews()
-                destroy()
-            }
-            webView = null
+        if (!chapterResponse.isSuccessful) {
+            chapterResponse.close()
+            return null
         }
 
-        if (!completed) return null
+        val html = chapterResponse.body.string()
+        val vaultData = VAULT_REGEX.find(html)?.groupValues?.get(1) ?: return null
 
-        return ocrUrl
+        val vault = vaultData.split(",").map { it.trim().removeSurrounding("\"") }
+        if (vault.size < 5) return null
+
+        val ch = try {
+            String(Base64.decode(vault[0], Base64.DEFAULT))
+        } catch (e: Exception) {
+            return null
+        }
+        val tk = vault[1]
+        val ts = vault[2].toLongOrNull() ?: return null
+        val nc = vault[3]
+        val gate = vault[4].replace("\\/", "/")
+
+        val payload = OcrPayload(ch, tk, ts, nc)
+        val requestBody = json.encodeToString(payload).toRequestBody(JSON_MEDIA_TYPE)
+
+        val ocrHeaders = headers.newBuilder()
+            .add("Content-Type", "application/json")
+            .add("X-Requested-With", "XMLHttpRequest")
+            .add("Referer", url)
+            .add("Origin", url.substringBeforeLast("/manga/"))
+            .build()
+
+        val ocrResponse = try {
+            client.newCall(POST(gate, ocrHeaders, requestBody)).execute()
+        } catch (e: Exception) {
+            return null
+        }
+
+        if (!ocrResponse.isSuccessful) {
+            ocrResponse.close()
+            return null
+        }
+
+        return ocrResponse.body.string()
+    }
+
+    @Serializable
+    private data class OcrPayload(
+        val ch: String,
+        val tk: String,
+        val ts: Long,
+        val nc: String,
+    )
+
+    companion object {
+        private val VAULT_REGEX = Regex("""const _0xvault = \[(.*?)];""", RegexOption.DOT_MATCHES_ALL)
+        private val JSON_MEDIA_TYPE = "application/json".toMediaType()
     }
 }
