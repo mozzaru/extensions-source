@@ -10,11 +10,11 @@ class ManhuarmFactory : SourceFactory {
 }
 
 private val languageList = listOf(
-    Language("ar", disableFontSettings = true),
-    Language("en"),
-    Language("es"),
+    Language("ar", disableFontSettings = true, supportNativeTranslation = true),
+    Language("en", supportNativeTranslation = true),
+    Language("es", supportNativeTranslation = true),
     Language("fr", supportNativeTranslation = true),
     Language("id", supportNativeTranslation = true),
-    Language("it"),
+    Language("it", supportNativeTranslation = true),
     Language("pt-BR", "pt", supportNativeTranslation = true),
 )

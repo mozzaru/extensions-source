@@ -57,9 +57,9 @@ data class Dialog(
         // 3. Try the origin language
         textByLanguage[origin]?.takeIf { it.isNotBlank() }?.let { return it }
 
-        // 4. Fallback sequence: English -> Chinese -> Any non-blank -> .text property
+        // 4. Fallback sequence: English -> Chinese (if target is not English) -> Any non-blank -> .text property
         return textByLanguage["en"]?.takeIf { it.isNotBlank() }
-            ?: textByLanguage["zh"]?.takeIf { it.isNotBlank() }
+            ?: textByLanguage["zh"]?.takeIf { it.isNotBlank() && target != "en" }
             ?: textByLanguage.values.firstOrNull { it.isNotBlank() }
             ?: text
     }

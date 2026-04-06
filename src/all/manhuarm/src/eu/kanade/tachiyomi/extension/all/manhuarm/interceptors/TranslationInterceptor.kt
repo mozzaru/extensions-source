@@ -36,23 +36,35 @@ class TranslationInterceptor(
         val dialogues = request.url.fragment?.parseAs<List<Dialog>>()
             ?: return chain.proceed(request)
 
-        val translated = runBlocking(Dispatchers.IO) {
-            dialogues.map { dialog ->
-                async {
-                    // Skip translation if target language is already present
-                    if (dialog.textByLanguage[language.target]?.isNotBlank() == true) {
-                        return@async dialog
-                    }
+        val toTranslate = dialogues.filter { it.textByLanguage[language.target].isNullOrBlank() }
+        val alreadyTranslated = dialogues.filter { !it.textByLanguage[language.target].isNullOrBlank() }
 
-                    val (sourceLang, sourceText) = dialog.getBestSource(language.origin)
-                    val translatedText = if (sourceText.isNotBlank()) {
-                        translator.translate(sourceLang, language.target, sourceText)
-                    } else {
-                        ""
+        val translated = if (toTranslate.isEmpty()) {
+            dialogues
+        } else {
+            runBlocking(Dispatchers.IO) {
+                toTranslate.chunked(BATCH_SIZE).map { chunk ->
+                    async {
+                        // Use a separator that is unlikely to be in the text and preserved by translators
+                        val separator = " ||| "
+                        val sourceLang = chunk.first().getBestSource(language.origin).first
+                        val combinedText = chunk.joinToString(separator) { it.getBestSource(language.origin).second }
+
+                        val translatedBatch = if (combinedText.isNotBlank()) {
+                            translator.translate(sourceLang, language.target, combinedText)
+                        } else {
+                            ""
+                        }
+
+                        val translatedTexts = translatedBatch.split(separator)
+
+                        chunk.mapIndexed { index, dialog ->
+                            val text = translatedTexts.getOrNull(index)?.trim() ?: ""
+                            dialog.replaceText(text)
+                        }
                     }
-                    dialog.replaceText(translatedText)
-                }
-            }.awaitAll()
+                }.awaitAll().flatten() + alreadyTranslated
+            }
         }
 
         val newRequest = request.newBuilder()
@@ -65,6 +77,10 @@ class TranslationInterceptor(
     private fun Dialog.replaceText(value: String) = this.copy(
         textByLanguage = this.textByLanguage + ("text" to value),
     )
+
+    companion object {
+        private const val BATCH_SIZE = 15
+    }
 
     private fun Dialog.getBestSource(defaultOrigin: String): Pair<String, String> {
         // Try the default origin first
