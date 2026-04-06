@@ -36,9 +36,7 @@ data class Dialog(
     val height: Float get() = scale * _height
     val width: Float get() = scale * _width
 
-    val text: String get() = textByLanguage["text"]
-        ?: textByLanguage["en"]
-        ?: textByLanguage["zh"]
+    val text: String get() = textByLanguage["en"]
         ?: textByLanguage.values.firstOrNull { it.isNotBlank() }
         ?: ""
 
@@ -46,31 +44,20 @@ data class Dialog(
         val target = language.target
         val origin = language.origin
 
-        // 1. Try the specific target language (server-side native translation)
         textByLanguage[target]?.takeIf { it.isNotBlank() }?.let { return it }
 
-        // 2. If translator is enabled and target is different from origin, try machine translated text
-        if (!language.disableTranslator && target != origin) {
-            textByLanguage["text"]?.takeIf { it.isNotBlank() }?.let { return it }
-        }
-
-        // 3. If target is Indonesian, we strictly avoid falling back to other languages
-        // to prevent mixed-language content, unless Indonesian is the origin.
-        if (target == "id" && origin != "id") {
+        if (target != origin) {
             return ""
         }
 
-        // 4. Try the origin language
         textByLanguage[origin]?.takeIf { it.isNotBlank() }?.let { return it }
+        textByLanguage["en"]?.takeIf { it.isNotBlank() }?.let { return it }
 
-        // 5. Fallback sequence: English -> Chinese (if target is not English) -> Any non-blank (excluding "text" key if translator disabled)
-        return textByLanguage["en"]?.takeIf { it.isNotBlank() }
-            ?: textByLanguage["zh"]?.takeIf { it.isNotBlank() && target != "en" }
-            ?: textByLanguage.entries.firstOrNull { (k, v) ->
-                v.isNotBlank() && (k != "text" || !language.disableTranslator)
-            }?.value
-            ?: text
+        return textByLanguage.entries
+            .firstOrNull { it.value.isNotBlank() }
+            ?.value ?: ""
     }
+
     val centerY get() = height / 2 + y
     val centerX get() = width / 2 + x
 }
@@ -119,7 +106,7 @@ private object DialogListSerializer :
 
     private fun getDialogs(element: JsonElement): JsonObject = buildJsonObject {
         when (element) {
-            is JsonArray -> put("text", element.jsonArray[1])
+            is JsonArray -> put("en", element.jsonArray[1])
 
             else -> {
                 element.jsonObject.entries

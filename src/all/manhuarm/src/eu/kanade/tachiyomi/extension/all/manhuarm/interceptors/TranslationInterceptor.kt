@@ -126,7 +126,7 @@ class TranslationInterceptor(
     }
 
     private fun Dialog.replaceText(value: String) = this.copy(
-        textByLanguage = this.textByLanguage + ("text" to value),
+        textByLanguage = this.textByLanguage + (language.target to value),
     )
 
     companion object {
@@ -139,9 +139,6 @@ class TranslationInterceptor(
 
         // Then try English
         textByLanguage["en"]?.takeIf { it.isNotBlank() }?.let { return "en" to it }
-
-        // Then try Chinese (zh)
-        textByLanguage["zh"]?.takeIf { it.isNotBlank() }?.let { return "zh" to it }
 
         // Finally fallback to any available text
         val firstAvailable = textByLanguage.entries.firstOrNull { it.value.isNotBlank() }
