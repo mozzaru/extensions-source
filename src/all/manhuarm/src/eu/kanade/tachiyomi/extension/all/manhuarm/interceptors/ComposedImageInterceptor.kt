@@ -79,9 +79,9 @@ class ComposedImageInterceptor(
             .substringAfterLast(".")
             .lowercase()
         val format = when (ext) {
-            "png" -> Bitmap.CompressFormat.PNG
-            "jpeg", "jpg" -> Bitmap.CompressFormat.JPEG
-            else -> Bitmap.CompressFormat.WEBP
+            "png" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Bitmap.CompressFormat.WEBP_LOSSLESS else Bitmap.CompressFormat.PNG
+            "jpeg", "jpg" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Bitmap.CompressFormat.WEBP_LOSSY else Bitmap.CompressFormat.JPEG
+            else -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Bitmap.CompressFormat.WEBP_LOSSY else Bitmap.CompressFormat.WEBP
         }
 
         bitmap.compress(format, 100, output)
@@ -170,7 +170,8 @@ class ComposedImageInterceptor(
 
         return StaticLayout.Builder.obtain(text, 0, text.length, textPaint, dialog.width.toInt()).apply {
             setAlignment(Layout.Alignment.ALIGN_CENTER)
-            setIncludePad(language.disableFontSettings)
+            setIncludePad(false)
+            setLineSpacing(0f, 0.9f)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 if (language.disableWordBreak) {
                     setBreakStrategy(LineBreaker.BREAK_STRATEGY_SIMPLE)

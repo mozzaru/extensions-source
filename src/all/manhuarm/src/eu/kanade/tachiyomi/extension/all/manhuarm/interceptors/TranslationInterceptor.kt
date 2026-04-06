@@ -39,6 +39,11 @@ class TranslationInterceptor(
         val translated = runBlocking(Dispatchers.IO) {
             dialogues.map { dialog ->
                 async {
+                    // Skip translation if target language is already present
+                    if (dialog.textByLanguage[language.target]?.isNotBlank() == true) {
+                        return@async dialog
+                    }
+
                     val (sourceLang, sourceText) = dialog.getBestSource(language.origin)
                     val translatedText = if (sourceText.isNotBlank()) {
                         translator.translate(sourceLang, language.target, sourceText)

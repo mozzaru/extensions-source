@@ -43,18 +43,23 @@ data class Dialog(
         ?: ""
 
     fun getTextBy(language: Language): String {
-        val preferred = if (!language.disableTranslator) {
-            textByLanguage[language.target]
-        } else {
-            textByLanguage[language.origin]
+        val target = language.target
+        val origin = language.origin
+
+        // 1. Try the specific target language (server-side native translation)
+        textByLanguage[target]?.takeIf { it.isNotBlank() }?.let { return it }
+
+        // 2. If translator is enabled and target is different from origin, try machine translated text
+        if (!language.disableTranslator && target != origin) {
+            textByLanguage["text"]?.takeIf { it.isNotBlank() }?.let { return it }
         }
 
-        return preferred?.takeIf { it.isNotBlank() }
-            ?: textByLanguage[language.target]?.takeIf { it.isNotBlank() }
-            ?: textByLanguage[language.origin]?.takeIf { it.isNotBlank() }
-            ?: textByLanguage["en"]?.takeIf { it.isNotBlank() }
+        // 3. Try the origin language
+        textByLanguage[origin]?.takeIf { it.isNotBlank() }?.let { return it }
+
+        // 4. Fallback sequence: English -> Chinese -> Any non-blank -> .text property
+        return textByLanguage["en"]?.takeIf { it.isNotBlank() }
             ?: textByLanguage["zh"]?.takeIf { it.isNotBlank() }
-            // Fallback to the first non-blank value if everything else fails
             ?: textByLanguage.values.firstOrNull { it.isNotBlank() }
             ?: text
     }

@@ -1,7 +1,6 @@
 package eu.kanade.tachiyomi.extension.all.manhuarm.interceptors
 
 import android.util.Base64
-import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -19,19 +18,7 @@ class OcrUrlInterceptor(
 
     private val json: Json by injectLazy()
 
-    fun getOcrData(url: String): String? {
-        val chapterResponse = try {
-            client.newCall(GET(url, headers)).execute()
-        } catch (e: Exception) {
-            return null
-        }
-
-        if (!chapterResponse.isSuccessful) {
-            chapterResponse.close()
-            return null
-        }
-
-        val html = chapterResponse.body.string()
+    fun getOcrData(url: String, html: String): String? {
         val vaultData = VAULT_REGEX.find(html)?.groupValues?.get(1) ?: return null
 
         val vault = vaultData.split(",").map { it.trim().removeSurrounding("\"") }

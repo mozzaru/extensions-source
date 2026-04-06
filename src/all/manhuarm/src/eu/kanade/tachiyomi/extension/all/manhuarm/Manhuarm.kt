@@ -309,7 +309,7 @@ class Manhuarm(
             .add("Cache-Control", "no-cache")
             .build()
 
-        val ocrData = ocrUrlInterceptor.getOcrData(chapterUrl.toString())
+        val ocrData = ocrUrlInterceptor.getOcrData(chapterUrl.toString(), document.html())
 
         if (ocrData == null) {
             Handler(Looper.getMainLooper()).post {
