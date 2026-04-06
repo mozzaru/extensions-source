@@ -23,6 +23,7 @@ import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import uy.kohesive.injekt.injectLazy
 import java.io.ByteArrayOutputStream
+import java.util.concurrent.ConcurrentHashMap
 
 // The Interceptor joins the dialogues and pages of the manga.
 @RequiresApi(Build.VERSION_CODES.O)
@@ -32,7 +33,7 @@ class ComposedImageInterceptor(
 
     private val context: Application by injectLazy()
 
-    private val fontCache = mutableMapOf<String, Typeface>()
+    private val fontCache = ConcurrentHashMap<String, Typeface>()
 
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
@@ -63,37 +64,42 @@ class ComposedImageInterceptor(
         val options = BitmapFactory.Options().apply {
             inMutable = true
         }
-        val bitmap = BitmapFactory.decodeStream(response.body.byteStream(), null, options)
-            ?: return response
+        val bitmap = response.body.use { body ->
+            BitmapFactory.decodeStream(body.byteStream(), null, options)
+        } ?: return response
 
-        val canvas = Canvas(bitmap)
+        try {
+            val canvas = Canvas(bitmap)
 
-        dialogues.forEach { dialog ->
-            dialog.scale = language.dialogBoxScale
-            val textPaint = createTextPaint(selectFontFamily())
-            val dialogBox = createDialogBox(dialog, textPaint)
-            val y = getYAxis(textPaint, dialog, dialogBox)
-            canvas.draw(textPaint, dialogBox, dialog, dialog.x, y)
+            dialogues.forEach { dialog ->
+                dialog.scale = language.dialogBoxScale
+                val textPaint = createTextPaint(selectFontFamily())
+                val dialogBox = createDialogBox(dialog, textPaint)
+                val y = getYAxis(textPaint, dialog, dialogBox)
+                canvas.draw(textPaint, dialogBox, dialog, dialog.x, y)
+            }
+
+            val output = ByteArrayOutputStream()
+
+            val ext = url.substringBefore("#")
+                .substringAfterLast(".")
+                .lowercase()
+            val format = when (ext) {
+                "png" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Bitmap.CompressFormat.WEBP_LOSSLESS else Bitmap.CompressFormat.PNG
+                "jpeg", "jpg" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Bitmap.CompressFormat.WEBP_LOSSY else Bitmap.CompressFormat.JPEG
+                else -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Bitmap.CompressFormat.WEBP_LOSSY else Bitmap.CompressFormat.WEBP
+            }
+
+            bitmap.compress(format, 90, output)
+
+            val responseBody = output.toByteArray().toResponseBody(mediaType)
+
+            return response.newBuilder()
+                .body(responseBody)
+                .build()
+        } finally {
+            bitmap.recycle()
         }
-
-        val output = ByteArrayOutputStream()
-
-        val ext = url.substringBefore("#")
-            .substringAfterLast(".")
-            .lowercase()
-        val format = when (ext) {
-            "png" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Bitmap.CompressFormat.WEBP_LOSSLESS else Bitmap.CompressFormat.PNG
-            "jpeg", "jpg" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Bitmap.CompressFormat.WEBP_LOSSY else Bitmap.CompressFormat.JPEG
-            else -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Bitmap.CompressFormat.WEBP_LOSSY else Bitmap.CompressFormat.WEBP
-        }
-
-        bitmap.compress(format, 90, output)
-
-        val responseBody = output.toByteArray().toResponseBody(mediaType)
-
-        return response.newBuilder()
-            .body(responseBody)
-            .build()
     }
 
     private fun createTextPaint(font: Typeface?): TextPaint {
@@ -157,9 +163,11 @@ class ComposedImageInterceptor(
         var dialogBox = createBoxLayout(dialog, textPaint)
 
         // The best way I've found to adjust the text in the dialog box (Especially in long dialogues)
-        while (dialogBox.height > dialog.height && textPaint.textSize >= 1.0f) {
+        var attempts = 0
+        while (dialogBox.height > dialog.height && textPaint.textSize >= 1.0f && attempts < 50) {
             textPaint.textSize -= 0.5f
             dialogBox = createBoxLayout(dialog, textPaint)
+            attempts++
         }
 
         textPaint.color = Color.BLACK

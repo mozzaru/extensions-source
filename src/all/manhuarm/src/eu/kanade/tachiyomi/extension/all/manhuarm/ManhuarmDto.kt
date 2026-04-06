@@ -54,10 +54,16 @@ data class Dialog(
             textByLanguage["text"]?.takeIf { it.isNotBlank() }?.let { return it }
         }
 
-        // 3. Try the origin language
+        // 3. If target is Indonesian, we strictly avoid falling back to other languages
+        // to prevent mixed-language content, unless Indonesian is the origin.
+        if (target == "id" && origin != "id") {
+            return ""
+        }
+
+        // 4. Try the origin language
         textByLanguage[origin]?.takeIf { it.isNotBlank() }?.let { return it }
 
-        // 4. Fallback sequence: English -> Chinese (if target is not English) -> Any non-blank (excluding "text" key if translator disabled)
+        // 5. Fallback sequence: English -> Chinese (if target is not English) -> Any non-blank (excluding "text" key if translator disabled)
         return textByLanguage["en"]?.takeIf { it.isNotBlank() }
             ?: textByLanguage["zh"]?.takeIf { it.isNotBlank() && target != "en" }
             ?: textByLanguage.entries.firstOrNull { (k, v) ->

@@ -36,13 +36,15 @@ class TranslationInterceptor(
         val dialogues = request.url.fragment?.parseAs<List<Dialog>>()
             ?: return chain.proceed(request)
 
-        val toTranslate = dialogues.filter { it.textByLanguage[language.target].isNullOrBlank() }
-        val alreadyTranslated = dialogues.filter { !it.textByLanguage[language.target].isNullOrBlank() }
+        val needsTranslation = dialogues.indices.filter {
+            dialogues[it].textByLanguage[language.target].isNullOrBlank()
+        }
 
-        val translated = if (toTranslate.isEmpty()) {
+        val translated = if (needsTranslation.isEmpty()) {
             dialogues
         } else {
-            runBlocking(Dispatchers.IO) {
+            val toTranslate = needsTranslation.map { dialogues[it] }
+            val translatedMap = runBlocking(Dispatchers.IO) {
                 toTranslate.chunked(BATCH_SIZE).map { chunk ->
                     async {
                         // Use a separator that is unlikely to be in the text and preserved by translators
@@ -52,23 +54,54 @@ class TranslationInterceptor(
                         val combinedText = chunk.joinToString(separator) { it.getBestSource(language.origin).second }
 
                         val translatedBatch = if (combinedText.isNotBlank()) {
-                            translator.translate(sourceLang, language.target, combinedText)
+                            try {
+                                translator.translate(sourceLang, language.target, combinedText)
+                            } catch (e: Exception) {
+                                ""
+                            }
                         } else {
                             ""
                         }
 
-                        val translatedTexts = translatedBatch.split(regexSeparator)
+                        var translatedTexts = translatedBatch.split(regexSeparator)
+                            .map { it.trim() }
+                            .filter { it.isNotBlank() }
 
-                        chunk.mapIndexed { index, dialog ->
-                            val text = translatedTexts.getOrNull(index)?.trim() ?: ""
-                            if (text.isNotBlank() && text != chunk[index].getBestSource(language.origin).second) {
-                                dialog.replaceText(text)
-                            } else {
-                                dialog
+                        // If batch translation fails or count mismatch, retry individual items
+                        if (translatedTexts.size != chunk.size) {
+                            chunk.map { dialog ->
+                                val source = dialog.getBestSource(language.origin).second
+                                if (source.isBlank()) return@map dialog
+
+                                try {
+                                    val result = translator.translate(sourceLang, language.target, source).trim()
+                                    if (result.isNotBlank() && result != source) {
+                                        dialog.replaceText(result)
+                                    } else {
+                                        dialog
+                                    }
+                                } catch (e: Exception) {
+                                    dialog
+                                }
+                            }
+                        } else {
+                            chunk.mapIndexed { index, dialog ->
+                                val text = translatedTexts[index]
+                                if (text.isNotBlank() && text != chunk[index].getBestSource(language.origin).second) {
+                                    dialog.replaceText(text)
+                                } else {
+                                    dialog
+                                }
                             }
                         }
                     }
-                }.awaitAll().flatten() + alreadyTranslated
+                }.awaitAll().flatten()
+            }
+
+            dialogues.toMutableList().apply {
+                needsTranslation.forEachIndexed { index, originalIndex ->
+                    this[originalIndex] = translatedMap[index]
+                }
             }
         }
 
