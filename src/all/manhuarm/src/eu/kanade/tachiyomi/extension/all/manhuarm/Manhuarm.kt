@@ -331,12 +331,11 @@ class Manhuarm(
 
         return dialog.mapIndexed { index, dto ->
             val page = pages.first { it.imageUrl?.contains(dto.imageUrl, true)!! }
-            val fragment = json.encodeToString<List<Dialog>>(
-                dto.dialogues.filter { it.getTextBy(language).isNotBlank() },
-            )
             if (dto.dialogues.isEmpty()) {
                 return@mapIndexed page
             }
+
+            val fragment = json.encodeToString<List<Dialog>>(dto.dialogues)
 
             Page(index, imageUrl = "${page.imageUrl}${fragment.toFragment()}")
         }
