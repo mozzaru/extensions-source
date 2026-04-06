@@ -38,10 +38,15 @@ class OcrUrlInterceptor(
         val requestBody = json.encodeToString(payload).toRequestBody(JSON_MEDIA_TYPE)
 
         val ocrHeaders = headers.newBuilder()
-            .add("Content-Type", "application/json")
-            .add("X-Requested-With", "XMLHttpRequest")
-            .add("Referer", url)
-            .add("Origin", url.substringBeforeLast("/manga/"))
+            .set("Content-Type", "application/json")
+            .set("X-Requested-With", "XMLHttpRequest")
+            .set("Referer", url)
+            .set("Origin", url.substringBeforeLast("/manga/"))
+            .set("Accept", "application/json, text/plain, */*")
+            .set("Sec-Fetch-Dest", "empty")
+            .set("Sec-Fetch-Mode", "cors")
+            .set("Sec-Fetch-Site", "same-origin")
+            .set("Accept-Language", "en-US,en;q=0.9,id;q=0.8")
             .build()
 
         val ocrResponse = try {

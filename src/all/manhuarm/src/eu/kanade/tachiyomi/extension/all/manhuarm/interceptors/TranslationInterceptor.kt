@@ -47,7 +47,8 @@ class TranslationInterceptor(
                     async {
                         // Use a separator that is unlikely to be in the text and preserved by translators
                         val separator = " ||| "
-                        val sourceLang = chunk.first().getBestSource(language.origin).first
+                        val regexSeparator = Regex("""\s*\|\|\|\s*""")
+                        val sourceLang = "auto"
                         val combinedText = chunk.joinToString(separator) { it.getBestSource(language.origin).second }
 
                         val translatedBatch = if (combinedText.isNotBlank()) {
@@ -56,11 +57,15 @@ class TranslationInterceptor(
                             ""
                         }
 
-                        val translatedTexts = translatedBatch.split(separator)
+                        val translatedTexts = translatedBatch.split(regexSeparator)
 
                         chunk.mapIndexed { index, dialog ->
                             val text = translatedTexts.getOrNull(index)?.trim() ?: ""
-                            dialog.replaceText(text)
+                            if (text.isNotBlank() && text != chunk[index].getBestSource(language.origin).second) {
+                                dialog.replaceText(text)
+                            } else {
+                                dialog
+                            }
                         }
                     }
                 }.awaitAll().flatten() + alreadyTranslated
@@ -79,7 +84,7 @@ class TranslationInterceptor(
     )
 
     companion object {
-        private const val BATCH_SIZE = 15
+        private const val BATCH_SIZE = 10
     }
 
     private fun Dialog.getBestSource(defaultOrigin: String): Pair<String, String> {

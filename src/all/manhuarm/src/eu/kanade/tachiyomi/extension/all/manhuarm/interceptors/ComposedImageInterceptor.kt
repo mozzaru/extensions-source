@@ -60,8 +60,11 @@ class ComposedImageInterceptor(
             return response
         }
 
-        val bitmap = BitmapFactory.decodeStream(response.body.byteStream())!!
-            .copy(Bitmap.Config.ARGB_8888, true)
+        val options = BitmapFactory.Options().apply {
+            inMutable = true
+        }
+        val bitmap = BitmapFactory.decodeStream(response.body.byteStream(), null, options)
+            ?: return response
 
         val canvas = Canvas(bitmap)
 
@@ -84,7 +87,7 @@ class ComposedImageInterceptor(
             else -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Bitmap.CompressFormat.WEBP_LOSSY else Bitmap.CompressFormat.WEBP
         }
 
-        bitmap.compress(format, 100, output)
+        bitmap.compress(format, 90, output)
 
         val responseBody = output.toByteArray().toResponseBody(mediaType)
 
