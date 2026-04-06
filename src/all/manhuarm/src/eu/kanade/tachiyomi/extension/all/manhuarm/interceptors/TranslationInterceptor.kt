@@ -57,7 +57,13 @@ class TranslationInterceptor(
                             try {
                                 translator.translate(sourceLang, language.target, combinedText)
                             } catch (e: Exception) {
-                                ""
+                                // Fallback to en/zh if auto fails
+                                try {
+                                    val source = chunk.firstOrNull()?.getBestSource(language.origin)?.first ?: "auto"
+                                    translator.translate(source, language.target, combinedText)
+                                } catch (_: Exception) {
+                                    ""
+                                }
                             }
                         } else {
                             ""
@@ -78,7 +84,14 @@ class TranslationInterceptor(
                                     if (result.isNotBlank() && result != source) {
                                         dialog.replaceText(result)
                                     } else {
-                                        dialog
+                                        // Specific retry for single item if auto fails
+                                        val sourceLangCode = dialog.getBestSource(language.origin).first
+                                        val secondResult = translator.translate(sourceLangCode, language.target, source).trim()
+                                        if (secondResult.isNotBlank() && secondResult != source) {
+                                            dialog.replaceText(secondResult)
+                                        } else {
+                                            dialog
+                                        }
                                     }
                                 } catch (e: Exception) {
                                     dialog
@@ -117,7 +130,7 @@ class TranslationInterceptor(
     )
 
     companion object {
-        private const val BATCH_SIZE = 10
+        private const val BATCH_SIZE = 20
     }
 
     private fun Dialog.getBestSource(defaultOrigin: String): Pair<String, String> {

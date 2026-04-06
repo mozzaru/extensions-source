@@ -46,6 +46,7 @@ class OcrUrlInterceptor(
             .set("Sec-Fetch-Dest", "empty")
             .set("Sec-Fetch-Mode", "cors")
             .set("Sec-Fetch-Site", "same-origin")
+            .set("Priority", "u=1, i")
             .set("Accept-Language", "en-US,en;q=0.9,id;q=0.8")
             .build()
 

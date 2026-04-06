@@ -90,7 +90,7 @@ class ComposedImageInterceptor(
                 else -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Bitmap.CompressFormat.WEBP_LOSSY else Bitmap.CompressFormat.WEBP
             }
 
-            bitmap.compress(format, 90, output)
+            bitmap.compress(format, 85, output)
 
             val responseBody = output.toByteArray().toResponseBody(mediaType)
 
