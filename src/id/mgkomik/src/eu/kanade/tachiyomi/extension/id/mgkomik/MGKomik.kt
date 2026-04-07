@@ -20,7 +20,7 @@ class MGKomik :
     ) {
     override val useLoadMoreRequest = LoadMoreStrategy.Always
 
-    override val useNewChapterEndpoint = false
+    override val useNewChapterEndpoint = true
 
     override val mangaSubString = "komik"
 
@@ -29,6 +29,7 @@ class MGKomik :
         add("Sec-Fetch-Mode", "navigate")
         add("Sec-Fetch-Site", "same-origin")
         add("Upgrade-Insecure-Requests", "1")
+        add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36")
         add("X-Requested-With", randomString((1..20).random())) // added for webview, and removed in interceptor for normal use
     }
 
@@ -50,7 +51,7 @@ class MGKomik :
         element.select("div.item-thumb a").let {
             setUrlWithoutDomain(it.attr("abs:href"))
             title = it.attr("title")
-            thumbnail_url = it.select("img").attr("abs:src")
+            thumbnail_url = it.selectFirst("img")?.let { img -> imageFromElement(img) }
         }
     }
 
