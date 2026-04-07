@@ -5,7 +5,10 @@ import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
+import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SManga
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.Request
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.text.SimpleDateFormat
@@ -29,7 +32,7 @@ class MGKomik :
         add("Sec-Fetch-Mode", "navigate")
         add("Sec-Fetch-Site", "same-origin")
         add("Upgrade-Insecure-Requests", "1")
-        add("X-Requested-With", randomString((1..20).random())) // added for webview, and removed in interceptor for normal use
+        add("X-Requested-With", randomString((1..20).random()))
     }
 
     override val client = network.cloudflareClient.newBuilder()
@@ -39,10 +42,43 @@ class MGKomik :
                 removeAll("X-Requested-With")
             }.build()
 
+            val url = request.url
+            if (url.host.contains("wp.com")) {
+                val path = url.encodedPath
+                val newUrl = if (path.contains('.')) {
+                    val originalUrl = "https://" + path.substringAfter("/")
+                    originalUrl.toHttpUrl().newBuilder()
+                } else {
+                    url.newBuilder()
+                }
+                    .removeAllQueryParameters("quality")
+                    .removeAllQueryParameters("resize")
+                    .removeAllQueryParameters("w")
+                    .removeAllQueryParameters("h")
+                    .removeAllQueryParameters("strip")
+                    .removeAllQueryParameters("fit")
+                    .build()
+
+                return@addInterceptor chain.proceed(
+                    request.newBuilder()
+                        .headers(headers)
+                        .url(newUrl)
+                        .build(),
+                )
+            }
+
             chain.proceed(request.newBuilder().headers(headers).build())
         }
         .rateLimit(9, 2)
         .build()
+
+    // ================================== Image ====================================
+
+    override fun imageRequest(page: Page): Request {
+        return super.imageRequest(page).newBuilder()
+            .addHeader("Referer", baseUrl)
+            .build()
+    }
 
     // ================================== Popular ======================================
 
