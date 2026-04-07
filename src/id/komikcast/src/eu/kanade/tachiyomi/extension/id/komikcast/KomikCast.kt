@@ -31,8 +31,10 @@ class KomikCast : HttpSource() {
     override fun headersBuilder(): Headers.Builder = super.headersBuilder()
         .add("Referer", "$baseUrl/")
         .add("Origin", baseUrl)
-        .add("Accept", "application/json")
         .add("Accept-language", "en-US,en;q=0.9,id;q=0.8")
+
+    private fun apiHeadersBuilder(): Headers.Builder = headersBuilder()
+        .add("Accept", "application/json")
 
     override fun popularMangaRequest(page: Int): Request {
         val url = "$apiUrl/series".toHttpUrl().newBuilder()
@@ -42,7 +44,7 @@ class KomikCast : HttpSource() {
             .addQueryParameter("take", "12")
             .addQueryParameter("page", page.toString())
             .build()
-        return GET(url, headers)
+        return GET(url, apiHeadersBuilder().build())
     }
 
     override fun popularMangaParse(response: Response): MangasPage = parseSeriesListResponse(response)
@@ -55,7 +57,7 @@ class KomikCast : HttpSource() {
             .addQueryParameter("take", "12")
             .addQueryParameter("page", page.toString())
             .build()
-        return GET(url, headers)
+        return GET(url, apiHeadersBuilder().build())
     }
 
     override fun latestUpdatesParse(response: Response): MangasPage = parseSeriesListResponse(response)
@@ -74,7 +76,7 @@ class KomikCast : HttpSource() {
             it.addToUri(url)
         }
 
-        return GET(url.build(), headers)
+        return GET(url.build(), apiHeadersBuilder().build())
     }
 
     override fun searchMangaParse(response: Response): MangasPage = parseSeriesListResponse(response)
@@ -88,7 +90,7 @@ class KomikCast : HttpSource() {
     override fun mangaDetailsRequest(manga: SManga): Request {
         val path = "$baseUrl${manga.url}".toHttpUrl().pathSegments
         val slug = path[1]
-        return GET("$apiUrl/series/$slug", headers)
+        return GET("$apiUrl/series/$slug", apiHeadersBuilder().build())
     }
 
     override fun mangaDetailsParse(response: Response): SManga {
@@ -99,7 +101,7 @@ class KomikCast : HttpSource() {
     override fun chapterListRequest(manga: SManga): Request {
         val path = "$baseUrl${manga.url}".toHttpUrl().pathSegments
         val slug = path[1]
-        return GET("$apiUrl/series/$slug/chapters", headers)
+        return GET("$apiUrl/series/$slug/chapters", apiHeadersBuilder().build())
     }
 
     override fun chapterListParse(response: Response): List<SChapter> {
@@ -112,13 +114,13 @@ class KomikCast : HttpSource() {
         if (chapter.url.startsWith("/chapter/")) {
             val slug = chapter.url.substringAfter("/chapter/").substringBefore("-chapter-")
             val chapterIndex = chapter.url.substringAfter("-chapter-").substringBefore("-bahasa-")
-            return GET("$apiUrl/series/$slug/chapters/$chapterIndex", headers)
+            return GET("$apiUrl/series/$slug/chapters/$chapterIndex", apiHeadersBuilder().build())
         }
 
         val path = "$baseUrl${chapter.url}".toHttpUrl().pathSegments
         val slug = path[1]
         val chapterIndex = path[3]
-        return GET("$apiUrl/series/$slug/chapters/$chapterIndex", headers)
+        return GET("$apiUrl/series/$slug/chapters/$chapterIndex", apiHeadersBuilder().build())
     }
 
     override fun pageListParse(response: Response): List<Page> {
