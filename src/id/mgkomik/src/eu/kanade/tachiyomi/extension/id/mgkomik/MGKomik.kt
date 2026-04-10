@@ -39,6 +39,25 @@ class MGKomik :
                 removeAll("X-Requested-With")
             }.build()
 
+            val url = request.url
+            if (url.host.contains("wp.com")) {
+                val newUrl = url.newBuilder()
+                    .removeAllQueryParameters("quality")
+                    .removeAllQueryParameters("resize")
+                    .removeAllQueryParameters("w")
+                    .removeAllQueryParameters("h")
+                    .removeAllQueryParameters("strip")
+                    .removeAllQueryParameters("fit")
+                    .build()
+
+                return@addInterceptor chain.proceed(
+                    request.newBuilder()
+                        .headers(headers)
+                        .url(newUrl)
+                        .build(),
+                )
+            }
+
             chain.proceed(request.newBuilder().headers(headers).build())
         }
         .rateLimit(9, 2)
