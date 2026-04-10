@@ -6,6 +6,7 @@ import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.SManga
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.text.SimpleDateFormat
@@ -41,7 +42,13 @@ class MGKomik :
 
             val url = request.url
             if (url.host.contains("wp.com")) {
-                val newUrl = url.newBuilder()
+                val path = url.encodedPath
+                val newUrl = if (path.contains('.')) {
+                    val originalUrl = "https://" + path.substringAfter("/")
+                    originalUrl.toHttpUrl().newBuilder()
+                } else {
+                    url.newBuilder()
+                }
                     .removeAllQueryParameters("quality")
                     .removeAllQueryParameters("resize")
                     .removeAllQueryParameters("w")
