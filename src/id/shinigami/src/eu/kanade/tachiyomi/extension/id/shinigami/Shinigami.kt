@@ -1,13 +1,17 @@
 package eu.kanade.tachiyomi.extension.id.shinigami
 
+import androidx.preference.ListPreference
+import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
+import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
+import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.parseAs
 import keiyoushi.utils.tryParse
 import okhttp3.Headers
@@ -17,21 +21,25 @@ import okhttp3.Response
 import java.text.SimpleDateFormat
 import java.util.Locale
 
-class Shinigami : HttpSource() {
+class Shinigami :
+    HttpSource(),
+    ConfigurableSource {
     // moved from Reaper Scans (id) to Shinigami (id)
     override val id = 3411809758861089969
 
     override val name = "Shinigami"
 
-    override val baseUrl = "https://c.shinigami.asia"
+    override val baseUrl = "https://e.shinigami.asia"
 
     private val apiUrl = "https://api.shngm.io"
 
-    private val cdnUrl = "https://storage.shngm.id"
+    private val cdnUrl = "https://assets.shngm.id"
 
     override val lang = "id"
 
     override val supportsLatest = true
+
+    private val preferences by getPreferencesLazy()
 
     private val apiHeaders: Headers by lazy { apiHeadersBuilder().build() }
 
@@ -39,7 +47,9 @@ class Shinigami : HttpSource() {
         .addInterceptor { chain ->
             val request = chain.request()
             val headers = request.headers.newBuilder().apply {
-                removeAll("X-Requested-With")
+                if (!request.url.toString().contains("shngm.id")) {
+                    removeAll("X-Requested-With")
+                }
             }.build()
 
             chain.proceed(request.newBuilder().headers(headers).build())
@@ -48,6 +58,7 @@ class Shinigami : HttpSource() {
         .build()
 
     override fun headersBuilder(): Headers.Builder = super.headersBuilder()
+        .set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         .add("X-Requested-With", randomString((1..20).random())) // added for webview, and removed in interceptor for normal use
 
     private fun randomString(length: Int) = buildString {
@@ -228,9 +239,16 @@ class Shinigami : HttpSource() {
 
     override fun pageListParse(response: Response): List<Page> {
         val result = response.parseAs<ShinigamiPageListDto>()
+        val quality = preferences.getString(IMAGE_QUALITY_PREF, IMAGE_QUALITY_DEFAULT)
+
+        val host = if (quality == "low") {
+            result.pageList.baseUrlLow ?: result.pageList.baseUrl ?: cdnUrl
+        } else {
+            result.pageList.baseUrl ?: cdnUrl
+        }
 
         return result.pageList.chapterPage.pages.mapIndexed { index, imageName ->
-            Page(index = index, imageUrl = "$cdnUrl${result.pageList.chapterPage.path}$imageName")
+            Page(index = index, imageUrl = "$host${result.pageList.chapterPage.path}$imageName")
         }
     }
 
@@ -248,7 +266,21 @@ class Shinigami : HttpSource() {
         return GET(page.imageUrl!!, newHeaders)
     }
 
+    override fun setupPreferenceScreen(screen: PreferenceScreen) {
+        ListPreference(screen.context).apply {
+            key = IMAGE_QUALITY_PREF
+            title = "Kualitas gambar"
+            entries = arrayOf("Tinggi", "Rendah")
+            entryValues = arrayOf("high", "low")
+            summary = "%s"
+            setDefaultValue(IMAGE_QUALITY_DEFAULT)
+        }.also(screen::addPreference)
+    }
+
     companion object {
+        private const val IMAGE_QUALITY_PREF = "image_quality"
+        private const val IMAGE_QUALITY_DEFAULT = "high"
+
         val dateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.ENGLISH)
     }
 }
