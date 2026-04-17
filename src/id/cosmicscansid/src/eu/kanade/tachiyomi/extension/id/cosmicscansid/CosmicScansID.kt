@@ -18,16 +18,13 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.jsoup.nodes.Element
 import org.jsoup.select.Elements
-import java.text.SimpleDateFormat
-import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 class CosmicScansID :
     MangaThemesia(
         "CosmicScans.id",
-        "https://lc5.cosmicscans.asia",
+        "https://lc6.cosmicscans.asia",
         "id",
-        dateFormat = SimpleDateFormat("MMMM dd, yyyy", Locale("id")),
     ),
     ConfigurableSource {
 
@@ -46,6 +43,9 @@ class CosmicScansID :
 
     override fun headersBuilder() = super.headersBuilder()
         .setRandomUserAgent()
+        .set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
+        .set("Accept-Language", "en-US,en;q=0.9,id;q=0.8")
+        .set("Upgrade-Insecure-Requests", "1")
 
     override fun getMangaUrl(manga: SManga) = "$baseUrl${manga.url}"
 
@@ -101,7 +101,7 @@ class CosmicScansID :
     override fun Elements.imgAttr(): String = this.first()?.imgAttr() ?: ""
 
     // pages
-    override val pageSelector = "div#readerarea img:not(noscript img):not([alt=''])"
+    override val pageSelector = "div#readerarea img:not(noscript img):not([alt='']):not([src*='kswp_ad']):not([src$='.gif']):not(.social-distancing)"
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         screen.addRandomUAPreference()
