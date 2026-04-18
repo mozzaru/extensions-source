@@ -22,7 +22,6 @@ import keiyoushi.utils.parseAs
 import keiyoushi.utils.toJsonString
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
@@ -41,18 +40,19 @@ class MGKomikBeta :
 
     private val json: Json by injectLazy()
 
-    override fun OkHttpClient.Builder.customizeClient() = rateLimit(4)
+    override fun OkHttpClient.Builder.customizeClient() = rateLimit(2)
 
     override fun headersBuilder() = super.headersBuilder().apply {
-        add("Sec-Fetch-Dest", "document")
-        add("Sec-Fetch-Mode", "navigate")
-        add("Sec-Fetch-Site", "same-origin")
-        add("Upgrade-Insecure-Requests", "1")
+        set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+        set("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
     }
+
+    override fun popularMangaRequest(page: Int) = searchMangaRequest(page, "", SortFilter.popular)
+    override fun latestUpdatesRequest(page: Int) = searchMangaRequest(page, "", SortFilter.latest)
 
     override fun imageRequest(page: Page): Request {
         val newHeaders = headersBuilder().apply {
-            set("Accept", "image/avif,image/webp,image/png,image/jpeg,*/*")
+            set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
             set("Referer", page.url)
             removeAll("Upgrade-Insecure-Requests")
         }.build()
@@ -62,45 +62,59 @@ class MGKomikBeta :
 
     private var nonce: String? = null
 
+    @Synchronized
     private fun fetchNonce(): String {
         if (nonce != null) return nonce!!
 
-        // 1. Try to get it from the homepage first as it's often more reliable
-        try {
-            val response = client.newCall(GET(baseUrl, headers)).execute().body.string()
-            val document = Jsoup.parse(response)
-            nonce = document.selectFirst("input[name=search_nonce], input[name=nonce]")?.attr("value")
+        val ajaxHeaders = headersBuilder()
+            .set("Accept", "*/*")
+            .set("X-Requested-With", "XMLHttpRequest")
+            .set("Referer", "$baseUrl/")
+            .build()
 
-            if (nonce == null) {
-                // Regex for common nonce patterns in scripts
-                nonce = Regex("""["'](?:nonce|search_nonce|security|wp_manga_nonce)["']\s*:\s*["']([a-z0-9]{10})["']""").find(response)?.groupValues?.get(1)
-            }
+        // 1. Try AJAX search_form action (most common for NatsuId)
+        try {
+            val url = "$baseUrl/wp-admin/admin-ajax.php?type=search_form&action=get_nonce"
+            val response = client.newCall(GET(url, ajaxHeaders)).execute().body.string()
+            nonce = Jsoup.parseBodyFragment(response).selectFirst("input[name=search_nonce]")?.attr("value")
+                ?: Regex("""["']nonce["']\s*[:=]\s*["']([a-z0-9]{10})["']""").find(response)?.groupValues?.get(1)
         } catch (_: Exception) {}
 
         if (nonce != null) return nonce!!
 
-        // 2. Try AJAX endpoint
+        // 2. Try other AJAX actions
+        for (action in listOf("get_nonce", "natsu_get_nonce", "get_search_nonce")) {
+            try {
+                val url = "$baseUrl/wp-admin/admin-ajax.php?action=$action"
+                val response = client.newCall(GET(url, ajaxHeaders)).execute().body.string()
+                nonce = Jsoup.parseBodyFragment(response).selectFirst("input[name$=_nonce], input[name$=security]")?.attr("value")
+                    ?: Regex("""["']nonce["']\s*[:=]\s*["']([a-z0-9]{10})["']""").find(response)?.groupValues?.get(1)
+                if (nonce != null) break
+            } catch (_: Exception) {}
+        }
+
+        if (nonce != null) return nonce!!
+
+        // 3. Try to find nonce in the homepage HTML regex
         try {
-            val url = "$baseUrl/wp-admin/admin-ajax.php?type=search_form&action=get_nonce"
-            val response = client.newCall(GET(url, headers.newBuilder().add("X-Requested-With", "XMLHttpRequest").build())).execute().body.string()
-
-            nonce = Jsoup.parseBodyFragment(response).selectFirst("input[name=search_nonce]")?.attr("value")
-
-            if (nonce == null && response.contains("{")) {
-                val jsonStr = transformJsonResponse(response)
-                val data = json.decodeFromString<kotlinx.serialization.json.JsonObject>(jsonStr)["data"]?.jsonPrimitive?.content
-                if (data != null) {
-                    nonce = Jsoup.parseBodyFragment(data).selectFirst("input[name=search_nonce]")?.attr("value")
-                }
-            }
+            val response = client.newCall(GET(baseUrl, headers)).execute().body.string()
+            nonce = Regex("""["']nonce["']\s*[:=]\s*["']([a-z0-9]{10})["']""").find(response)?.groupValues?.get(1)
+                ?: Regex("""["']security["']\s*[:=]\s*["']([a-z0-9]{10})["']""").find(response)?.groupValues?.get(1)
+                ?: Regex("""natsu_nonce["']\s*[:=]\s*["']([a-z0-9]{10})["']""").find(response)?.groupValues?.get(1)
+                ?: Jsoup.parse(response).selectFirst("input[name$=_nonce], input[name$=security]")?.attr("value")
         } catch (_: Exception) {}
 
-        return nonce ?: throw Exception("Unable to get nonce")
+        return nonce ?: throw Exception("Unable to get nonce (Beta)")
     }
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
         val url = "$baseUrl/wp-admin/admin-ajax.php?action=advanced_search"
-        val ajaxHeaders = headersBuilder().add("X-Requested-With", "XMLHttpRequest").build()
+        val ajaxHeaders = headersBuilder()
+            .set("Accept", "*/*")
+            .set("X-Requested-With", "XMLHttpRequest")
+            .set("Referer", "$baseUrl/")
+            .build()
+
         val body = MultipartBody.Builder().apply {
             setType(MultipartBody.FORM)
             addFormDataPart("nonce", fetchNonce())
@@ -143,10 +157,10 @@ class MGKomikBeta :
         }
 
         val document = Jsoup.parseBodyFragment(body, baseUrl)
-        val slugs = document.select("div > a:has(img)").mapNotNull {
-            val href = it.attr("href")
-            if (href.contains("/komik/") || href.contains("/manga/")) {
-                href.removeSuffix("/").toHttpUrl().pathSegments.last()
+        val slugs = document.select("a").mapNotNull {
+            val href = it.attr("abs:href")
+            if (href.contains("/komik/") || href.contains("/manga/") || href.contains("/series/")) {
+                href.removeSuffix("/").substringAfterLast("/")
             } else {
                 null
             }
@@ -189,7 +203,7 @@ class MGKomikBeta :
         val httpUrl = url.toHttpUrl()
         val isMangaUrl = httpUrl.host == baseUrl.toHttpUrl().host &&
             httpUrl.pathSegments.size >= 2 &&
-            (httpUrl.pathSegments[0] == "komik" || httpUrl.pathSegments[0] == "manga")
+            (httpUrl.pathSegments[0] == "komik" || httpUrl.pathSegments[0] == "manga" || httpUrl.pathSegments[0] == "series")
 
         if (isMangaUrl) {
             val slug = httpUrl.pathSegments[1]
@@ -201,8 +215,11 @@ class MGKomikBeta :
             return client.newCall(GET(restUrl, headers))
                 .asObservableSuccess()
                 .map { response ->
-                    val manga = response.body.string().let { transformJsonResponse(it) }
-                        .let { json.decodeFromString<List<Manga>>(it) }[0]
+                    val mangaList = response.body.string().let { transformJsonResponse(it) }
+                        .let { json.decodeFromString<List<Manga>>(it) }
+
+                    if (mangaList.isEmpty()) throw Exception("Manga not found")
+                    val manga = mangaList[0]
 
                     if (manga.embedded.getTerms("type").contains("Novel")) {
                         throw Exception("Novels are not supported")
