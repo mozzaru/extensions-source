@@ -7,4 +7,5 @@ class MGKomikBeta :
         "MG Komik Beta",
         "https://web.mgkomik.cc",
         "id",
+        "/komik",
     )
