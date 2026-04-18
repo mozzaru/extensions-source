@@ -14,9 +14,10 @@ class SoulScans : MangaThemesia("Soul Scans", "https://soulscans.my.id", "id") {
         add("Sec-Fetch-Dest", "document")
         add("Sec-Fetch-Mode", "navigate")
         add("Sec-Fetch-Site", "same-origin")
+        add("Sec-Fetch-User", "?1")
         add("Upgrade-Insecure-Requests", "1")
-        add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36")
-        add("X-Requested-With", randomString((1..20).random())) // added for webview, and removed in interceptor for normal use
+        add("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Mobile Safari/537.36")
+        add("X-Requested-With", "com.${randomString((3..6).random())}.${randomString((3..6).random())}") // added for webview, and removed in interceptor for normal use
     }
 
     override val hasProjectPage = true
