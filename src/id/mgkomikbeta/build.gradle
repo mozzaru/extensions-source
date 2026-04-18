@@ -1,0 +1,10 @@
+ext {
+    extName = 'MG Komik Beta'
+    extClass = '.MGKomikBeta'
+    themePkg = 'mangathemesia'
+    baseUrl = 'https://web.mgkomik.cc'
+    overrideVersionCode = 1
+    isNsfw = false
+}
+
+apply from: "$rootDir/common.gradle"
