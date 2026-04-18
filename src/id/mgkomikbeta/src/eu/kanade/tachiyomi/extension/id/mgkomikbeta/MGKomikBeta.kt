@@ -16,6 +16,7 @@ import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SManga
+import eu.kanade.tachiyomi.util.asJsoup
 import keiyoushi.utils.firstInstance
 import keiyoushi.utils.firstInstanceOrNull
 import keiyoushi.utils.parseAs
@@ -30,6 +31,7 @@ import okhttp3.Response
 import org.jsoup.Jsoup
 import rx.Observable
 import uy.kohesive.injekt.injectLazy
+import kotlin.random.Random
 
 class MGKomikBeta :
     NatsuId(
@@ -41,6 +43,18 @@ class MGKomikBeta :
     private val json: Json by injectLazy()
 
     override fun OkHttpClient.Builder.customizeClient() = rateLimit(2)
+        .addInterceptor { chain ->
+            val request = chain.request()
+            val url = request.url.toString()
+            if (url.contains("admin-ajax.php") || url.contains("wp-json")) {
+                val newRequest = request.newBuilder()
+                    .header("X-Requested-With", "XMLHttpRequest")
+                    .build()
+                chain.proceed(newRequest)
+            } else {
+                chain.proceed(request)
+            }
+        }
 
     override fun headersBuilder() = super.headersBuilder().apply {
         set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
@@ -72,36 +86,33 @@ class MGKomikBeta :
             .set("Referer", "$baseUrl/")
             .build()
 
-        // 1. Try AJAX search_form action (most common for NatsuId)
-        try {
-            val url = "$baseUrl/wp-admin/admin-ajax.php?type=search_form&action=get_nonce"
-            val response = client.newCall(GET(url, ajaxHeaders)).execute().body.string()
-            nonce = Jsoup.parseBodyFragment(response).selectFirst("input[name=search_nonce]")?.attr("value")
-                ?: Regex("""["']nonce["']\s*[:=]\s*["']([a-z0-9]{10})["']""").find(response)?.groupValues?.get(1)
-        } catch (_: Exception) {}
+        // 1. Try various AJAX actions
+        val actions = listOf(
+            "get_nonce&type=search_form",
+            "get_nonce",
+            "natsu_get_nonce",
+            "get_search_nonce",
+            "search_nonce",
+            "natsu_search_nonce",
+        )
 
-        if (nonce != null) return nonce!!
-
-        // 2. Try other AJAX actions
-        for (action in listOf("get_nonce", "natsu_get_nonce", "get_search_nonce")) {
+        for (action in actions) {
             try {
                 val url = "$baseUrl/wp-admin/admin-ajax.php?action=$action"
                 val response = client.newCall(GET(url, ajaxHeaders)).execute().body.string()
-                nonce = Jsoup.parseBodyFragment(response).selectFirst("input[name$=_nonce], input[name$=security]")?.attr("value")
-                    ?: Regex("""["']nonce["']\s*[:=]\s*["']([a-z0-9]{10})["']""").find(response)?.groupValues?.get(1)
+                nonce = Jsoup.parseBodyFragment(response).selectFirst("input[name$=_nonce], input[name$=security], input[name=search_nonce]")?.attr("value")
+                    ?: Regex("""["'](?:nonce|security|natsu_nonce)["']\s*[:=]\s*["']([a-z0-9]{10})["']""").find(response)?.groupValues?.get(1)
                 if (nonce != null) break
             } catch (_: Exception) {}
         }
 
         if (nonce != null) return nonce!!
 
-        // 3. Try to find nonce in the homepage HTML regex
+        // 2. Try to find nonce in the homepage HTML
         try {
             val response = client.newCall(GET(baseUrl, headers)).execute().body.string()
-            nonce = Regex("""["']nonce["']\s*[:=]\s*["']([a-z0-9]{10})["']""").find(response)?.groupValues?.get(1)
-                ?: Regex("""["']security["']\s*[:=]\s*["']([a-z0-9]{10})["']""").find(response)?.groupValues?.get(1)
-                ?: Regex("""natsu_nonce["']\s*[:=]\s*["']([a-z0-9]{10})["']""").find(response)?.groupValues?.get(1)
-                ?: Jsoup.parse(response).selectFirst("input[name$=_nonce], input[name$=security]")?.attr("value")
+            nonce = Regex("""["'](?:nonce|security|natsu_nonce)["']\s*[:=]\s*["']([a-z0-9]{10})["']""").find(response)?.groupValues?.get(1)
+                ?: Jsoup.parse(response).selectFirst("input[name$=_nonce], input[name$=security], input[name=search_nonce]")?.attr("value")
         } catch (_: Exception) {}
 
         return nonce ?: throw Exception("Unable to get nonce (Beta)")
@@ -246,5 +257,44 @@ class MGKomikBeta :
     override fun transformJsonResponse(responseBody: String): String {
         val jsonStart = responseBody.indexOfFirst { it == '{' || it == '[' }
         return if (jsonStart >= 0) responseBody.substring(jsonStart) else responseBody
+    }
+
+    override fun mangaDetailsRequest(manga: SManga): Request {
+        val id = getMangaIdBeta(manga)
+        val appendId = !manga.url.startsWith("{")
+
+        return GET("$baseUrl/wp-json/wp/v2/manga/$id?_embed#$appendId", headers)
+    }
+
+    override fun chapterListRequest(manga: SManga): Request {
+        val id = getMangaIdBeta(manga)
+
+        val url = "$baseUrl/wp-admin/admin-ajax.php".toHttpUrl().newBuilder()
+            .addQueryParameter("manga_id", id)
+            .addQueryParameter("page", "${Random.nextInt(99, 9999)}")
+            .addQueryParameter("action", "chapter_list")
+            .build()
+
+        return GET(url, headers)
+    }
+
+    private val descriptionIdRegex = Regex("""ID: (\d+)""")
+
+    private fun getMangaIdBeta(manga: SManga): String {
+        if (manga.url.startsWith("{")) {
+            return manga.url.parseAs<eu.kanade.tachiyomi.multisrc.natsuid.MangaUrl>().id.toString()
+        }
+        val descId = descriptionIdRegex.find(manga.description.orEmpty())?.groupValues?.get(1)
+        if (descId != null) return descId
+
+        return client.newCall(GET(getMangaUrl(manga), headers)).execute().use { response ->
+            val document = response.asJsoup()
+            document.selectFirst("link[rel=shortlink]")?.attr("href")?.substringAfter("?p=")
+                ?: document.selectFirst("#gallery-list")?.attr("hx-get")?.substringAfter("manga_id=")?.substringBefore("&")
+                ?: document.select("script").mapNotNull {
+                    Regex("""manga_id\s*[:=]\s*["']?(\d+)""").find(it.data())?.groupValues?.get(1)
+                }.firstOrNull()
+                ?: throw Exception("Could not find manga ID")
+        }
     }
 }
