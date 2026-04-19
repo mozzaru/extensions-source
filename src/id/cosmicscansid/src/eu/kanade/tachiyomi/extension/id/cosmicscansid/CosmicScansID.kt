@@ -20,7 +20,6 @@ import org.jsoup.nodes.Element
 import org.jsoup.select.Elements
 import java.text.SimpleDateFormat
 import java.util.Locale
-import java.util.concurrent.TimeUnit
 
 class CosmicScansID :
     MangaThemesia(
@@ -64,30 +63,30 @@ class CosmicScansID :
     }
 
     override val client: OkHttpClient = network.cloudflareClient.newBuilder()
-    .addInterceptor { chain ->
-        val request = chain.request()
-        val headers = request.headers.newBuilder().apply {
-            val url = request.url.toString()
-            if (url.contains(".jpg") || url.contains(".png") ||
-                url.contains(".webp") || url.contains(".jpeg")) {
-                set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
-                set("Sec-Fetch-Dest", "image")
-                set("Sec-Fetch-Mode", "no-cors")
-                set("Sec-Fetch-Site", "cross-site")
+        .addInterceptor { chain ->
+            val request = chain.request()
+            val headers = request.headers.newBuilder().apply {
+                val url = request.url.toString()
+                if (url.contains(".jpg") || url.contains(".png") ||
+                    url.contains(".webp") || url.contains(".jpeg")
+                ) {
+                    set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+                    set("Sec-Fetch-Dest", "image")
+                    set("Sec-Fetch-Mode", "no-cors")
+                    set("Sec-Fetch-Site", "cross-site")
+                }
+            }.build()
+
+            val response = chain.proceed(request.newBuilder().headers(headers).build())
+
+            if (response.code == 403 || response.code == 503) {
+                response.close()
+                throw Exception("Cloudflare block. Buka WebView untuk verifikasi manual.")
             }
-        }.build()
-
-        val response = chain.proceed(request.newBuilder().headers(headers).build())
-
-        if (response.code == 403 || response.code == 503) {
-            response.close()
-            throw Exception("Cloudflare block. Buka WebView untuk verifikasi manual.")
+            response
         }
-
-        response
-    }
-    .rateLimit(3)
-    .build()
+        .rateLimit(3)
+        .build()
 
     override val hasProjectPage = true
 
