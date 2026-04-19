@@ -43,9 +43,12 @@ class MGKomikBeta : ParsedHttpSource() {
     override fun popularMangaSelector() = ".manga-card"
 
     override fun popularMangaFromElement(element: Element) = SManga.create().apply {
-        val a = element.selectFirst(".card-info a.manga-title")!!
+        val a = element.selectFirst(".card-info a.manga-title-link")
+            ?: element.selectFirst(".card-info a.manga-title")
+            ?: element.selectFirst("a[href*='/komik/']")!!
         setUrlWithoutDomain(a.attr("abs:href"))
-        title = a.text().trim()
+        title = element.selectFirst(".manga-title")?.text()?.trim()
+            ?: a.text().trim()
         thumbnail_url = element.selectFirst("img.manga-cover")?.attr("abs:src")
     }
 
