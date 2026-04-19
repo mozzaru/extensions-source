@@ -48,6 +48,10 @@ class CosmicScansID :
         .setRandomUserAgent()
         .set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
         .set("Accept-Language", "en-US,en;q=0.9,id;q=0.8")
+        .set("Sec-Fetch-Dest", "document")
+        .set("Sec-Fetch-Mode", "navigate")
+        .set("Sec-Fetch-Site", "none")
+        .set("Sec-Fetch-User", "?1")
         .set("Upgrade-Insecure-Requests", "1")
 
     override fun getMangaUrl(manga: SManga) = "$baseUrl${manga.url}"
@@ -59,9 +63,31 @@ class CosmicScansID :
         else -> preferences.prefBaseUrl
     }
 
-    override val client: OkHttpClient = super.client.newBuilder()
-        .rateLimit(20, 4, TimeUnit.SECONDS)
-        .build()
+    override val client: OkHttpClient = network.cloudflareClient.newBuilder()
+    .addInterceptor { chain ->
+        val request = chain.request()
+        val headers = request.headers.newBuilder().apply {
+            val url = request.url.toString()
+            if (url.contains(".jpg") || url.contains(".png") ||
+                url.contains(".webp") || url.contains(".jpeg")) {
+                set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+                set("Sec-Fetch-Dest", "image")
+                set("Sec-Fetch-Mode", "no-cors")
+                set("Sec-Fetch-Site", "cross-site")
+            }
+        }.build()
+
+        val response = chain.proceed(request.newBuilder().headers(headers).build())
+
+        if (response.code == 403 || response.code == 503) {
+            response.close()
+            throw Exception("Cloudflare block. Buka WebView untuk verifikasi manual.")
+        }
+
+        response
+    }
+    .rateLimit(3)
+    .build()
 
     override val hasProjectPage = true
 
