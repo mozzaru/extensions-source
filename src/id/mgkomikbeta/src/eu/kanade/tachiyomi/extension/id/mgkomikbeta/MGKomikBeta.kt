@@ -8,6 +8,7 @@ import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.ParsedHttpSource
+import keiyoushi.utils.tryParse
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.jsoup.nodes.Document
@@ -36,6 +37,7 @@ class MGKomikBeta : ParsedHttpSource() {
     }
 
     // ========== POPULAR ==========
+
     override fun popularMangaRequest(page: Int) = GET("$baseUrl/komik/?order_by=views&page=$page", headers)
 
     override fun popularMangaSelector() = ".manga-card"
@@ -49,36 +51,43 @@ class MGKomikBeta : ParsedHttpSource() {
 
     override fun popularMangaNextPageSelector() = ".pagination .next, a[href*='page=']:contains(Next)"
 
+    // ========== LATEST ==========
+
     override fun latestUpdatesRequest(page: Int) = GET("$baseUrl/komik/?order_by=latest&page=$page", headers)
 
     override fun latestUpdatesSelector() = popularMangaSelector()
+
     override fun latestUpdatesFromElement(element: Element) = popularMangaFromElement(element)
+
     override fun latestUpdatesNextPageSelector() = popularMangaNextPageSelector()
 
-    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
-        val url = StringBuilder("$baseUrl/komik/?page=$page")
+    // ========== SEARCH ==========
 
+    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
         if (query.isNotBlank()) {
             return GET("$baseUrl/search/?q=${query.trim()}&page=$page", headers)
         }
 
+        val url = StringBuilder("$baseUrl/komik/?page=$page")
         filters.forEach { filter ->
             when (filter) {
                 is OrderFilter -> url.append("&order_by=${filter.selected}")
                 is GenreFilter -> if (filter.selected.isNotBlank()) url.append("&filter=${filter.selected}")
-                is StatusFilter -> if (filter.isCompleted) url.append("&completed=1")
+                is StatusFilter -> if (filter.state) url.append("&completed=1")
                 else -> {}
             }
         }
-
         return GET(url.toString(), headers)
     }
 
     override fun searchMangaSelector() = popularMangaSelector()
+
     override fun searchMangaFromElement(element: Element) = popularMangaFromElement(element)
+
     override fun searchMangaNextPageSelector() = popularMangaNextPageSelector()
 
     // ========== FILTERS ==========
+
     override fun getFilterList() = FilterList(
         Filter.Header("Filter tidak berlaku saat pencarian teks"),
         OrderFilter(),
@@ -94,33 +103,48 @@ class MGKomikBeta : ParsedHttpSource() {
         val selected get() = if (state == 0) "latest" else "views"
     }
 
-    class StatusFilter : Filter.CheckBox("Hanya Completed") {
-        val isCompleted get() = state
-    }
+    class StatusFilter : Filter.CheckBox("Hanya Completed")
 
     class GenreFilter :
         Filter.Select<String>(
             "Genre / Type",
             arrayOf(
-                "Semua", "manga", "manhua", "manhwa",
-                "action", "adaptation", "adult", "adventure", "age-gap",
-                "animals", "another-chance", "apocalypse", "based-on-a-novel",
-                "comedy", "cooking", "drama", "dungeons", "ecchi", "fantasy",
-                "game", "gender-bender", "harem", "historical", "horror",
-                "isekai", "josei", "magic", "martial-arts", "mature",
-                "mecha", "military", "monster-girls", "mystery", "noir",
-                "office-workers", "overpowered-mc", "psychological", "reincarnation",
-                "romance", "school-life", "sci-fi", "seinen", "shoujo",
-                "shounen", "slice-of-life", "sports", "super-powers",
-                "supernatural", "survival", "system", "time-travel",
-                "tragedy", "vampires", "video-games", "villainess", "webtoons",
-                "zombies",
+                "Semua", "Manga", "Manhua", "Manhwa",
+                "Action", "Adaptation", "Adult", "Adventure", "Age Gap",
+                "Animals", "Another Chance", "Apocalypse", "Based On A Novel",
+                "Comedy", "Cooking", "Drama", "Dungeons", "Ecchi", "Fantasy",
+                "Game", "Gender Bender", "Harem", "Historical", "Horror",
+                "Isekai", "Josei", "Magic", "Martial Arts", "Mature",
+                "Mecha", "Military", "Monster Girls", "Mystery", "Noir",
+                "Office Workers", "Overpowered MC", "Psychological", "Reincarnation",
+                "Romance", "School Life", "Sci Fi", "Seinen", "Shoujo",
+                "Shounen", "Slice Of Life", "Sports", "Super Powers",
+                "Supernatural", "Survival", "System", "Time Travel",
+                "Tragedy", "Vampires", "Video Games", "Villainess", "Webtoons",
+                "Zombies",
             ),
         ) {
-        val selected get() = if (state == 0) "" else values[state]
+        private val slugValues = arrayOf(
+            "", "manga", "manhua", "manhwa",
+            "action", "adaptation", "adult", "adventure", "age-gap",
+            "animals", "another-chance", "apocalypse", "based-on-a-novel",
+            "comedy", "cooking", "drama", "dungeons", "ecchi", "fantasy",
+            "game", "gender-bender", "harem", "historical", "horror",
+            "isekai", "josei", "magic", "martial-arts", "mature",
+            "mecha", "military", "monster-girls", "mystery", "noir",
+            "office-workers", "overpowered-mc", "psychological", "reincarnation",
+            "romance", "school-life", "sci-fi", "seinen", "shoujo",
+            "shounen", "slice-of-life", "sports", "super-powers",
+            "supernatural", "survival", "system", "time-travel",
+            "tragedy", "vampires", "video-games", "villainess", "webtoons",
+            "zombies",
+        )
+
+        val selected get() = slugValues[state]
     }
 
     // ========== MANGA DETAILS ==========
+
     override fun mangaDetailsParse(document: Document) = SManga.create().apply {
         title = document.selectFirst("h1#mangaTitle")?.ownText()?.trim() ?: ""
 
@@ -150,6 +174,8 @@ class MGKomikBeta : ParsedHttpSource() {
         thumbnail_url = document.selectFirst("img.manga-cover-large")?.attr("abs:src")
     }
 
+    // ========== CHAPTER LIST ==========
+
     override fun chapterListSelector() = "ul#chapterList .chapter-list-item"
 
     override fun chapterFromElement(element: Element) = SChapter.create().apply {
@@ -159,32 +185,42 @@ class MGKomikBeta : ParsedHttpSource() {
         date_upload = parseDate(element.selectFirst(".chapter-date")?.text()?.trim() ?: "")
     }
 
+    // ========== DATE PARSER ==========
+
+    private val dateFormatterShort by lazy { SimpleDateFormat("dd MMM yy", Locale.ENGLISH) }
+
+    private val dateFormatterLong by lazy { SimpleDateFormat("dd MMM yyyy", Locale.ENGLISH) }
+
     private fun parseDate(date: String): Long {
         val lower = date.lowercase().trim()
-        val value = Regex("""(\d+)""").find(lower)?.groupValues?.get(1)?.toLongOrNull()
-        if (value != null) {
+        if (lower.isBlank()) return 0L
+
+        // Relative: Indonesian ("lalu", "hari ini") and English ("ago", "today")
+        if (lower.contains("lalu") || lower.contains("ago") ||
+            lower == "hari ini" || lower == "today"
+        ) {
+            val value = Regex("""(\d+)""").find(lower)
+                ?.groupValues?.get(1)?.toLongOrNull() ?: 1L
             val now = System.currentTimeMillis()
             return when {
-                lower.contains("detik") -> now - value * 1_000
-                lower.contains("menit") -> now - value * 60 * 1_000
-                lower.contains("jam") -> now - value * 3_600 * 1_000
-                lower.contains("hari") -> now - value * 86_400 * 1_000
-                lower.contains("minggu") -> now - value * 7 * 86_400 * 1_000
-                lower.contains("bulan") -> now - value * 30L * 86_400 * 1_000
-                lower.contains("tahun") -> now - value * 365L * 86_400 * 1_000
-                else -> 0L
+                lower.contains("detik") || lower.contains("second") -> now - value * 1_000L
+                lower.contains("menit") || lower.contains("minute") -> now - value * 60_000L
+                lower.contains("jam") || lower.contains("hour") -> now - value * 3_600_000L
+                lower.contains("hari") || lower.contains("day") -> now - value * 86_400_000L
+                lower.contains("minggu") || lower.contains("week") -> now - value * 7 * 86_400_000L
+                lower.contains("bulan") || lower.contains("month") -> now - value * 30L * 86_400_000L
+                lower.contains("tahun") || lower.contains("year") -> now - value * 365L * 86_400_000L
+                else -> now
             }
         }
-        return try {
-            SimpleDateFormat("dd MMM yy", Locale("id")).parse(date)?.time ?: 0L
-        } catch (_: Exception) {
-            try {
-                SimpleDateFormat("dd MMM yyyy", Locale("id")).parse(date)?.time ?: 0L
-            } catch (_: Exception) {
-                0L
-            }
-        }
+
+        // Absolute: try "dd MMM yy" first, then "dd MMM yyyy"
+        return dateFormatterShort.tryParse(date)
+            .takeIf { it != 0L }
+            ?: dateFormatterLong.tryParse(date)
     }
+
+    // ========== PAGE LIST ==========
 
     override fun pageListParse(document: Document): List<Page> = document.select("#readingContent img[data-page]")
         .mapIndexed { idx, img ->
