@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.extension.id.mgkomikbeta
 
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
+import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
@@ -34,32 +35,92 @@ class MGKomikBeta : ParsedHttpSource() {
         set("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
     }
 
-    override fun popularMangaRequest(page: Int) = GET("$baseUrl/komik/?filter=&order_by=views&page=$page", headers)
+    // ========== POPULAR ==========
+    override fun popularMangaRequest(page: Int) = GET("$baseUrl/komik/?order_by=views&page=$page", headers)
 
-    override fun popularMangaSelector() = ".listupd .bs, .listupd .utao, .grid-item, .manga-card"
+    override fun popularMangaSelector() = ".manga-card"
 
     override fun popularMangaFromElement(element: Element) = SManga.create().apply {
-        val a = element.selectFirst("a[href*='/komik/']")!!
+        val a = element.selectFirst(".card-info a.manga-title")!!
         setUrlWithoutDomain(a.attr("abs:href"))
-        title = element.selectFirst(".title, h2, h3, .tt")?.text()?.trim()
-            ?: element.selectFirst("img")?.attr("alt")?.trim() ?: ""
-        thumbnail_url = element.selectFirst("img")?.attr("abs:src")
+        title = a.text().trim()
+        thumbnail_url = element.selectFirst("img.manga-cover")?.attr("abs:src")
     }
 
-    override fun popularMangaNextPageSelector() = ".pagination .next, a:contains(Next), .next-page"
+    override fun popularMangaNextPageSelector() = ".pagination .next, a[href*='page=']:contains(Next)"
 
-    override fun latestUpdatesRequest(page: Int) = GET("$baseUrl/komik/?filter=&order_by=latest&page=$page", headers)
+    override fun latestUpdatesRequest(page: Int) = GET("$baseUrl/komik/?order_by=latest&page=$page", headers)
 
     override fun latestUpdatesSelector() = popularMangaSelector()
     override fun latestUpdatesFromElement(element: Element) = popularMangaFromElement(element)
     override fun latestUpdatesNextPageSelector() = popularMangaNextPageSelector()
 
-    override fun searchMangaRequest(page: Int, query: String, filters: FilterList) = GET("$baseUrl/search/?q=${query.trim()}&page=$page", headers)
+    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
+        val url = StringBuilder("$baseUrl/komik/?page=$page")
+
+        if (query.isNotBlank()) {
+            return GET("$baseUrl/search/?q=${query.trim()}&page=$page", headers)
+        }
+
+        filters.forEach { filter ->
+            when (filter) {
+                is OrderFilter -> url.append("&order_by=${filter.selected}")
+                is GenreFilter -> if (filter.selected.isNotBlank()) url.append("&filter=${filter.selected}")
+                is StatusFilter -> if (filter.isCompleted) url.append("&completed=1")
+                else -> {}
+            }
+        }
+
+        return GET(url.toString(), headers)
+    }
 
     override fun searchMangaSelector() = popularMangaSelector()
     override fun searchMangaFromElement(element: Element) = popularMangaFromElement(element)
     override fun searchMangaNextPageSelector() = popularMangaNextPageSelector()
 
+    // ========== FILTERS ==========
+    override fun getFilterList() = FilterList(
+        Filter.Header("Filter tidak berlaku saat pencarian teks"),
+        OrderFilter(),
+        StatusFilter(),
+        GenreFilter(),
+    )
+
+    class OrderFilter :
+        Filter.Select<String>(
+            "Urutkan",
+            arrayOf("Terbaru", "Terpopuler"),
+        ) {
+        val selected get() = if (state == 0) "latest" else "views"
+    }
+
+    class StatusFilter : Filter.CheckBox("Hanya Completed") {
+        val isCompleted get() = state
+    }
+
+    class GenreFilter :
+        Filter.Select<String>(
+            "Genre / Type",
+            arrayOf(
+                "Semua", "manga", "manhua", "manhwa",
+                "action", "adaptation", "adult", "adventure", "age-gap",
+                "animals", "another-chance", "apocalypse", "based-on-a-novel",
+                "comedy", "cooking", "drama", "dungeons", "ecchi", "fantasy",
+                "game", "gender-bender", "harem", "historical", "horror",
+                "isekai", "josei", "magic", "martial-arts", "mature",
+                "mecha", "military", "monster-girls", "mystery", "noir",
+                "office-workers", "overpowered-mc", "psychological", "reincarnation",
+                "romance", "school-life", "sci-fi", "seinen", "shoujo",
+                "shounen", "slice-of-life", "sports", "super-powers",
+                "supernatural", "survival", "system", "time-travel",
+                "tragedy", "vampires", "video-games", "villainess", "webtoons",
+                "zombies",
+            ),
+        ) {
+        val selected get() = if (state == 0) "" else values[state]
+    }
+
+    // ========== MANGA DETAILS ==========
     override fun mangaDetailsParse(document: Document) = SManga.create().apply {
         title = document.selectFirst("h1#mangaTitle")?.ownText()?.trim() ?: ""
 
@@ -67,7 +128,7 @@ class MGKomikBeta : ParsedHttpSource() {
         val desc = document.selectFirst(".manga-description p")?.text()?.trim() ?: ""
 
         description = if (!altTitle.isNullOrBlank()) {
-            "Alternative Title: $altTitle\n\n$desc"
+            "$desc\n\nAlternative Title: $altTitle"
         } else {
             desc
         }
