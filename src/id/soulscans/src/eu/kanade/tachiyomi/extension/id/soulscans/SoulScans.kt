@@ -34,8 +34,9 @@ class SoulScans : MangaThemesia("Soul Scans", "https://soulscans.my.id", "id") {
                 val url = request.url.toString()
                 removeAll("X-Requested-With")
 
-                if (url.contains(".jpg") || url.contains(".png") || 
-                    url.contains(".webp") || url.contains(".jpeg")) {
+                if (url.contains(".jpg") || url.contains(".png") ||
+                    url.contains(".webp") || url.contains(".jpeg")
+                ) {
                     set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
                     set("Sec-Fetch-Dest", "image")
                     set("Sec-Fetch-Mode", "no-cors")
@@ -62,8 +63,12 @@ class SoulScans : MangaThemesia("Soul Scans", "https://soulscans.my.id", "id") {
     override val pageSelector = "div#readerarea img:not([src*='.gif'])"
 
     override fun Element.imgAttr(): String = sequenceOf(
-        "data-lazy-src", "data-src", "data-cfsrc", 
-        "data-original", "data-realsrc", "src"
+        "data-lazy-src",
+        "data-src",
+        "data-cfsrc",
+        "data-original",
+        "data-realsrc",
+        "src",
     )
         .map { attr("abs:$it") }
         .find { it.isNotEmpty() && !it.startsWith("data:") }
