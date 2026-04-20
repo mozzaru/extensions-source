@@ -10,8 +10,6 @@ import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.SManga
-import keiyoushi.lib.randomua.addRandomUAPreference
-import keiyoushi.lib.randomua.setRandomUserAgent
 import keiyoushi.utils.getPreferences
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
@@ -20,14 +18,13 @@ import org.jsoup.nodes.Element
 import org.jsoup.select.Elements
 import java.text.SimpleDateFormat
 import java.util.Locale
-import java.util.concurrent.TimeUnit
 
 class CosmicScansID :
     MangaThemesia(
         "CosmicScans.id",
-        "https://lc5.cosmicscans.asia",
+        "https://lc6.cosmicscans.asia",
         "id",
-        dateFormat = SimpleDateFormat("MMMM dd, yyyy", Locale("id")),
+        dateFormat = SimpleDateFormat("MMMM dd, yyyy", Locale.ENGLISH),
     ),
     ConfigurableSource {
 
@@ -45,7 +42,9 @@ class CosmicScansID :
     }
 
     override fun headersBuilder() = super.headersBuilder()
-        .setRandomUserAgent()
+        .set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36")
+        .add("Accept-Language", "en-US,en;q=0.9,id;q=0.8")
+        .add("Upgrade-Insecure-Requests", "1")
 
     override fun getMangaUrl(manga: SManga) = "$baseUrl${manga.url}"
 
@@ -57,7 +56,7 @@ class CosmicScansID :
     }
 
     override val client: OkHttpClient = super.client.newBuilder()
-        .rateLimit(20, 4, TimeUnit.SECONDS)
+        .rateLimit(2)
         .build()
 
     override val hasProjectPage = true
@@ -104,8 +103,6 @@ class CosmicScansID :
     override val pageSelector = "div#readerarea img:not(noscript img):not([alt=''])"
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
-        screen.addRandomUAPreference()
-
         EditTextPreference(screen.context).apply {
             key = BASE_URL_PREF
             title = "Edit source URL"
