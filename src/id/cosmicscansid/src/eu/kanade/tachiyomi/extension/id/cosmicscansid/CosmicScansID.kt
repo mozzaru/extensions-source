@@ -45,6 +45,9 @@ class CosmicScansID :
         .set("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
         .add("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
         .add("Upgrade-Insecure-Requests", "1")
+        .add("Sec-Fetch-Dest", "document")
+        .add("Sec-Fetch-Mode", "navigate")
+        .add("Sec-Fetch-Site", "none")
 
     override fun getMangaUrl(manga: SManga) = "$baseUrl${manga.url}"
 
@@ -55,7 +58,7 @@ class CosmicScansID :
         else -> preferences.prefBaseUrl
     }
 
-    override val client: OkHttpClient = super.client.newBuilder()
+    override val client: OkHttpClient = network.cloudflareClient.newBuilder()
         .rateLimit(2)
         .build()
 
