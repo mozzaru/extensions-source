@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.extension.id.soulscans
 import eu.kanade.tachiyomi.multisrc.mangathemesia.MangaThemesia
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.model.SManga
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import org.jsoup.nodes.Document
 import java.util.Locale
@@ -12,8 +13,6 @@ class SoulScans : MangaThemesia("Soul Scans", "https://soulscans.my.id", "id") {
     override fun headersBuilder() = super.headersBuilder().apply {
         set("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
         set("Upgrade-Insecure-Requests", "1")
-        set("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Mobile Safari/537.36")
-        set("X-Requested-With", "com.android.chrome")
     }
 
     override val client: OkHttpClient = super.client.newBuilder()
@@ -23,22 +22,36 @@ class SoulScans : MangaThemesia("Soul Scans", "https://soulscans.my.id", "id") {
             val headers = request.headers.newBuilder().apply {
                 val isPost = request.method == "POST"
                 val isAjax = url.contains("admin-ajax.php") || url.contains("wp-json") || isPost
+                val isImage = url.contains(".jpg") || url.contains(".png") || url.contains(".webp") || url.contains(".jpeg") || url.contains(".gif") || url.contains(".avif")
+                val isSameOrigin = request.url.host == baseUrl.toHttpUrl().host
+                val hasReferer = !request.header("Referer").isNullOrEmpty()
 
                 if (isAjax) {
                     set("X-Requested-With", "XMLHttpRequest")
+                    set("Accept", "application/json, text/javascript, */*; q=0.01")
                     set("Sec-Fetch-Dest", "empty")
                     set("Sec-Fetch-Mode", "cors")
-                    set("Sec-Fetch-Site", "same-origin")
-                } else if (url.contains(".jpg") || url.contains(".png") || url.contains(".webp") || url.contains(".jpeg") || url.contains(".gif") || url.contains(".avif")) {
-                    removeAll("X-Requested-With")
+                    set("Sec-Fetch-Site", if (isSameOrigin) "same-origin" else "cross-site")
+                } else if (isImage) {
+                    set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
                     set("Sec-Fetch-Dest", "image")
                     set("Sec-Fetch-Mode", "no-cors")
-                    set("Sec-Fetch-Site", "cross-site")
+                    set("Sec-Fetch-Site", if (isSameOrigin) "same-origin" else "cross-site")
                 } else {
-                    removeAll("X-Requested-With")
+                    set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
                     set("Sec-Fetch-Dest", "document")
                     set("Sec-Fetch-Mode", "navigate")
-                    set("Sec-Fetch-Site", "none")
+                    set(
+                        "Sec-Fetch-Site",
+                        if (hasReferer && isSameOrigin) {
+                            "same-origin"
+                        } else if (hasReferer) {
+                            "cross-site"
+                        } else {
+                            "none"
+                        },
+                    )
+                    set("Sec-Fetch-User", "?1")
                 }
             }.build()
 
