@@ -1,13 +1,39 @@
 package eu.kanade.tachiyomi.extension.id.soulscans
 
 import eu.kanade.tachiyomi.multisrc.mangathemesia.MangaThemesia
+import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.model.SManga
+import keiyoushi.lib.randomua.setRandomUserAgent
+import okhttp3.OkHttpClient
 import org.jsoup.nodes.Document
 import java.util.Locale
 
 class SoulScans : MangaThemesia("Soul Scans", "https://soulscans.my.id", "id") {
 
+    override fun headersBuilder() = super.headersBuilder().apply {
+        setRandomUserAgent()
+        add("Sec-Fetch-Dest", "document")
+        add("Sec-Fetch-Mode", "navigate")
+        add("Sec-Fetch-Site", "same-origin")
+        add("Upgrade-Insecure-Requests", "1")
+        add("X-Requested-With", randomString((1..20).random()))
+    }
+
+    override val client: OkHttpClient = super.client.newBuilder()
+        .addInterceptor { chain ->
+            val request = chain.request()
+            val headers = request.headers.newBuilder().apply {
+                removeAll("X-Requested-With")
+            }.build()
+
+            chain.proceed(request.newBuilder().headers(headers).build())
+        }
+        .rateLimit(3)
+        .build()
+
     override val hasProjectPage = true
+
+    override fun getMangaUrl(manga: SManga) = "$baseUrl${manga.url}"
 
     override fun searchMangaSelector() = ".listupd .bs .bsx:not(:has(.novelabel))"
 
@@ -42,4 +68,9 @@ class SoulScans : MangaThemesia("Soul Scans", "https://soulscans.my.id", "id") {
     }
 
     override val pageSelector = "div#readerarea img:not([src*='.gif'])"
+
+    private fun randomString(length: Int): String {
+        val charPool = ('a'..'z') + ('A'..'Z')
+        return List(length) { charPool.random() }.joinToString("")
+    }
 }
