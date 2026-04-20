@@ -42,8 +42,8 @@ class CosmicScansID :
     }
 
     override fun headersBuilder() = super.headersBuilder()
-        .set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36")
-        .add("Accept-Language", "en-US,en;q=0.9,id;q=0.8")
+        .set("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
+        .add("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
         .add("Upgrade-Insecure-Requests", "1")
 
     override fun getMangaUrl(manga: SManga) = "$baseUrl${manga.url}"
