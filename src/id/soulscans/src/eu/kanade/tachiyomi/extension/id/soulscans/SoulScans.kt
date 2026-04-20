@@ -3,7 +3,6 @@ package eu.kanade.tachiyomi.extension.id.soulscans
 import eu.kanade.tachiyomi.multisrc.mangathemesia.MangaThemesia
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.model.SManga
-import keiyoushi.lib.randomua.setRandomUserAgent
 import okhttp3.OkHttpClient
 import org.jsoup.nodes.Document
 import java.util.Locale
@@ -11,19 +10,36 @@ import java.util.Locale
 class SoulScans : MangaThemesia("Soul Scans", "https://soulscans.my.id", "id") {
 
     override fun headersBuilder() = super.headersBuilder().apply {
-        setRandomUserAgent()
-        add("Sec-Fetch-Dest", "document")
-        add("Sec-Fetch-Mode", "navigate")
-        add("Sec-Fetch-Site", "same-origin")
-        add("Upgrade-Insecure-Requests", "1")
-        add("X-Requested-With", randomString((1..20).random()))
+        set("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
+        set("Upgrade-Insecure-Requests", "1")
+        set("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Mobile Safari/537.36")
+        set("X-Requested-With", "com.android.chrome")
     }
 
     override val client: OkHttpClient = super.client.newBuilder()
         .addInterceptor { chain ->
             val request = chain.request()
+            val url = request.url.toString()
             val headers = request.headers.newBuilder().apply {
-                removeAll("X-Requested-With")
+                val isPost = request.method == "POST"
+                val isAjax = url.contains("admin-ajax.php") || url.contains("wp-json") || isPost
+
+                if (isAjax) {
+                    set("X-Requested-With", "XMLHttpRequest")
+                    set("Sec-Fetch-Dest", "empty")
+                    set("Sec-Fetch-Mode", "cors")
+                    set("Sec-Fetch-Site", "same-origin")
+                } else if (url.contains(".jpg") || url.contains(".png") || url.contains(".webp") || url.contains(".jpeg") || url.contains(".gif") || url.contains(".avif")) {
+                    removeAll("X-Requested-With")
+                    set("Sec-Fetch-Dest", "image")
+                    set("Sec-Fetch-Mode", "no-cors")
+                    set("Sec-Fetch-Site", "cross-site")
+                } else {
+                    removeAll("X-Requested-With")
+                    set("Sec-Fetch-Dest", "document")
+                    set("Sec-Fetch-Mode", "navigate")
+                    set("Sec-Fetch-Site", "none")
+                }
             }.build()
 
             chain.proceed(request.newBuilder().headers(headers).build())
@@ -32,8 +48,6 @@ class SoulScans : MangaThemesia("Soul Scans", "https://soulscans.my.id", "id") {
         .build()
 
     override val hasProjectPage = true
-
-    override fun getMangaUrl(manga: SManga) = "$baseUrl${manga.url}"
 
     override fun searchMangaSelector() = ".listupd .bs .bsx:not(:has(.novelabel))"
 
@@ -68,9 +82,4 @@ class SoulScans : MangaThemesia("Soul Scans", "https://soulscans.my.id", "id") {
     }
 
     override val pageSelector = "div#readerarea img:not([src*='.gif'])"
-
-    private fun randomString(length: Int): String {
-        val charPool = ('a'..'z') + ('A'..'Z')
-        return List(length) { charPool.random() }.joinToString("")
-    }
 }
