@@ -20,28 +20,20 @@ class MGKomik :
     ) {
     override val useLoadMoreRequest = LoadMoreStrategy.Always
 
-    override val useNewChapterEndpoint = true
+    override val useNewChapterEndpoint = false
 
     override val mangaSubString = "komik"
 
     override fun headersBuilder() = super.headersBuilder().apply {
         add("Sec-Fetch-Dest", "document")
         add("Sec-Fetch-Mode", "navigate")
-        add("Sec-Fetch-Site", "same-origin")
+        add("Sec-Fetch-Site", "none")
         add("Upgrade-Insecure-Requests", "1")
-        add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36")
-        add("X-Requested-With", randomString((1..20).random())) // added for webview, and removed in interceptor for normal use
+        add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36")
+        add("X-Requested-With", randomString((1..20).random()))
     }
 
-    override val client = network.cloudflareClient.newBuilder()
-        .addInterceptor { chain ->
-            val request = chain.request()
-            val headers = request.headers.newBuilder().apply {
-                removeAll("X-Requested-With")
-            }.build()
-
-            chain.proceed(request.newBuilder().headers(headers).build())
-        }
+    override val client = super.client.newBuilder()
         .rateLimit(9, 2)
         .build()
 
