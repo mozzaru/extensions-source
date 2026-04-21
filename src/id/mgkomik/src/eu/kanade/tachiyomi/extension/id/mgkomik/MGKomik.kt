@@ -23,7 +23,7 @@ class MGKomik : ParsedHttpSource() {
     override val lang = "id"
     override val supportsLatest = true
 
-    // override val id = 5845004992097969882
+    override val id = 5845004992097969882
 
     override val client: OkHttpClient = network.cloudflareClient.newBuilder()
         .rateLimit(3)
@@ -48,17 +48,24 @@ class MGKomik : ParsedHttpSource() {
         val a = element.selectFirst(".card-info a.manga-title-link")
             ?: element.selectFirst(".card-info a.manga-title")
             ?: element.selectFirst("a[href*='/komik/']")!!
-        setUrlWithoutDomain(a.attr("abs:href"))
+        setUrlWithoutDomain(a.attr("href").trim())
         title = element.selectFirst(".manga-title")?.text()?.trim()
             ?: a.text().trim()
         thumbnail_url = element.selectFirst("img.manga-cover")?.attr("abs:src")
     }
 
+    override fun getMangaUrl(manga: SManga): String = if (manga.url.startsWith("http")) manga.url else "$baseUrl${manga.url}"
+
+    override fun mangaDetailsRequest(manga: SManga): Request = GET(getMangaUrl(manga), headers)
+
     override fun popularMangaNextPageSelector() = ".pagination .next, a[href*='page=']:contains(Next)"
 
     // ========== LATEST ==========
 
-    override fun latestUpdatesRequest(page: Int) = GET("$baseUrl/komik/?order_by=latest&page=$page", headers)
+    override fun latestUpdatesRequest(page: Int): Request {
+        val t = System.currentTimeMillis()
+        return GET("$baseUrl/komik/?order_by=latest&page=$page&t=$t", headersBuilder().add("Cache-Control", "no-cache").build())
+    }
 
     override fun latestUpdatesSelector() = popularMangaSelector()
 
@@ -185,16 +192,24 @@ class MGKomik : ParsedHttpSource() {
 
     override fun chapterFromElement(element: Element) = SChapter.create().apply {
         val a = element.selectFirst("a.chapter-link")!!
-        setUrlWithoutDomain(a.attr("abs:href"))
+        setUrlWithoutDomain(a.attr("href").trim())
         name = element.selectFirst(".chapter-number")?.text()?.trim() ?: ""
         date_upload = parseDate(element.selectFirst(".chapter-date")?.text()?.trim() ?: "")
     }
 
+    override fun getChapterUrl(chapter: SChapter): String = if (chapter.url.startsWith("http")) chapter.url else "$baseUrl${chapter.url}"
+
+    override fun chapterListRequest(manga: SManga): Request = GET(getMangaUrl(manga), headers)
+
+    override fun pageListRequest(chapter: SChapter): Request = GET(getChapterUrl(chapter), headers)
+
     // ========== DATE PARSER ==========
 
-    private val dateFormatterShort by lazy { SimpleDateFormat("dd MMM yy", Locale.ENGLISH) }
+    private val dateFormatterNumeric by lazy { SimpleDateFormat("dd/MM/yy", Locale("id")) }
 
-    private val dateFormatterLong by lazy { SimpleDateFormat("dd MMM yyyy", Locale.ENGLISH) }
+    private val dateFormatterShort by lazy { SimpleDateFormat("dd MMM yy", Locale("id")) }
+
+    private val dateFormatterLong by lazy { SimpleDateFormat("dd MMM yyyy", Locale("id")) }
 
     private fun parseDate(date: String): Long {
         val lower = date.lowercase().trim()
@@ -219,9 +234,11 @@ class MGKomik : ParsedHttpSource() {
             }
         }
 
-        // Absolute: try "dd MMM yy" first, then "dd MMM yyyy"
-        return dateFormatterShort.tryParse(date)
+        // Absolute: try "dd/MM/yy", then "dd MMM yy", then "dd MMM yyyy"
+        return dateFormatterNumeric.tryParse(date)
             .takeIf { it != 0L }
+            ?: dateFormatterShort.tryParse(date)
+                .takeIf { it != 0L }
             ?: dateFormatterLong.tryParse(date)
     }
 
