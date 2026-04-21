@@ -19,13 +19,13 @@ class SoulScans : MangaThemesia("Soul Scans", "https://soulscans.my.id", "id") {
         .addInterceptor { chain ->
             val request = chain.request()
             val url = request.url.toString()
-            val headers = request.headers.newBuilder().apply {
-                val isPost = request.method == "POST"
-                val isAjax = url.contains("admin-ajax.php") || url.contains("wp-json") || isPost
-                val isImage = url.contains(".jpg") || url.contains(".png") || url.contains(".webp") || url.contains(".jpeg") || url.contains(".gif") || url.contains(".avif")
-                val isSameOrigin = request.url.host == baseUrl.toHttpUrl().host
-                val hasReferer = !request.header("Referer").isNullOrEmpty()
+            val isPost = request.method == "POST"
+            val isAjax = url.contains("admin-ajax.php") || url.contains("wp-json") || isPost
+            val isImage = url.contains(".jpg") || url.contains(".png") || url.contains(".webp") || url.contains(".jpeg") || url.contains(".gif") || url.contains(".avif")
+            val isSameOrigin = request.url.host == baseUrl.toHttpUrl().host
+            val hasReferer = !request.header("Referer").isNullOrEmpty()
 
+            val headers = request.headers.newBuilder().apply {
                 if (isAjax) {
                     set("X-Requested-With", "XMLHttpRequest")
                     set("Accept", "application/json, text/javascript, */*; q=0.01")
@@ -33,11 +33,13 @@ class SoulScans : MangaThemesia("Soul Scans", "https://soulscans.my.id", "id") {
                     set("Sec-Fetch-Mode", "cors")
                     set("Sec-Fetch-Site", if (isSameOrigin) "same-origin" else "cross-site")
                 } else if (isImage) {
+                    removeAll("X-Requested-With")
                     set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
                     set("Sec-Fetch-Dest", "image")
                     set("Sec-Fetch-Mode", "no-cors")
                     set("Sec-Fetch-Site", if (isSameOrigin) "same-origin" else "cross-site")
                 } else {
+                    removeAll("X-Requested-With")
                     set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
                     set("Sec-Fetch-Dest", "document")
                     set("Sec-Fetch-Mode", "navigate")
