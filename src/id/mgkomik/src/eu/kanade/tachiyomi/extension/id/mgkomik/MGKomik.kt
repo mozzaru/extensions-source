@@ -5,9 +5,7 @@ import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
-import eu.kanade.tachiyomi.source.model.SManga
 import org.jsoup.nodes.Document
-import org.jsoup.nodes.Element
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -18,7 +16,7 @@ class MGKomik :
         "id",
         SimpleDateFormat("dd MMM yy", Locale.US),
     ) {
-    override val useLoadMoreRequest = LoadMoreStrategy.Always
+    override val useLoadMoreRequest = LoadMoreStrategy.AutoDetect
 
     override val useNewChapterEndpoint = false
 
@@ -50,16 +48,6 @@ class MGKomik :
         }
         .rateLimit(9, 2)
         .build()
-
-    // ================================== Popular ======================================
-
-    override fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
-        element.select("div.item-thumb a").let {
-            setUrlWithoutDomain(it.attr("abs:href"))
-            title = it.attr("title")
-            thumbnail_url = it.selectFirst("img")?.let { img -> imageFromElement(img) }
-        }
-    }
 
     // ================================ Chapters ================================
 
@@ -101,8 +89,8 @@ class MGKomik :
     override fun parseGenres(document: Document): List<Genre> {
         val genres = mutableListOf<Genre>()
         genres += Genre("All", "")
-        genres += document.select(".row.genres li a").map { a ->
-            Genre(a.text(), a.absUrl("href"))
+        genres += document.select(".row.genres li a, .checkbox-group .checkbox label").map { a ->
+            Genre(a.text(), a.absUrl("href").ifEmpty { a.previousElementSibling()?.`val`() ?: "" })
         }
         return genres
     }
