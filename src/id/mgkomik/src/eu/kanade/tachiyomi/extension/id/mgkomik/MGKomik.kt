@@ -25,15 +25,29 @@ class MGKomik :
     override val mangaSubString = "komik"
 
     override fun headersBuilder() = super.headersBuilder().apply {
+        add("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
         add("Sec-Fetch-Dest", "document")
         add("Sec-Fetch-Mode", "navigate")
         add("Sec-Fetch-Site", "none")
         add("Upgrade-Insecure-Requests", "1")
-        add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36")
-        add("X-Requested-With", randomString((1..20).random()))
+        add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
+        add("X-Requested-With", "com.android.chrome")
     }
 
     override val client = super.client.newBuilder()
+        .addInterceptor { chain ->
+            val request = chain.request()
+            val url = request.url.toString()
+            val headers = request.headers.newBuilder().apply {
+                if (url.contains("admin-ajax.php") || url.contains("wp-json")) {
+                    set("X-Requested-With", "XMLHttpRequest")
+                } else {
+                    removeAll("X-Requested-With")
+                }
+            }.build()
+
+            chain.proceed(request.newBuilder().headers(headers).build())
+        }
         .rateLimit(9, 2)
         .build()
 
