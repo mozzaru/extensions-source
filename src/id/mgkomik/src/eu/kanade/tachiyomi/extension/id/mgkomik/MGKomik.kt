@@ -9,6 +9,7 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.ParsedHttpSource
 import keiyoushi.utils.tryParse
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.jsoup.nodes.Document
@@ -32,7 +33,7 @@ class MGKomik : ParsedHttpSource() {
     override fun headersBuilder() = super.headersBuilder().apply {
         set(
             "User-Agent",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
         )
         set("Referer", baseUrl)
         set("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
@@ -40,7 +41,10 @@ class MGKomik : ParsedHttpSource() {
 
     // ========== POPULAR ==========
 
-    override fun popularMangaRequest(page: Int) = GET("$baseUrl/komik/?order_by=views&page=$page", headers)
+    override fun popularMangaRequest(page: Int): Request {
+        val t = System.currentTimeMillis()
+        return GET("$baseUrl/komik/?order_by=views&page=$page&t=$t", headersBuilder().add("Cache-Control", "no-cache").build())
+    }
 
     override fun popularMangaSelector() = ".manga-card"
 
@@ -54,9 +58,25 @@ class MGKomik : ParsedHttpSource() {
         thumbnail_url = element.selectFirst("img.manga-cover")?.attr("abs:src")
     }
 
-    override fun getMangaUrl(manga: SManga): String = if (manga.url.startsWith("http")) manga.url else "$baseUrl${manga.url}"
+    override fun getMangaUrl(manga: SManga): String {
+        val url = manga.url.replace("/manga/", "/komik/")
+        return when {
+            url.startsWith("http") -> {
+                url.replace("mgkomik.com", "web.mgkomik.cc")
+                    .replace("id.mgkomik.cc", "web.mgkomik.cc")
+            }
+            url.startsWith("//") -> "https:$url"
+            else -> baseUrl + url.let { if (it.startsWith("/")) it else "/$it" }
+        }
+    }
 
-    override fun mangaDetailsRequest(manga: SManga): Request = GET(getMangaUrl(manga), headers)
+    override fun mangaDetailsRequest(manga: SManga): Request {
+        val t = System.currentTimeMillis()
+        val url = getMangaUrl(manga).toHttpUrlOrNull()?.newBuilder()
+            ?.addQueryParameter("t", t.toString())
+            ?.build()?.toString() ?: getMangaUrl(manga)
+        return GET(url, headersBuilder().add("Cache-Control", "no-cache").build())
+    }
 
     override fun popularMangaNextPageSelector() = ".pagination .next, a[href*='page=']:contains(Next)"
 
@@ -76,20 +96,21 @@ class MGKomik : ParsedHttpSource() {
     // ========== SEARCH ==========
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
+        val t = System.currentTimeMillis()
         if (query.isNotBlank()) {
-            return GET("$baseUrl/search/?q=${query.trim()}&page=$page", headers)
+            return GET("$baseUrl/search/?q=${query.trim()}&page=$page&t=$t", headersBuilder().add("Cache-Control", "no-cache").build())
         }
 
-        val url = StringBuilder("$baseUrl/komik/?page=$page")
+        val urlBuilder = "$baseUrl/komik/?page=$page&t=$t".toHttpUrlOrNull()!!.newBuilder()
         filters.forEach { filter ->
             when (filter) {
-                is OrderFilter -> url.append("&order_by=${filter.selected}")
-                is GenreFilter -> if (filter.selected.isNotBlank()) url.append("&filter=${filter.selected}")
-                is StatusFilter -> if (filter.state) url.append("&completed=1")
+                is OrderFilter -> urlBuilder.addQueryParameter("order_by", filter.selected)
+                is GenreFilter -> if (filter.selected.isNotBlank()) urlBuilder.addQueryParameter("filter", filter.selected)
+                is StatusFilter -> if (filter.state) urlBuilder.addQueryParameter("completed", "1")
                 else -> {}
             }
         }
-        return GET(url.toString(), headers)
+        return GET(urlBuilder.build().toString(), headersBuilder().add("Cache-Control", "no-cache").build())
     }
 
     override fun searchMangaSelector() = popularMangaSelector()
@@ -197,11 +218,33 @@ class MGKomik : ParsedHttpSource() {
         date_upload = parseDate(element.selectFirst(".chapter-date")?.text()?.trim() ?: "")
     }
 
-    override fun getChapterUrl(chapter: SChapter): String = if (chapter.url.startsWith("http")) chapter.url else "$baseUrl${chapter.url}"
+    override fun getChapterUrl(chapter: SChapter): String {
+        val url = chapter.url.replace("/manga/", "/komik/")
+        return when {
+            url.startsWith("http") -> {
+                url.replace("mgkomik.com", "web.mgkomik.cc")
+                    .replace("id.mgkomik.cc", "web.mgkomik.cc")
+            }
+            url.startsWith("//") -> "https:$url"
+            else -> baseUrl + url.let { if (it.startsWith("/")) it else "/$it" }
+        }
+    }
 
-    override fun chapterListRequest(manga: SManga): Request = GET(getMangaUrl(manga), headers)
+    override fun chapterListRequest(manga: SManga): Request {
+        val t = System.currentTimeMillis()
+        val url = getMangaUrl(manga).toHttpUrlOrNull()?.newBuilder()
+            ?.addQueryParameter("t", t.toString())
+            ?.build()?.toString() ?: getMangaUrl(manga)
+        return GET(url, headersBuilder().add("Cache-Control", "no-cache").build())
+    }
 
-    override fun pageListRequest(chapter: SChapter): Request = GET(getChapterUrl(chapter), headers)
+    override fun pageListRequest(chapter: SChapter): Request {
+        val t = System.currentTimeMillis()
+        val url = getChapterUrl(chapter).toHttpUrlOrNull()?.newBuilder()
+            ?.addQueryParameter("t", t.toString())
+            ?.build()?.toString() ?: getChapterUrl(chapter)
+        return GET(url, headersBuilder().add("Cache-Control", "no-cache").build())
+    }
 
     // ========== DATE PARSER ==========
 
