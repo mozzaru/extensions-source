@@ -7,8 +7,6 @@ import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
-import okhttp3.Interceptor
-import okhttp3.Response
 import org.jsoup.nodes.Document
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -29,55 +27,16 @@ class MGKomik :
     override val mangaSubString = "komik"
 
     override fun headersBuilder() = super.headersBuilder().apply {
-        add("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
+        set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36")
+        set("Referer", "$baseUrl/")
+        set("Sec-Fetch-Site", "none")
     }
 
     override fun popularMangaSelector() = "div.page-item-detail:not(:has(a[href*='bilibilicomics.com'])), .manga__item, .post-item"
 
     override val client = super.client.newBuilder()
-        .addInterceptor(::browserLikeInterceptor)
-        .rateLimit(5, 2)
+        .rateLimit(9, 2)
         .build()
-
-    private fun browserLikeInterceptor(chain: Interceptor.Chain): Response {
-        val request = chain.request()
-        val url = request.url.toString()
-        val isAjax = request.header("X-Requested-With") == "XMLHttpRequest" ||
-            url.contains("admin-ajax.php") ||
-            url.contains("ajax/chapters")
-
-        val newHeaders = request.headers.newBuilder().apply {
-            // Do NOT set a fixed User-Agent here. Let cloudflareClient handle it.
-            // Just ensure Referer and other browser-like headers are present.
-            if (request.header("Referer") == null) {
-                set("Referer", "$baseUrl/")
-            }
-
-            if (isAjax) {
-                set("X-Requested-With", "XMLHttpRequest")
-                if (request.header("Accept") == null) {
-                    set("Accept", "*/*")
-                }
-                set("Sec-Fetch-Dest", "empty")
-                set("Sec-Fetch-Mode", "cors")
-                set("Sec-Fetch-Site", "same-origin")
-            } else {
-                val isImage = url.contains("img") || url.contains("uploads") || url.contains(".jpg") || url.contains(".png")
-                set("Sec-Fetch-Dest", if (isImage) "image" else "document")
-                set("Sec-Fetch-Mode", if (isImage) "no-cors" else "navigate")
-                set("Sec-Fetch-Site", if (url.contains(baseUrl.substringAfter("://"))) "same-origin" else "cross-site")
-                if (!isImage) {
-                    set("Sec-Fetch-User", "?1")
-                    set("Upgrade-Insecure-Requests", "1")
-                    if (request.header("Accept") == null) {
-                        set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
-                    }
-                }
-            }
-        }.build()
-
-        return chain.proceed(request.newBuilder().headers(newHeaders).build())
-    }
 
     // =========================== URL Migration ============================
 
