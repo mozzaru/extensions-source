@@ -32,34 +32,24 @@ class ReYume : HttpSource() {
     private val json: Json by injectLazy()
 
     private val dateFormatter by lazy {
-        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
     }
 
     override fun headersBuilder() = super.headersBuilder()
         .add("Referer", "$baseUrl/")
 
     // Popular
-    override fun popularMangaRequest(page: Int): Request = GET(baseUrl, headers)
-
-    override fun popularMangaParse(response: Response): MangasPage {
-        val document = response.asJsoup()
-        val mangas = document.select("#Side .group").map { element ->
-            SManga.create().apply {
-                val thumbnailElement = element.selectFirst("a[style*=background-image]")
-                thumbnail_url = thumbnailElement?.let {
-                    val style = it.attr("style")
-                    val url = style.substringAfter("url(").substringBefore(")").trim('"', '\'')
-                    if (url.startsWith("//")) "https:$url" else url
-                } ?: element.selectFirst("img")?.attr("abs:src")
-
-                title = element.selectFirst("h3")?.text() ?: ""
-                element.selectFirst("a:has(h3)")?.attr("href")?.let {
-                    setUrlWithoutDomain(it)
-                }
-            }
-        }
-        return MangasPage(mangas, false)
+    override fun popularMangaRequest(page: Int): Request {
+        val startIndex = (page - 1) * 20 + 1
+        val url = "$baseUrl/feeds/posts/default/-/Series".toHttpUrl().newBuilder()
+            .addQueryParameter("alt", "json")
+            .addQueryParameter("max-results", "20")
+            .addQueryParameter("start-index", startIndex.toString())
+            .build()
+        return GET(url, headers)
     }
+
+    override fun popularMangaParse(response: Response): MangasPage = searchMangaParse(response)
 
     // Latest
     override fun latestUpdatesRequest(page: Int): Request {
@@ -189,8 +179,8 @@ class ReYume : HttpSource() {
                         }
                         url = entry.link?.firstOrNull { it.rel == "alternate" }?.href?.substringAfter(baseUrl) ?: ""
                         date_upload = runCatching {
-                            dateFormatter.parse(entry.published?.t?.substringBefore("T"))?.time
-                        }.getOrDefault(0L) ?: 0L
+                            dateFormatter.parse(entry.published?.t?.substringBefore("."))?.time
+                        }.getOrDefault(0L)
                     }
                 },
             )
