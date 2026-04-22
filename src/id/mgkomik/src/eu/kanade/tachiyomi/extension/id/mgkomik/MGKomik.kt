@@ -30,15 +30,13 @@ class MGKomik :
 
     override fun headersBuilder() = super.headersBuilder().apply {
         add("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
-        // Consistent identity for Cloudflare bypass: spoof Chrome mobile
-        add("X-Requested-With", "com.android.chrome")
     }
 
-    override fun popularMangaSelector() = "div.page-item-detail:not(:has(a[href*='bilibilicomics.com'])), .manga__item"
+    override fun popularMangaSelector() = "div.page-item-detail:not(:has(a[href*='bilibilicomics.com'])), .manga__item, .post-item"
 
     override val client = super.client.newBuilder()
         .addInterceptor(::browserLikeInterceptor)
-        .rateLimit(9, 2)
+        .rateLimit(5, 2)
         .build()
 
     private fun browserLikeInterceptor(chain: Interceptor.Chain): Response {
@@ -49,24 +47,31 @@ class MGKomik :
             url.contains("ajax/chapters")
 
         val newHeaders = request.headers.newBuilder().apply {
-            set("User-Agent", "Mozilla/5.0 (Linux; Android 13; SM-S901B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
-            set("Referer", "$baseUrl/")
+            // Do NOT set a fixed User-Agent here. Let cloudflareClient handle it.
+            // Just ensure Referer and other browser-like headers are present.
+            if (request.header("Referer") == null) {
+                set("Referer", "$baseUrl/")
+            }
 
             if (isAjax) {
                 set("X-Requested-With", "XMLHttpRequest")
-                set("Accept", "*/*")
+                if (request.header("Accept") == null) {
+                    set("Accept", "*/*")
+                }
                 set("Sec-Fetch-Dest", "empty")
                 set("Sec-Fetch-Mode", "cors")
                 set("Sec-Fetch-Site", "same-origin")
             } else {
-                // Remove X-Requested-With for normal document/image navigation to mimic real browser
-                removeAll("X-Requested-With")
-                set("Sec-Fetch-Dest", if (url.contains("img") || url.contains("uploads")) "image" else "document")
-                set("Sec-Fetch-Mode", if (url.contains("img") || url.contains("uploads")) "no-cors" else "navigate")
-                set("Sec-Fetch-Site", if (url.contains(baseUrl)) "same-origin" else "cross-site")
-                if (!url.contains("img")) {
+                val isImage = url.contains("img") || url.contains("uploads") || url.contains(".jpg") || url.contains(".png")
+                set("Sec-Fetch-Dest", if (isImage) "image" else "document")
+                set("Sec-Fetch-Mode", if (isImage) "no-cors" else "navigate")
+                set("Sec-Fetch-Site", if (url.contains(baseUrl.substringAfter("://"))) "same-origin" else "cross-site")
+                if (!isImage) {
                     set("Sec-Fetch-User", "?1")
                     set("Upgrade-Insecure-Requests", "1")
+                    if (request.header("Accept") == null) {
+                        set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
+                    }
                 }
             }
         }.build()
