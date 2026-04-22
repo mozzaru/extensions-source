@@ -69,14 +69,16 @@ class ReYume : ZeistManga("ReYume", "https://www.re-yume.my.id", "id") {
     }
 
     override fun chapterListParse(response: Response): List<SChapter> {
-        val chapters = super.chapterListParse(response)
-        val mangaTitle = response.asJsoup().selectFirst("#post-title")?.text() ?: ""
+        val document = response.asJsoup()
+        val chapters = super.chapterListParse(document)
+        val mangaTitle = document.selectFirst("#post-title")?.text() ?: ""
         if (mangaTitle.isBlank()) return chapters
 
         return chapters.map { chapter ->
             chapter.apply {
                 if (name.startsWith(mangaTitle, ignoreCase = true)) {
                     name = name.substring(mangaTitle.length).trim()
+                        .removePrefix("-").removePrefix(":").trim()
                 }
             }
         }

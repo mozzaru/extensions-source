@@ -203,6 +203,10 @@ abstract class ZeistManga(
 
     override fun chapterListParse(response: Response): List<SChapter> {
         val document = response.asJsoup()
+        return chapterListParse(document)
+    }
+
+    open fun chapterListParse(document: Document): List<SChapter> {
         val url = getChapterFeedUrl(document).toHttpUrl()
 
         var startIndex = 1
@@ -214,8 +218,9 @@ abstract class ZeistManga(
                 .setQueryParameter("max-results", "150")
                 .build()
 
-            val res = client.newCall(GET(paginationUrl, headers)).execute()
-            val result = json.decodeFromString<ZeistMangaDto>(res.body.string())
+            val result = client.newCall(GET(paginationUrl, headers)).execute().use { res ->
+                json.decodeFromString<ZeistMangaDto>(res.body.string())
+            }
 
             val entries = result.feed?.entry.orEmpty()
             if (entries.isEmpty()) break
