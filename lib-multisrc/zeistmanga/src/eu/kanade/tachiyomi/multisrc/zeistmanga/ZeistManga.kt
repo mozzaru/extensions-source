@@ -226,7 +226,7 @@ abstract class ZeistManga(
             )
 
             val totalResults = result.feed?.totalResults?.t?.toIntOrNull() ?: 0
-            if (startIndex + entries.size > totalResults || entries.size < 150) break
+            if (startIndex + entries.size > totalResults || entries.size < 1) break
 
             startIndex += entries.size
         }

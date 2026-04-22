@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.extension.id.inazumanga
 
 import eu.kanade.tachiyomi.multisrc.zeistmanga.ZeistManga
 import eu.kanade.tachiyomi.source.model.MangasPage
+import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.util.asJsoup
 import okhttp3.Response
@@ -64,6 +65,20 @@ class ReYume : ZeistManga("ReYume", "https://www.re-yume.my.id", "id") {
                 statusOnGoingList.contains(text) || statusCompletedList.contains(text)
             }?.text()
             status = parseStatus(statusText ?: "")
+        }
+    }
+
+    override fun chapterListParse(response: Response): List<SChapter> {
+        val chapters = super.chapterListParse(response)
+        val mangaTitle = response.asJsoup().selectFirst("#post-title")?.text() ?: ""
+        if (mangaTitle.isBlank()) return chapters
+
+        return chapters.map { chapter ->
+            chapter.apply {
+                if (name.startsWith(mangaTitle, ignoreCase = true)) {
+                    name = name.substring(mangaTitle.length).trim()
+                }
+            }
         }
     }
 
