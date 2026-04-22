@@ -16,9 +16,11 @@ class MGKomik :
         "id",
         SimpleDateFormat("dd MMM yy", Locale.US),
     ) {
-    override val useLoadMoreRequest = LoadMoreStrategy.Always
+    override val useLoadMoreRequest = LoadMoreStrategy.Never
 
     override val useNewChapterEndpoint = false
+
+    override val filterNonMangaItems = false
 
     override val mangaSubString = "komik"
 
@@ -29,6 +31,8 @@ class MGKomik :
         add("Sec-Fetch-Site", "none")
         add("Upgrade-Insecure-Requests", "1")
     }
+
+    override fun popularMangaSelector() = "div.page-item-detail, .manga__item"
 
     override val client = super.client.newBuilder()
         .rateLimit(9, 2)
