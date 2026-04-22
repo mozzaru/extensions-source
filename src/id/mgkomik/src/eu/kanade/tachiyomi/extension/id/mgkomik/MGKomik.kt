@@ -5,6 +5,8 @@ import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
+import okhttp3.Interceptor
+import okhttp3.Response
 import org.jsoup.nodes.Document
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -16,7 +18,7 @@ class MGKomik :
         "id",
         SimpleDateFormat("dd MMM yy", Locale.US),
     ) {
-    override val useLoadMoreRequest = LoadMoreStrategy.Never
+    override val useLoadMoreRequest = LoadMoreStrategy.Always
 
     override val useNewChapterEndpoint = false
 
@@ -26,17 +28,39 @@ class MGKomik :
 
     override fun headersBuilder() = super.headersBuilder().apply {
         add("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
-        add("Sec-Fetch-Dest", "document")
-        add("Sec-Fetch-Mode", "navigate")
-        add("Sec-Fetch-Site", "none")
-        add("Upgrade-Insecure-Requests", "1")
     }
 
-    override fun popularMangaSelector() = "div.page-item-detail, .manga__item"
+    override fun popularMangaSelector() = "div.page-item-detail:not(:has(a[href*='bilibilicomics.com'])), .manga__item"
 
     override val client = super.client.newBuilder()
+        .addInterceptor(::browserLikeInterceptor)
         .rateLimit(9, 2)
         .build()
+
+    private fun browserLikeInterceptor(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+        val url = request.url.toString()
+        val isAjax = request.header("X-Requested-With") == "XMLHttpRequest" || url.contains("admin-ajax.php") || url.contains("ajax/chapters")
+
+        val newHeaders = request.headers.newBuilder().apply {
+            set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+            if (isAjax) {
+                set("X-Requested-With", "XMLHttpRequest")
+                set("Accept", "*/*")
+                set("Sec-Fetch-Dest", "empty")
+                set("Sec-Fetch-Mode", "cors")
+                set("Sec-Fetch-Site", "same-origin")
+            } else {
+                set("Sec-Fetch-Dest", "document")
+                set("Sec-Fetch-Mode", "navigate")
+                set("Sec-Fetch-Site", "none")
+                set("Sec-Fetch-User", "?1")
+                set("Upgrade-Insecure-Requests", "1")
+            }
+        }.build()
+
+        return chain.proceed(request.newBuilder().headers(newHeaders).build())
+    }
 
     // ================================ Chapters ================================
 
