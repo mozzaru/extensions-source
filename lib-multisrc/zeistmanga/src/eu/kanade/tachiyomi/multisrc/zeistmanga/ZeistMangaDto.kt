@@ -23,6 +23,7 @@ data class ZeistMangaDto(
 @Serializable
 data class ZeistMangaFeedDto(
     val entry: List<ZeistMangaEntryDto>? = emptyList(),
+    @SerialName("openSearch${"$"}totalResults") val totalResults: ZeistMangaEntryTitleDto? = null,
 )
 
 @Serializable

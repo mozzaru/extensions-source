@@ -72,7 +72,6 @@ class ReYume : ZeistManga("ReYume", "https://www.re-yume.my.id", "id") {
         if (label != null) {
             return apiUrl("Chapter")
                 .addPathSegment(label)
-                .addQueryParameter("max-results", MAX_CHAPTER_RESULTS.toString())
                 .build().toString()
         }
         return super.getChapterFeedUrl(doc)
