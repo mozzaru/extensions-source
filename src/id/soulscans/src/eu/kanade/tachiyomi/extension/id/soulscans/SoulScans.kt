@@ -16,7 +16,7 @@ class SoulScans : MangaThemesia("Soul Scans", "https://soulscans.my.id", "id") {
         set("X-Requested-With", "com.android.chrome")
     }
 
-    override val client: OkHttpClient = super.client.newBuilder()
+    override val client: OkHttpClient = network.cloudflareClient.newBuilder()
         .addInterceptor { chain ->
             val request = chain.request()
             val url = request.url.toString()
@@ -33,7 +33,7 @@ class SoulScans : MangaThemesia("Soul Scans", "https://soulscans.my.id", "id") {
                     set("Sec-Fetch-Dest", "empty")
                     set("Sec-Fetch-Mode", "cors")
                     set("Sec-Fetch-Site", if (isSameOrigin) "same-origin" else "cross-site")
-                    if (isPost || isAjax) set("Origin", "https://${request.url.host}")
+                    set("Origin", "https://${request.url.host}")
                 } else if (isImage) {
                     removeAll("X-Requested-With")
                     set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
@@ -62,7 +62,7 @@ class SoulScans : MangaThemesia("Soul Scans", "https://soulscans.my.id", "id") {
 
             chain.proceed(request.newBuilder().headers(headers).build())
         }
-        .rateLimit(1)
+        .rateLimit(12, 3)
         .build()
 
     override val hasProjectPage = true
