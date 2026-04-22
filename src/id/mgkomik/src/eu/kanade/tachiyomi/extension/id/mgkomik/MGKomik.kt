@@ -16,7 +16,7 @@ class MGKomik :
         "id",
         SimpleDateFormat("dd MMM yy", Locale.US),
     ) {
-    override val useLoadMoreRequest = LoadMoreStrategy.AutoDetect
+    override val useLoadMoreRequest = LoadMoreStrategy.Always
 
     override val useNewChapterEndpoint = false
 
@@ -28,24 +28,9 @@ class MGKomik :
         add("Sec-Fetch-Mode", "navigate")
         add("Sec-Fetch-Site", "none")
         add("Upgrade-Insecure-Requests", "1")
-        add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
-        add("X-Requested-With", "com.android.chrome")
     }
 
     override val client = super.client.newBuilder()
-        .addInterceptor { chain ->
-            val request = chain.request()
-            val url = request.url.toString()
-            val headers = request.headers.newBuilder().apply {
-                if (url.contains("admin-ajax.php") || url.contains("wp-json")) {
-                    set("X-Requested-With", "XMLHttpRequest")
-                } else {
-                    removeAll("X-Requested-With")
-                }
-            }.build()
-
-            chain.proceed(request.newBuilder().headers(headers).build())
-        }
         .rateLimit(9, 2)
         .build()
 
