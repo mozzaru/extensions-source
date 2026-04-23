@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.extension.id.inazumanga
 
 import eu.kanade.tachiyomi.network.GET
+import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
@@ -27,7 +28,9 @@ class ReYume : HttpSource() {
     override val lang = "id"
     override val supportsLatest = true
 
-    override val client = network.cloudflareClient
+    override val client = network.cloudflareClient.newBuilder()
+        .rateLimit(2)
+        .build()
 
     private val dateFormatter by lazy {
         SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.getDefault()).apply {
@@ -39,24 +42,50 @@ class ReYume : HttpSource() {
         .add("Referer", "$baseUrl/")
 
     // Popular
-    override fun popularMangaRequest(page: Int): Request {
+    override fun popularMangaRequest(page: Int): Request = if (page == 1) {
+        GET("$baseUrl/", headers)
+    } else {
         val startIndex = (page - 1) * 20 + 1
         val url = "$baseUrl/feeds/posts/default/-/Series".toHttpUrl().newBuilder()
             .addQueryParameter("alt", "json")
             .addQueryParameter("max-results", "20")
             .addQueryParameter("start-index", startIndex.toString())
             .build()
-        return GET(url, headers)
+        GET(url, headers)
     }
 
-    override fun popularMangaParse(response: Response): MangasPage = searchMangaParse(response)
+    override fun popularMangaParse(response: Response): MangasPage {
+        val url = response.request.url.toString()
+        if (url == "$baseUrl/" || url == "$baseUrl") {
+            val document = response.asJsoup()
+            val mangas = document.select("#Side .group").map { element ->
+                SManga.create().apply {
+                    val a = element.selectFirst("a:has(h3)")
+                        ?: element.selectFirst("a[href][title]")
+                    title = element.selectFirst("h3")?.text() ?: a?.attr("title") ?: ""
+                    val href = a?.attr("abs:href") ?: ""
+                    this.url = if (href.startsWith(baseUrl)) {
+                        "/" + href.substringAfter(baseUrl).removePrefix("/")
+                    } else {
+                        href
+                    }
+                    thumbnail_url = element.selectFirst("a[style*='background-image']")?.attr("style")?.let { style ->
+                        Regex("""url\(['"]?(.+?)['"]?\)""").find(style)?.groupValues?.get(1)
+                            ?.replace(Regex("/s\\d+(-c)?/"), "/s600/")
+                    }
+                }
+            }.filter { it.title.isNotBlank() }
+            return MangasPage(mangas, false)
+        }
+        return searchMangaParse(response)
+    }
 
     // Latest
     override fun latestUpdatesRequest(page: Int): Request {
         val startIndex = (page - 1) * 20 + 1
         val url = "$baseUrl/feeds/posts/default/-/Series".toHttpUrl().newBuilder()
             .addQueryParameter("alt", "json")
-            .addQueryParameter("orderby", "published")
+            .addQueryParameter("orderby", "updated")
             .addQueryParameter("max-results", "20")
             .addQueryParameter("start-index", startIndex.toString())
             .build()
@@ -79,8 +108,12 @@ class ReYume : HttpSource() {
             url.addQueryParameter("q", query)
         } else {
             val genres = filters.filterIsInstance<GenreList>().flatMap { it.state }.filter { it.state }.map { it.value }
+            val type = filters.filterIsInstance<TypeFilter>().firstOrNull()?.let {
+                if (it.state > 0) it.values[it.state] else null
+            }
             url.addPathSegment("-")
             url.addPathSegment("Series")
+            if (type != null) url.addPathSegment(type)
             genres.forEach { url.addPathSegment(it) }
         }
 
@@ -96,7 +129,13 @@ class ReYume : HttpSource() {
             .map { entry ->
                 SManga.create().apply {
                     title = entry.title?.t ?: ""
-                    url = entry.link?.firstOrNull { it.rel == "alternate" }?.href?.substringAfter(baseUrl) ?: ""
+                    url = entry.link?.firstOrNull { it.rel == "alternate" }?.href?.let { href ->
+                        if (href.startsWith(baseUrl)) {
+                            "/" + href.substringAfter(baseUrl).removePrefix("/")
+                        } else {
+                            href
+                        }
+                    } ?: ""
                     thumbnail_url = entry.mediaThumbnail?.url?.replace(Regex("/s\\d+(-c)?/"), "/s600/")
                         ?: entry.content?.t?.let { Jsoup.parse(it).selectFirst("img")?.attr("src") }
                 }
@@ -107,18 +146,33 @@ class ReYume : HttpSource() {
     }
 
     // Details
-    override fun mangaDetailsParse(response: Response): SManga {
-        val document = response.asJsoup()
-        return SManga.create().apply {
-            title = document.selectFirst("#post-title")?.text() ?: ""
-            thumbnail_url = document.selectFirst("meta[property=og:image]")?.attr("content")
-            description = document.selectFirst("#syn_bod")?.text()
+    override fun mangaDetailsRequest(manga: SManga): Request {
+        val url = "$baseUrl/feeds/posts/default".toHttpUrl().newBuilder()
+            .addQueryParameter("alt", "json")
+            .addQueryParameter("path", manga.url)
+            .build()
+        return GET(url, headers)
+    }
 
-            val excludedGenres = listOf("Series", "Ongoing", "Completed", "Project")
-            genre = document.select("a[rel=tag]")
-                .map { it.text() }
+    override fun mangaDetailsParse(response: Response): SManga {
+        val result = response.parseAs<BloggerDto>()
+        val entry = result.feed?.entry?.firstOrNull() ?: throw Exception("Manga tidak ditemukan")
+        val titleStr = entry.title?.t ?: ""
+        val content = entry.content?.t ?: ""
+        val document = Jsoup.parse(content)
+
+        return SManga.create().apply {
+            title = titleStr
+            thumbnail_url = entry.mediaThumbnail?.url?.replace(Regex("/s\\d+(-c)?/"), "/s600/")
+                ?: document.selectFirst("img")?.attr("src")
+            description = document.selectFirst("#syn_bod")?.text() ?: document.text()
+
+            val categories = entry.category.orEmpty().map { it.term }
+            val excludedLabels = listOf("Series", "Ongoing", "Completed", "Project", "Manga", "Manhwa", "Manhua", "Chapter", "Hot", "New", "JP", "CN")
+
+            genre = categories
                 .filterNot { g ->
-                    excludedGenres.any { it.equals(g, true) } || g.equals(title, true) || g.toDoubleOrNull() != null
+                    excludedLabels.any { it.equals(g, true) } || g.equals(titleStr, true) || g.toDoubleOrNull() != null
                 }
                 .distinct()
                 .joinToString { it }
@@ -131,25 +185,29 @@ class ReYume : HttpSource() {
                 description = "Alternative: $altName\n\n$description"
             }
 
-            val statusText = document.select(".capitalize").firstOrNull {
-                val text = it.text().lowercase()
-                text.contains("ongoing") || text.contains("completed")
-            }?.text()
-            status = when (statusText?.lowercase()) {
-                "ongoing", "berjalan" -> SManga.ONGOING
-                "completed", "selesai", "tamat" -> SManga.COMPLETED
+            status = when {
+                categories.any { it.equals("Ongoing", true) } -> SManga.ONGOING
+                categories.any { it.equals("Completed", true) } -> SManga.COMPLETED
                 else -> SManga.UNKNOWN
             }
         }
     }
 
     // Chapters
+    override fun chapterListRequest(manga: SManga): Request = mangaDetailsRequest(manga)
+
     override fun chapterListParse(response: Response): List<SChapter> {
-        val document = response.asJsoup()
-        val title = document.selectFirst("#post-title")?.text() ?: ""
+        val result = response.parseAs<BloggerDto>()
+        val entry = result.feed?.entry?.firstOrNull() ?: throw Exception("Manga tidak ditemukan")
+        val titleStr = entry.title?.t ?: ""
+        val content = entry.content?.t ?: ""
+        val document = Jsoup.parse(content)
+
+        val excludedLabels = listOf("Series", "Ongoing", "Completed", "Project", "Manga", "Manhwa", "Manhua", "Chapter", "Hot", "New", "JP", "CN")
         val label = document.selectFirst(".chapter_get")?.attr("data-labelchapter")
-            ?: document.select("a[rel=tag]").map { it.text() }.firstOrNull { it.equals(title, true) }
-            ?: throw Exception("Failed to find chapter identifier")
+            ?: entry.category.orEmpty().map { it.term }
+                .firstOrNull { it !in excludedLabels && it != titleStr && it.toDoubleOrNull() == null }
+            ?: titleStr
 
         val chapters = mutableListOf<SChapter>()
         var startIndex = 1
@@ -162,21 +220,28 @@ class ReYume : HttpSource() {
                 .addQueryParameter("start-index", startIndex.toString())
                 .build()
 
-            val result = client.newCall(GET(chapterUrl, headers)).execute().parseAs<BloggerDto>()
-            val entries = result.feed?.entry.orEmpty()
+            val chapterResponse = client.newCall(GET(chapterUrl, headers)).execute()
+            val chapterResult = chapterResponse.parseAs<BloggerDto>()
+            val entries = chapterResult.feed?.entry.orEmpty()
             if (entries.isEmpty()) break
 
             chapters.addAll(
-                entries.map { entry ->
+                entries.map { e ->
                     SChapter.create().apply {
-                        name = cleanChapterName(title, entry.title?.t ?: "")
-                        url = entry.link?.firstOrNull { it.rel == "alternate" }?.href?.substringAfter(baseUrl) ?: ""
-                        date_upload = parseDate(entry.published?.t)
+                        name = cleanChapterName(titleStr, e.title?.t ?: "")
+                        url = e.link?.firstOrNull { it.rel == "alternate" }?.href?.let { href ->
+                            if (href.startsWith(baseUrl)) {
+                                "/" + href.substringAfter(baseUrl).removePrefix("/")
+                            } else {
+                                href
+                            }
+                        } ?: ""
+                        date_upload = parseDate(e.published?.t)
                     }
                 },
             )
 
-            val totalResults = result.feed?.totalResults?.t?.toIntOrNull() ?: 0
+            val totalResults = chapterResult.feed?.totalResults?.t?.toIntOrNull() ?: 0
             if (startIndex + entries.size > totalResults) break
             startIndex += entries.size
         }
@@ -193,13 +258,11 @@ class ReYume : HttpSource() {
             }
         }
 
-        // Fallback: try to remove manga title variations and common separators
         var name = entryTitle
         val titleVariations = mutableListOf(mangaTitle)
         if (mangaTitle.contains(":")) titleVariations.add(mangaTitle.substringBefore(":"))
         if (mangaTitle.contains("(")) titleVariations.add(mangaTitle.substringBefore("("))
 
-        // Sort by length descending to replace longest variations first
         titleVariations.sortByDescending { it.length }
 
         for (variation in titleVariations.filter { it.length > 3 }) {
@@ -224,8 +287,11 @@ class ReYume : HttpSource() {
     // Pages
     override fun pageListParse(response: Response): List<Page> {
         val document = response.asJsoup()
-        return document.select(".i_img img").mapIndexed { i, img ->
-            Page(i, "", img.attr("abs:src"))
+        return document.select(".i_img img, a[imageanchor] img, .separator a img, .post-body img").mapIndexed { i, img ->
+            val url = img.parent()?.takeIf { it.tagName() == "a" }?.attr("abs:href")
+                ?.takeIf { it.contains(Regex("\\.(jpg|jpeg|png|webp|gif|bmp)(\\?.*)?$", RegexOption.IGNORE_CASE)) }
+                ?: img.attr("abs:src")
+            Page(i, "", url)
         }
     }
 
@@ -234,8 +300,11 @@ class ReYume : HttpSource() {
     // Filters
     override fun getFilterList() = FilterList(
         Filter.Header("Gunakan filter untuk mencari berdasarkan genre"),
+        TypeFilter(),
         GenreList(getGenreListData()),
     )
+
+    private class TypeFilter : Filter.Select<String>("Type", arrayOf("All", "Manga", "Manhwa", "Manhua"))
 
     private class GenreData(val name: String, val value: String)
     private class GenreList(genres: List<GenreData>) : Filter.Group<GenreCheckbox>("Genre", genres.map { GenreCheckbox(it.name, it.value) })
@@ -246,12 +315,27 @@ class ReYume : HttpSource() {
         GenreData("Adventure", "Adventure"),
         GenreData("Comedy", "Comedy"),
         GenreData("Drama", "Drama"),
+        GenreData("Ecchi", "Ecchi"),
         GenreData("Fantasy", "Fantasy"),
+        GenreData("Gore", "Gore"),
+        GenreData("Harem", "Harem"),
+        GenreData("Horror", "Horror"),
+        GenreData("Isekai", "Isekai"),
         GenreData("Magic", "Magic"),
         GenreData("Martial Arts", "Martial Arts"),
+        GenreData("Mystery", "Mystery"),
+        GenreData("Psychological", "Psychological"),
         GenreData("Romance", "Romance"),
+        GenreData("School Life", "School Life"),
         GenreData("Sci-Fi", "Sci-Fi"),
+        GenreData("Seinen", "Seinen"),
+        GenreData("Shoujo", "Shoujo"),
+        GenreData("Shounen", "Shounen"),
         GenreData("Slice of Life", "Slice of Life"),
+        GenreData("Supernatural", "Supernatural"),
+        GenreData("Thriller", "Thriller"),
+        GenreData("Tragedy", "Tragedy"),
+        GenreData("Yuri", "Yuri"),
     )
 
     @Serializable
