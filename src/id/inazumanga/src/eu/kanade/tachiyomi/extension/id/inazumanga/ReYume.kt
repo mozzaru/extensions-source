@@ -10,15 +10,12 @@ import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.util.asJsoup
 import keiyoushi.utils.parseAs
-import keiyoushi.utils.tryParse
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.Jsoup
-import uy.kohesive.injekt.injectLazy
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
@@ -219,8 +216,9 @@ class ReYume : HttpSource() {
     private fun parseDate(dateStr: String?): Long {
         if (dateStr == null) return 0L
         val cleanedDate = dateStr.replace(Regex("([+-]\\d{2}):(\\d{2})$"), "$1$2")
-        return dateFormatter.tryParse(cleanedDate).takeIf { it != 0L }
-            ?: SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ", Locale.getDefault()).tryParse(cleanedDate)
+        return runCatching { dateFormatter.parse(cleanedDate)?.time }.getOrNull()
+            ?: runCatching { SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ", Locale.getDefault()).parse(cleanedDate)?.time }.getOrNull()
+            ?: 0L
     }
 
     // Pages
