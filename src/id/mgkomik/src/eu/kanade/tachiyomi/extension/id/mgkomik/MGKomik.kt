@@ -22,13 +22,13 @@ class MGKomik :
 
     override val useNewChapterEndpoint = false
 
+    override val filterNonMangaItems = false
+
     override val mangaSubString = "komik"
 
     override fun headersBuilder() = super.headersBuilder().apply {
-        add("Sec-Fetch-Dest", "document")
-        add("Sec-Fetch-Mode", "navigate")
-        add("Sec-Fetch-Site", "same-origin")
-        add("Upgrade-Insecure-Requests", "1")
+        set("Referer", "$baseUrl/")
+        set("Sec-Fetch-Site", "none")
         add("X-Requested-With", randomString((1..20).random())) // added for webview, and removed in interceptor for normal use
     }
 
