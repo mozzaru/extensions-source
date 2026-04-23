@@ -9,6 +9,8 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.util.asJsoup
+import keiyoushi.utils.parseAs
+import keiyoushi.utils.tryParse
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -19,6 +21,7 @@ import org.jsoup.Jsoup
 import uy.kohesive.injekt.injectLazy
 import java.text.SimpleDateFormat
 import java.util.Locale
+import java.util.TimeZone
 
 class ReYume : HttpSource() {
 
@@ -29,10 +32,10 @@ class ReYume : HttpSource() {
 
     override val client = network.cloudflareClient
 
-    private val json: Json by injectLazy()
-
     private val dateFormatter by lazy {
-        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
+        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.getDefault()).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
     }
 
     override fun headersBuilder() = super.headersBuilder()
@@ -88,8 +91,7 @@ class ReYume : HttpSource() {
     }
 
     override fun searchMangaParse(response: Response): MangasPage {
-        val jsonString = response.body.string()
-        val result = json.decodeFromString<BloggerDto>(jsonString)
+        val result = response.parseAs<BloggerDto>()
         val entries = result.feed?.entry.orEmpty()
 
         val mangas = entries
@@ -137,8 +139,8 @@ class ReYume : HttpSource() {
                 text.contains("ongoing") || text.contains("completed")
             }?.text()
             status = when (statusText?.lowercase()) {
-                "ongoing" -> SManga.ONGOING
-                "completed" -> SManga.COMPLETED
+                "ongoing", "berjalan" -> SManga.ONGOING
+                "completed", "selesai", "tamat" -> SManga.COMPLETED
                 else -> SManga.UNKNOWN
             }
         }
@@ -147,40 +149,32 @@ class ReYume : HttpSource() {
     // Chapters
     override fun chapterListParse(response: Response): List<SChapter> {
         val document = response.asJsoup()
+        val title = document.selectFirst("#post-title")?.text() ?: ""
         val label = document.selectFirst(".chapter_get")?.attr("data-labelchapter")
+            ?: document.select("a[rel=tag]").map { it.text() }.firstOrNull { it.equals(title, true) }
             ?: throw Exception("Failed to find chapter identifier")
 
         val chapters = mutableListOf<SChapter>()
         var startIndex = 1
-        val mangaTitle = document.selectFirst("#post-title")?.text() ?: ""
 
         while (true) {
-            val chapterUrl = "$baseUrl/feeds/posts/default/-/Chapter/$label".toHttpUrl().newBuilder()
+            val chapterUrl = "$baseUrl/feeds/posts/default/-/Chapter".toHttpUrl().newBuilder()
+                .addPathSegment(label)
                 .addQueryParameter("alt", "json")
                 .addQueryParameter("max-results", "150")
                 .addQueryParameter("start-index", startIndex.toString())
                 .build()
 
-            val result = client.newCall(GET(chapterUrl, headers)).execute().use { res ->
-                json.decodeFromString<BloggerDto>(res.body.string())
-            }
+            val result = client.newCall(GET(chapterUrl, headers)).execute().parseAs<BloggerDto>()
             val entries = result.feed?.entry.orEmpty()
             if (entries.isEmpty()) break
 
             chapters.addAll(
                 entries.map { entry ->
                     SChapter.create().apply {
-                        val entryTitle = entry.title?.t ?: ""
-                        name = if (mangaTitle.isNotBlank() && entryTitle.startsWith(mangaTitle, ignoreCase = true)) {
-                            entryTitle.substring(mangaTitle.length).trim()
-                                .removePrefix("-").removePrefix(":").trim()
-                        } else {
-                            entryTitle
-                        }
+                        name = cleanChapterName(title, entry.title?.t ?: "")
                         url = entry.link?.firstOrNull { it.rel == "alternate" }?.href?.substringAfter(baseUrl) ?: ""
-                        date_upload = runCatching {
-                            dateFormatter.parse(entry.published?.t?.substringBefore("."))?.time
-                        }.getOrDefault(0L)
+                        date_upload = parseDate(entry.published?.t)
                     }
                 },
             )
@@ -191,6 +185,42 @@ class ReYume : HttpSource() {
         }
 
         return chapters
+    }
+
+    private fun cleanChapterName(mangaTitle: String, entryTitle: String): String {
+        val chapterKeywords = listOf("Chapter ", "Ch.", "Ch ", "Prolog", "Epilog", "Ending", "End", "Tamat")
+        for (keyword in chapterKeywords) {
+            val index = entryTitle.lastIndexOf(keyword, ignoreCase = true)
+            if (index != -1) {
+                return entryTitle.substring(index).trim()
+            }
+        }
+
+        // Fallback: try to remove manga title variations and common separators
+        var name = entryTitle
+        val titleVariations = mutableListOf(mangaTitle)
+        if (mangaTitle.contains(":")) titleVariations.add(mangaTitle.substringBefore(":"))
+        if (mangaTitle.contains("(")) titleVariations.add(mangaTitle.substringBefore("("))
+
+        // Sort by length descending to replace longest variations first
+        titleVariations.sortByDescending { it.length }
+
+        for (variation in titleVariations.filter { it.length > 3 }) {
+            if (name.contains(variation, ignoreCase = true)) {
+                name = name.replace(variation, "", ignoreCase = true)
+            }
+        }
+
+        return name.trim()
+            .removePrefix("-").removePrefix(":").trim()
+            .ifBlank { entryTitle }
+    }
+
+    private fun parseDate(dateStr: String?): Long {
+        if (dateStr == null) return 0L
+        val cleanedDate = dateStr.replace(Regex("([+-]\\d{2}):(\\d{2})$"), "$1$2")
+        return dateFormatter.tryParse(cleanedDate).takeIf { it != 0L }
+            ?: SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ", Locale.getDefault()).tryParse(cleanedDate)
     }
 
     // Pages
