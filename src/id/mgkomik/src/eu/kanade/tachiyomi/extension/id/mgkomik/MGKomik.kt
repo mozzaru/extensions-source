@@ -10,12 +10,13 @@ import org.jsoup.nodes.Document
 import java.text.SimpleDateFormat
 import java.util.Locale
 
-class MGKomik : Madara(
-    "MG Komik",
-    "https://id.mgkomik.cc",
-    "id",
-    SimpleDateFormat("dd MMM yy", Locale.US),
-) {
+class MGKomik :
+    Madara(
+        "MG Komik",
+        "https://id.mgkomik.cc",
+        "id",
+        SimpleDateFormat("dd MMM yy", Locale.US),
+    ) {
     override val useLoadMoreRequest = LoadMoreStrategy.Always
 
     override val useNewChapterEndpoint = false
@@ -25,9 +26,13 @@ class MGKomik : Madara(
     override val mangaSubString = "komik"
 
     override fun headersBuilder() = super.headersBuilder().apply {
+        set("User-Agent", "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36")
         set("Referer", "$baseUrl/")
+        set("Sec-Fetch-Dest", "document")
+        set("Sec-Fetch-Mode", "navigate")
         set("Sec-Fetch-Site", "none")
-        add("X-Requested-With", randomString((1..20).random())) // added for webview, and removed in interceptor for normal use
+        set("Sec-Fetch-User", "?1")
+        set("X-Requested-With", "com.android.chrome") // added for webview, and removed in interceptor for normal use
     }
 
     override val client = network.cloudflareClient.newBuilder()
@@ -48,12 +53,11 @@ class MGKomik : Madara(
 
     // ================================== Latest =======================================
 
-    override fun latestUpdatesRequest(page: Int): Request =
-        if (useLoadMoreRequest()) {
-            loadMoreRequest(page, popular = false)
-        } else {
-            GET("$baseUrl/$mangaSubString/${searchPage(page)}", headers)
-        }
+    override fun latestUpdatesRequest(page: Int): Request = if (useLoadMoreRequest()) {
+        loadMoreRequest(page, popular = false)
+    } else {
+        GET("$baseUrl/$mangaSubString/${searchPage(page)}", headers)
+    }
 
     // ================================== Search =======================================
 
@@ -106,10 +110,11 @@ class MGKomik : Madara(
         return FilterList(filters)
     }
 
-    private class GenreContentFilter(title: String, options: List<Pair<String, String>>) : UriPartFilter(
-        title,
-        options.toTypedArray(),
-    )
+    private class GenreContentFilter(title: String, options: List<Pair<String, String>>) :
+        UriPartFilter(
+            title,
+            options.toTypedArray(),
+        )
 
     override fun genresRequest() = GET("$baseUrl/$mangaSubString", headers)
 
@@ -120,12 +125,5 @@ class MGKomik : Madara(
             Genre(a.text(), a.absUrl("href"))
         }
         return genres
-    }
-
-    // =============================== Utilities ==============================
-
-    private fun randomString(length: Int): String {
-        val charPool = ('a'..'z') + ('A'..'Z') + ('.')
-        return List(length) { charPool.random() }.joinToString("")
     }
 }
