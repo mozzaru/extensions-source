@@ -2,7 +2,7 @@ ext {
     extName = 'ReYume'
     extClass = '.ReYume'
     baseUrl = 'https://www.re-yume.my.id'
-    extVersionCode = 29
+    extVersionCode = 30
     isNsfw = false
 }
 

@@ -45,10 +45,10 @@ class ReYume : HttpSource() {
     override fun popularMangaRequest(page: Int): Request = if (page == 1) {
         GET("$baseUrl/", headers)
     } else {
-        val startIndex = (page - 1) * 20 + 1
+        val startIndex = (page - 2) * 50 + 1
         val url = "$baseUrl/feeds/posts/default/-/Series".toHttpUrl().newBuilder()
             .addQueryParameter("alt", "json")
-            .addQueryParameter("max-results", "20")
+            .addQueryParameter("max-results", "50")
             .addQueryParameter("start-index", startIndex.toString())
             .build()
         GET(url, headers)
@@ -60,33 +60,36 @@ class ReYume : HttpSource() {
             val document = response.asJsoup()
             val mangas = document.select("#Side .group").map { element ->
                 SManga.create().apply {
-                    val a = element.selectFirst("a:has(h3)")
-                        ?: element.selectFirst("a[href][title]")
-                    title = element.selectFirst("h3")?.text() ?: a?.attr("title") ?: ""
+                    val a = element.select("a[href]").firstOrNull { it.selectFirst("h3") != null || it.hasAttr("title") }
+                    title = a?.selectFirst("h3")?.text() ?: a?.attr("title") ?: ""
                     val href = a?.attr("abs:href") ?: ""
                     this.url = if (href.startsWith(baseUrl)) {
                         "/" + href.substringAfter(baseUrl).removePrefix("/")
                     } else {
                         href
                     }
-                    thumbnail_url = element.selectFirst("a[style*='background-image']")?.attr("style")?.let { style ->
-                        Regex("""url\(['"]?(.+?)['"]?\)""").find(style)?.groupValues?.get(1)
-                            ?.replace(Regex("/s\\d+(-c)?/"), "/s600/")
-                    }
+                    thumbnail_url = element.select("a[style*='background-image'], img[src]").firstOrNull()?.let { el ->
+                        val style = el.attr("style")
+                        if (style.contains("background-image")) {
+                            Regex("""url\(['"]?(.+?)['"]?\)""").find(style)?.groupValues?.get(1)
+                        } else {
+                            el.attr("abs:src")
+                        }
+                    }?.replace(Regex("/s\\d+(-c)?/"), "/s600/")
                 }
-            }.filter { it.title.isNotBlank() }
-            return MangasPage(mangas, false)
+            }.filter { it.title.isNotBlank() && !it.url.contains("/search/label/") }
+            return MangasPage(mangas, true)
         }
         return searchMangaParse(response)
     }
 
     // Latest
     override fun latestUpdatesRequest(page: Int): Request {
-        val startIndex = (page - 1) * 20 + 1
+        val startIndex = (page - 1) * 50 + 1
         val url = "$baseUrl/feeds/posts/default/-/Series".toHttpUrl().newBuilder()
             .addQueryParameter("alt", "json")
             .addQueryParameter("orderby", "updated")
-            .addQueryParameter("max-results", "20")
+            .addQueryParameter("max-results", "50")
             .addQueryParameter("start-index", startIndex.toString())
             .build()
         return GET(url, headers)
@@ -96,10 +99,10 @@ class ReYume : HttpSource() {
 
     // Search
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
-        val startIndex = (page - 1) * 20 + 1
+        val startIndex = (page - 1) * 50 + 1
         val url = "$baseUrl/feeds/posts/default".toHttpUrl().newBuilder()
             .addQueryParameter("alt", "json")
-            .addQueryParameter("max-results", "20")
+            .addQueryParameter("max-results", "50")
             .addQueryParameter("start-index", startIndex.toString())
 
         if (query.isNotBlank()) {
@@ -122,26 +125,28 @@ class ReYume : HttpSource() {
 
     override fun searchMangaParse(response: Response): MangasPage {
         val result = response.parseAs<BloggerDto>()
-        val entries = result.feed?.entry.orEmpty()
+        val feed = result.feed ?: return MangasPage(emptyList(), false)
+        val entries = feed.entry.orEmpty()
 
         val mangas = entries
             .filter { entry -> entry.category.orEmpty().any { it.term == "Series" } }
             .map { entry ->
                 SManga.create().apply {
                     title = entry.title?.t ?: ""
-                    url = entry.link?.firstOrNull { it.rel == "alternate" }?.href?.let { href ->
-                        if (href.startsWith(baseUrl)) {
-                            "/" + href.substringAfter(baseUrl).removePrefix("/")
-                        } else {
-                            href
-                        }
-                    } ?: ""
+                    val href = entry.link?.firstOrNull { it.rel == "alternate" }?.href ?: ""
+                    url = if (href.startsWith(baseUrl)) {
+                        "/" + href.substringAfter(baseUrl).removePrefix("/")
+                    } else {
+                        href
+                    }
                     thumbnail_url = entry.mediaThumbnail?.url?.replace(Regex("/s\\d+(-c)?/"), "/s600/")
-                        ?: entry.content?.t?.let { Jsoup.parse(it).selectFirst("img")?.attr("src") }
+                        ?: entry.content?.t?.let { Jsoup.parse(it).selectFirst("img")?.attr("abs:src") }
                 }
             }
 
-        val hasNextPage = entries.size == 20
+        val totalResults = feed.totalResults?.t?.toIntOrNull() ?: 0
+        val startIndex = response.request.url.queryParameter("start-index")?.toIntOrNull() ?: 1
+        val hasNextPage = startIndex + entries.size <= totalResults
         return MangasPage(mangas, hasNextPage)
     }
 
@@ -164,8 +169,8 @@ class ReYume : HttpSource() {
         return SManga.create().apply {
             title = titleStr
             thumbnail_url = entry.mediaThumbnail?.url?.replace(Regex("/s\\d+(-c)?/"), "/s600/")
-                ?: document.selectFirst("img")?.attr("src")
-            description = document.selectFirst("#syn_bod")?.text() ?: document.text()
+                ?: document.selectFirst("img")?.attr("abs:src")
+            description = document.selectFirst("#syn_bod")?.text() ?: document.select("p").firstOrNull { it.text().length > 20 }?.text()
 
             val categories = entry.category.orEmpty().map { it.term }
             val excludedLabels = listOf("Series", "Ongoing", "Completed", "Project", "Manga", "Manhwa", "Manhua", "Chapter", "Hot", "New", "JP", "CN")
@@ -175,14 +180,16 @@ class ReYume : HttpSource() {
                     excludedLabels.any { it.equals(g, true) } || g.equals(titleStr, true) || g.toDoubleOrNull() != null
                 }
                 .distinct()
-                .joinToString { it }
+                .joinToString()
 
             author = document.selectFirst("#tauthers, #tauther")?.text() ?: document.selectFirst("span:contains(Author:) + span")?.text()
             artist = document.selectFirst("#tartists, #tartist")?.text() ?: document.selectFirst("span:contains(Artist:) + span")?.text()
 
             val altName = document.selectFirst("#talternatives, #talternative")?.text()
             if (!altName.isNullOrBlank()) {
-                description = "Alternative: $altName\n\n$description"
+                description = (description ?: "").let {
+                    if (it.isBlank()) "Alternative: $altName" else "$it\n\nAlternative: $altName"
+                }
             }
 
             status = when {
@@ -343,7 +350,7 @@ class ReYume : HttpSource() {
 
     @Serializable
     data class BloggerFeedDto(
-        val entry: List<BloggerEntryDto>? = emptyList(),
+        val entry: List<BloggerEntryDto>? = null,
         @SerialName("openSearch\$totalResults") val totalResults: BloggerTDto? = null,
     )
 
@@ -351,8 +358,8 @@ class ReYume : HttpSource() {
     data class BloggerEntryDto(
         val title: BloggerTDto? = null,
         val published: BloggerTDto? = null,
-        val link: List<BloggerLinkDto>? = emptyList(),
-        val category: List<BloggerCategoryDto>? = emptyList(),
+        val link: List<BloggerLinkDto>? = null,
+        val category: List<BloggerCategoryDto>? = null,
         val content: BloggerTDto? = null,
         @SerialName("media\$thumbnail") val mediaThumbnail: BloggerThumbnailDto? = null,
     )
