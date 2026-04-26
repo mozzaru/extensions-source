@@ -36,10 +36,10 @@ data class Dialog(
     val height: Float get() = scale * _height
     val width: Float get() = scale * _width
 
-    val text: String get() = textByLanguage["en"] ?: throw Exception("Dialog not found")
+    val text: String get() = textByLanguage["en"] ?: textByLanguage.values.firstOrNull() ?: ""
     fun getTextBy(language: Language) = when {
-        !language.disableTranslator -> textByLanguage[language.origin]
-        else -> textByLanguage[language.target]
+        !language.disableTranslator -> textByLanguage[language.target]
+        else -> textByLanguage[language.origin]
     } ?: text
     val centerY get() = height / 2 + y
     val centerX get() = width / 2 + x

@@ -39,9 +39,13 @@ class TranslationInterceptor(
         val translated = runBlocking(Dispatchers.IO) {
             dialogues.map { dialog ->
                 async {
-                    dialog.replaceText(
-                        translator.translate(language.origin, language.target, dialog.text),
-                    )
+                    if (dialog.textByLanguage[language.target].isNullOrBlank()) {
+                        val translatedText = translator.translate(language.origin, language.target, dialog.text)
+                        if (translatedText.isNotBlank() && translatedText != dialog.text) {
+                            return@async dialog.replaceText(language.target, translatedText)
+                        }
+                    }
+                    dialog
                 }
             }.awaitAll()
         }
@@ -53,9 +57,9 @@ class TranslationInterceptor(
         return chain.proceed(newRequest)
     }
 
-    private fun Dialog.replaceText(value: String) = this.copy(
-        textByLanguage = mutableMapOf(
-            "text" to value,
-        ),
+    private fun Dialog.replaceText(lang: String, value: String) = this.copy(
+        textByLanguage = textByLanguage.toMutableMap().apply {
+            put(lang, value)
+        },
     )
 }

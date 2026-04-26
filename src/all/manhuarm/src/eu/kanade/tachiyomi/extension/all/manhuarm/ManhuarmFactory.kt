@@ -11,7 +11,7 @@ class ManhuarmFactory : SourceFactory {
 
 private val languageList = listOf(
     Language("ar", disableFontSettings = true),
-    Language("en"),
+    Language("en", origin = "en"),
     Language("es"),
     Language("fr", supportNativeTranslation = true),
     Language("id", supportNativeTranslation = true),
