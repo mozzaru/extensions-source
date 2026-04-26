@@ -36,7 +36,7 @@ data class Dialog(
     val height: Float get() = scale * _height
     val width: Float get() = scale * _width
 
-    val text: String get() = textByLanguage["text"] ?: throw Exception("Dialog not found")
+    val text: String get() = textByLanguage["en"] ?: throw Exception("Dialog not found")
     fun getTextBy(language: Language) = when {
         !language.disableTranslator -> textByLanguage[language.origin]
         else -> textByLanguage[language.target]
@@ -89,12 +89,14 @@ private object DialogListSerializer :
 
     private fun getDialogs(element: JsonElement): JsonObject = buildJsonObject {
         when (element) {
-            is JsonArray -> put("text", element.jsonArray[1])
-
+            is JsonArray -> put("en", element.jsonArray[1])
             else -> {
                 element.jsonObject.entries
                     .filter { it.value.isString }
-                    .forEach { put(it.key, it.value) }
+                    .forEach {
+                        val key = if (it.key == "text") "en" else it.key
+                        put(key, it.value)
+                    }
             }
         }
     }
