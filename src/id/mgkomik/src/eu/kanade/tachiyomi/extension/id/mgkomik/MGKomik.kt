@@ -47,15 +47,23 @@ class MGKomik :
 
             val builder = request.newBuilder()
 
+            // On-point Client Hints sinkron dengan User-Agent untuk Publik
             builder.header("Sec-CH-UA", "\"Chromium\";v=\"$chromeVersion\", \"Not_A Brand\";v=\"24\"")
             builder.header("Sec-CH-UA-Mobile", "?1")
             builder.header("Sec-CH-UA-Platform", "\"Android\"")
+            builder.header("Sec-CH-UA-Full-Version-List", "\"Chromium\";v=\"$chromeVersion.0.0.0\", \"Not_A Brand\";v=\"24.0.0.0\"")
+            builder.header("Sec-CH-UA-Platform-Version", "\"11.0.0\"")
+            builder.header("Sec-CH-UA-Model", "\"\"")
 
             if (url.contains("admin-ajax.php") || url.contains("wp-json")) {
                 builder.header("X-Requested-With", "XMLHttpRequest")
+                builder.header("Sec-Fetch-Dest", "empty")
+                builder.header("Sec-Fetch-Mode", "cors")
+                builder.header("Sec-Fetch-Site", "same-origin")
+                builder.header("Referer", "$baseUrl/")
+                builder.header("Accept", "*/*")
             } else {
                 builder.removeHeader("X-Requested-With")
-
                 if (request.header("Accept")?.contains("text/html") == true) {
                     builder.header("Sec-Fetch-Dest", "document")
                     builder.header("Sec-Fetch-Mode", "navigate")
@@ -70,24 +78,16 @@ class MGKomik :
         .rateLimit(3)
         .build()
 
-    // Selector utama tetap Madara standard agar simple
-    override fun popularMangaSelector() = "div.page-item-detail, .manga__item"
-
     override fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
-        element.select("div.item-thumb a, div.post-title a").first()!!.let {
-            setUrlWithoutDomain(it.attr("abs:href"))
-            title = it.attr("title").ifEmpty { it.text() }
-        }
-        element.select("img").first()?.let {
-            thumbnail_url = imageFromElement(it)
-        }
+        val link = element.selectFirst("div.item-thumb a, div.post-title a")!!
+        setUrlWithoutDomain(link.attr("abs:href"))
+        title = link.attr("title").ifEmpty { link.text() }
+        thumbnail_url = element.selectFirst("img")?.let { imageFromElement(it) }
     }
 
     override fun getFilterList(): FilterList {
         launchIO { fetchGenres() }
-
         val filters = super.getFilterList().list.toMutableList()
-
         if (genresList.isNotEmpty()) {
             filters += listOf(
                 Filter.Separator(),
@@ -97,15 +97,10 @@ class MGKomik :
                 ),
             )
         }
-
         return FilterList(filters)
     }
 
-    private class GenreContentFilter(title: String, options: List<Pair<String, String>>) :
-        UriPartFilter(
-            title,
-            options.toTypedArray(),
-        )
+    private class GenreContentFilter(title: String, options: List<Pair<String, String>>) : UriPartFilter(title, options.toTypedArray())
 
     override fun genresRequest() = GET("$baseUrl/$mangaSubString", headers)
 
