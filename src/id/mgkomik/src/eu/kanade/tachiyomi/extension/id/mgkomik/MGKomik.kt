@@ -41,12 +41,15 @@ class MGKomik :
         set("Accept-Language", "id-ID,id;q=0.9")
         set("Upgrade-Insecure-Requests", "1")
 
-        set("Sec-CH-UA", "\"Chromium\";v=\"$chromeVersion\", \"Not.A/Brand\";v=\"8\"")
+        // On-point Client Hints sinkron dengan User-Agent untuk Publik
+        set("Sec-CH-UA", "\"Chromium\";v=\"$chromeVersion\", \"Not_A Brand\";v=\"24\", \"Google Chrome\";v=\"$chromeVersion\"")
         set("Sec-CH-UA-Mobile", "?1")
         set("Sec-CH-UA-Platform", "\"Android\"")
-        set("Sec-CH-UA-Full-Version-List", "\"Chromium\";v=\"$chromeVersion.0.0.0\", \"Not.A/Brand\";v=\"8.0.0.0\"")
+        set("Sec-CH-UA-Full-Version-List", "\"Chromium\";v=\"$chromeVersion.0.0.0\", \"Not_A Brand\";v=\"24.0.0.0\", \"Google Chrome\";v=\"$chromeVersion.0.0.0\"")
         set("Sec-CH-UA-Platform-Version", "\"11.0.0\"")
+        set("Sec-CH-UA-Model", "\"\"")
 
+        // Default navigation headers
         set("Sec-Fetch-Dest", "document")
         set("Sec-Fetch-Mode", "navigate")
         set("Sec-Fetch-Site", "none")
@@ -59,11 +62,12 @@ class MGKomik :
             val url = request.url.toString()
 
             val builder = request.newBuilder()
-            if (url.contains("admin-ajax.php") || url.contains("wp-json") || url.contains("/ajax/chapters")) {
+            if (url.contains("admin-ajax.php") || url.contains("wp-json") || url.contains("ajax")) {
                 builder.header("X-Requested-With", "XMLHttpRequest")
                 builder.header("Sec-Fetch-Dest", "empty")
                 builder.header("Sec-Fetch-Mode", "cors")
                 builder.header("Sec-Fetch-Site", "same-origin")
+                builder.header("Referer", "$baseUrl/")
                 builder.header("Accept", "*/*")
                 builder.removeHeader("Sec-Fetch-User")
                 builder.removeHeader("Upgrade-Insecure-Requests")
@@ -77,11 +81,11 @@ class MGKomik :
         .build()
 
     override fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
-        element.select("div.item-thumb a, div.post-title a").first()?.let {
+        element.selectFirst("div.item-thumb a, div.post-title a")?.let {
             setUrlWithoutDomain(it.attr("abs:href"))
             title = it.attr("title").ifEmpty { it.text() }
         }
-        element.select("img").first()?.let {
+        element.selectFirst("img")?.let {
             thumbnail_url = imageFromElement(it)
         }
     }
