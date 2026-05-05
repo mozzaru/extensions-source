@@ -34,45 +34,47 @@ class MGKomik :
 
     override fun headersBuilder() = super.headersBuilder().apply {
         setRandomUserAgent(userAgentType = UserAgentType.MOBILE, filterInclude = listOf("Chrome"))
-        val ua = build().get("User-Agent").orEmpty()
-        val chromeVersion = CHROME_REGEX.find(ua)?.groupValues?.get(1) ?: "131"
-
-        set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
         set("Accept-Language", "id-ID,id;q=0.9")
-        set("Upgrade-Insecure-Requests", "1")
-
-        // On-point Client Hints sinkron dengan User-Agent untuk Publik
-        set("Sec-CH-UA", "\"Chromium\";v=\"$chromeVersion\", \"Not_A Brand\";v=\"24\", \"Google Chrome\";v=\"$chromeVersion\"")
-        set("Sec-CH-UA-Mobile", "?1")
-        set("Sec-CH-UA-Platform", "\"Android\"")
-        set("Sec-CH-UA-Full-Version-List", "\"Chromium\";v=\"$chromeVersion.0.0.0\", \"Not_A Brand\";v=\"24.0.0.0\", \"Google Chrome\";v=\"$chromeVersion.0.0.0\"")
-        set("Sec-CH-UA-Platform-Version", "\"11.0.0\"")
-        set("Sec-CH-UA-Model", "\"\"")
-
-        // Default navigation headers
-        set("Sec-Fetch-Dest", "document")
-        set("Sec-Fetch-Mode", "navigate")
-        set("Sec-Fetch-Site", "none")
-        set("Sec-Fetch-User", "?1")
     }
 
     override val client = network.cloudflareClient.newBuilder()
         .addInterceptor { chain ->
             val request = chain.request()
             val url = request.url.toString()
+            val ua = request.header("User-Agent").orEmpty()
+            val chromeVersion = CHROME_REGEX.find(ua)?.groupValues?.get(1) ?: "131"
 
             val builder = request.newBuilder()
+
+            // Identitas Browser (Client Hints) sinkron dengan User-Agent untuk Publik
+            builder.header("Sec-CH-UA", "\"Chromium\";v=\"$chromeVersion\", \"Not?A_Brand\";v=\"24\", \"Google Chrome\";v=\"$chromeVersion\"")
+            builder.header("Sec-CH-UA-Mobile", "?1")
+            builder.header("Sec-CH-UA-Platform", "\"Android\"")
+
             if (url.contains("admin-ajax.php") || url.contains("wp-json") || url.contains("ajax")) {
+                // Request Internal (Search, Load More, Chapter List)
                 builder.header("X-Requested-With", "XMLHttpRequest")
                 builder.header("Sec-Fetch-Dest", "empty")
                 builder.header("Sec-Fetch-Mode", "cors")
                 builder.header("Sec-Fetch-Site", "same-origin")
                 builder.header("Referer", "$baseUrl/")
                 builder.header("Accept", "*/*")
-                builder.removeHeader("Sec-Fetch-User")
-                builder.removeHeader("Upgrade-Insecure-Requests")
-            } else {
+            } else if (url.contains(Regex("""\.(jpg|jpeg|png|webp|avif|gif)""", RegexOption.IGNORE_CASE))) {
+                // Request Gambar
                 builder.removeHeader("X-Requested-With")
+                builder.header("Sec-Fetch-Dest", "image")
+                builder.header("Sec-Fetch-Mode", "no-cors")
+                builder.header("Sec-Fetch-Site", "same-origin")
+                builder.header("Referer", "$baseUrl/")
+            } else {
+                // Request Halaman (Navigation)
+                builder.removeHeader("X-Requested-With")
+                builder.header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
+                builder.header("Sec-Fetch-Dest", "document")
+                builder.header("Sec-Fetch-Mode", "navigate")
+                builder.header("Sec-Fetch-Site", "none")
+                builder.header("Sec-Fetch-User", "?1")
+                builder.header("Upgrade-Insecure-Requests", "1")
             }
 
             chain.proceed(builder.build())
@@ -80,14 +82,14 @@ class MGKomik :
         .rateLimit(9, 2)
         .build()
 
+    // Selector standard Madara agar simple dan clean
+    override fun popularMangaSelector() = "div.page-item-detail, .manga__item"
+
     override fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
-        element.selectFirst("div.item-thumb a, div.post-title a")?.let {
-            setUrlWithoutDomain(it.attr("abs:href"))
-            title = it.attr("title").ifEmpty { it.text() }
-        }
-        element.selectFirst("img")?.let {
-            thumbnail_url = imageFromElement(it)
-        }
+        val link = element.selectFirst("div.item-thumb a, div.post-title a")!!
+        setUrlWithoutDomain(link.attr("abs:href"))
+        title = link.attr("title").ifEmpty { link.text() }
+        thumbnail_url = element.selectFirst("img")?.let { imageFromElement(it) }
     }
 
     override fun getFilterList(): FilterList {
