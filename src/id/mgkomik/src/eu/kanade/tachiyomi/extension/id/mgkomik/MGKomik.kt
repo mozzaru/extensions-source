@@ -35,6 +35,7 @@ class MGKomik :
     override fun headersBuilder() = super.headersBuilder().apply {
         setRandomUserAgent(userAgentType = UserAgentType.MOBILE, filterInclude = listOf("Chrome"))
         set("Accept-Language", "id-ID,id;q=0.9")
+        set("Cache-Control", "no-cache")
     }
 
     override val client = network.cloudflareClient.newBuilder()
@@ -47,9 +48,10 @@ class MGKomik :
             val builder = request.newBuilder()
 
             // Identitas Browser (Client Hints) sinkron dengan User-Agent
-            builder.header("Sec-CH-UA", "\"Chromium\";v=\"$chromeVersion\", \"Not(A:Brand\";v=\"99\", \"Google Chrome\";v=\"$chromeVersion\"")
+            builder.header("Sec-CH-UA", "\"Chromium\";v=\"$chromeVersion\", \"Not?A_Brand\";v=\"24\", \"Google Chrome\";v=\"$chromeVersion\"")
             builder.header("Sec-CH-UA-Mobile", "?1")
             builder.header("Sec-CH-UA-Platform", "\"Android\"")
+            builder.header("Sec-CH-UA-Full-Version-List", "\"Chromium\";v=\"$chromeVersion.0.0.0\", \"Not?A_Brand\";v=\"24.0.0.0\", \"Google Chrome\";v=\"$chromeVersion.0.0.0\"")
 
             if (url.contains("admin-ajax.php") || url.contains("wp-json") || url.contains("ajax")) {
                 // Request Internal / AJAX (Search, Load More, Chapter List)
@@ -68,7 +70,7 @@ class MGKomik :
                 builder.header("Sec-Fetch-Site", "cross-site")
                 builder.header("Referer", "$baseUrl/")
             } else {
-                // Request Halaman / Navigation (Manga details, Chapter page)
+                // Request Halaman / Navigation (Manga details, Chapter page, Listings)
                 builder.removeHeader("X-Requested-With")
                 builder.header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
                 builder.header("Sec-Fetch-Dest", "document")
@@ -83,13 +85,13 @@ class MGKomik :
         .rateLimit(9, 2)
         .build()
 
-    // Selector standard Madara agar simple dan clean
-    override fun popularMangaSelector() = "div.page-item-detail, .manga__item"
+    // Selector lebih inklusif agar manga tetap muncul meski layout berubah sedikit
+    override fun popularMangaSelector() = "div.page-item-detail, .manga__item, .post-item"
 
     override fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
-        val link = element.selectFirst("div.item-thumb a, div.post-title a")!!
+        val link = element.selectFirst("div.item-thumb a, div.post-title a, a:has(img)")!!
         setUrlWithoutDomain(link.attr("abs:href"))
-        title = link.attr("title").ifEmpty { link.text() }
+        title = link.attr("title").ifEmpty { link.selectFirst("h3, h4")?.text() ?: link.text() }
         thumbnail_url = element.selectFirst("img")?.let { imageFromElement(it) }
     }
 
