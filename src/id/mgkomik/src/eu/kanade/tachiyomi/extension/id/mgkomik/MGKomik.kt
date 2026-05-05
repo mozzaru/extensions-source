@@ -4,20 +4,22 @@ import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
+import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
-import eu.kanade.tachiyomi.source.online.ParsedHttpSource
+import eu.kanade.tachiyomi.source.online.HttpSource
+import eu.kanade.tachiyomi.util.asJsoup
 import keiyoushi.utils.tryParse
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.jsoup.nodes.Document
+import okhttp3.Response
 import org.jsoup.nodes.Element
 import java.text.SimpleDateFormat
 import java.util.Locale
 
-class MGKomik : ParsedHttpSource() {
+class MGKomik : HttpSource() {
 
     override val name = "MG Komik"
     override val baseUrl = "https://web.mgkomik.cc"
@@ -28,15 +30,38 @@ class MGKomik : ParsedHttpSource() {
 
     override val client: OkHttpClient = network.cloudflareClient.newBuilder()
         .rateLimit(3)
+        .addInterceptor { chain ->
+            val request = chain.request()
+            val headers = request.headers.newBuilder().apply {
+                val url = request.url.toString()
+                if (url.contains("t=")) {
+                    set("X-Requested-With", "XMLHttpRequest")
+                }
+                if (url.contains("wp-admin/admin-ajax.php") || url.contains("wp-json")) {
+                    set("X-Requested-With", "XMLHttpRequest")
+                }
+
+                // Browser-like headers
+                if (request.header("Sec-Fetch-Site") == null) {
+                    set("Sec-Fetch-Site", if (url.startsWith(baseUrl)) "same-origin" else "cross-site")
+                }
+                if (request.header("Sec-Fetch-Mode") == null) {
+                    set("Sec-Fetch-Mode", "navigate")
+                }
+                if (request.header("Sec-Fetch-Dest") == null) {
+                    set("Sec-Fetch-Dest", "document")
+                }
+            }.build()
+            chain.proceed(request.newBuilder().headers(headers).build())
+        }
         .build()
 
     override fun headersBuilder() = super.headersBuilder().apply {
-        set(
-            "User-Agent",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
-        )
-        set("Referer", baseUrl)
+        set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36")
+        set("Referer", "$baseUrl/")
+        set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
         set("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
+        set("Upgrade-Insecure-Requests", "1")
     }
 
     // ========== POPULAR ==========
@@ -46,9 +71,16 @@ class MGKomik : ParsedHttpSource() {
         return GET("$baseUrl/komik/?order_by=views&page=$page&t=$t", headersBuilder().add("Cache-Control", "no-cache").build())
     }
 
-    override fun popularMangaSelector() = ".manga-card"
+    override fun popularMangaParse(response: Response): MangasPage {
+        val document = response.asJsoup()
+        val mangas = document.select(".manga-card").map { element ->
+            popularMangaFromElement(element)
+        }
+        val hasNextPage = document.selectFirst(".pagination .next, a[href*='page=']:contains(Next)") != null
+        return MangasPage(mangas, hasNextPage)
+    }
 
-    override fun popularMangaFromElement(element: Element) = SManga.create().apply {
+    private fun popularMangaFromElement(element: Element) = SManga.create().apply {
         val a = element.selectFirst(".card-info a.manga-title-link")
             ?: element.selectFirst(".card-info a.manga-title")
             ?: element.selectFirst("a[href*='/komik/']")!!
@@ -70,16 +102,6 @@ class MGKomik : ParsedHttpSource() {
         }
     }
 
-    override fun mangaDetailsRequest(manga: SManga): Request {
-        val t = System.currentTimeMillis()
-        val url = getMangaUrl(manga).toHttpUrlOrNull()?.newBuilder()
-            ?.addQueryParameter("t", t.toString())
-            ?.build()?.toString() ?: getMangaUrl(manga)
-        return GET(url, headersBuilder().add("Cache-Control", "no-cache").build())
-    }
-
-    override fun popularMangaNextPageSelector() = ".pagination .next, a[href*='page=']:contains(Next)"
-
     // ========== LATEST ==========
 
     override fun latestUpdatesRequest(page: Int): Request {
@@ -87,11 +109,7 @@ class MGKomik : ParsedHttpSource() {
         return GET("$baseUrl/komik/?order_by=latest&page=$page&t=$t", headersBuilder().add("Cache-Control", "no-cache").build())
     }
 
-    override fun latestUpdatesSelector() = popularMangaSelector()
-
-    override fun latestUpdatesFromElement(element: Element) = popularMangaFromElement(element)
-
-    override fun latestUpdatesNextPageSelector() = popularMangaNextPageSelector()
+    override fun latestUpdatesParse(response: Response): MangasPage = popularMangaParse(response)
 
     // ========== SEARCH ==========
 
@@ -113,11 +131,143 @@ class MGKomik : ParsedHttpSource() {
         return GET(urlBuilder.build().toString(), headersBuilder().add("Cache-Control", "no-cache").build())
     }
 
-    override fun searchMangaSelector() = popularMangaSelector()
+    override fun searchMangaParse(response: Response): MangasPage = popularMangaParse(response)
 
-    override fun searchMangaFromElement(element: Element) = popularMangaFromElement(element)
+    // ========== MANGA DETAILS ==========
 
-    override fun searchMangaNextPageSelector() = popularMangaNextPageSelector()
+    override fun mangaDetailsRequest(manga: SManga): Request {
+        val t = System.currentTimeMillis()
+        val url = getMangaUrl(manga).toHttpUrlOrNull()?.newBuilder()
+            ?.addQueryParameter("t", t.toString())
+            ?.build()?.toString() ?: getMangaUrl(manga)
+        return GET(url, headersBuilder().add("Cache-Control", "no-cache").build())
+    }
+
+    override fun mangaDetailsParse(response: Response): SManga = SManga.create().apply {
+        val document = response.asJsoup()
+        title = document.selectFirst("h1#mangaTitle")?.ownText()?.trim() ?: ""
+
+        val altTitle = document.selectFirst("h1#mangaTitle")?.attr("data-alt")?.trim()
+        val desc = document.selectFirst(".manga-description p")?.text()?.trim() ?: ""
+
+        description = if (!altTitle.isNullOrBlank()) {
+            "$desc\n\nAlternative Title: $altTitle"
+        } else {
+            desc
+        }
+
+        author = document.select(".manga-meta .meta-item")
+            .firstOrNull { it.text().startsWith("Author:") }
+            ?.text()?.removePrefix("Author:")?.trim()
+
+        genre = document.select(".genre-list .genre-tag")
+            .joinToString { it.text().trim() }
+
+        status = when (document.selectFirst(".status-badge")?.text()?.lowercase()?.trim()) {
+            "ongoing" -> SManga.ONGOING
+            "completed" -> SManga.COMPLETED
+            "hiatus" -> SManga.ON_HIATUS
+            else -> SManga.UNKNOWN
+        }
+
+        thumbnail_url = document.selectFirst("img.manga-cover-large")?.attr("abs:src")
+    }
+
+    // ========== CHAPTER LIST ==========
+
+    override fun chapterListRequest(manga: SManga): Request = mangaDetailsRequest(manga)
+
+    override fun chapterListParse(response: Response): List<SChapter> {
+        val document = response.asJsoup()
+        return document.select("ul#chapterList .chapter-list-item").map { element ->
+            SChapter.create().apply {
+                val a = element.selectFirst("a.chapter-link")!!
+                setUrlWithoutDomain(a.attr("href").trim())
+                name = element.selectFirst(".chapter-number")?.text()?.trim() ?: ""
+                date_upload = parseDate(element.selectFirst(".chapter-date")?.text()?.trim() ?: "")
+            }
+        }
+    }
+
+    override fun getChapterUrl(chapter: SChapter): String {
+        val url = chapter.url.replace("/manga/", "/komik/")
+        return when {
+            url.startsWith("http") -> {
+                url.replace("mgkomik.com", "web.mgkomik.cc")
+                    .replace("id.mgkomik.cc", "web.mgkomik.cc")
+            }
+            url.startsWith("//") -> "https:$url"
+            else -> baseUrl + url.let { if (it.startsWith("/")) it else "/$it" }
+        }
+    }
+
+    // ========== PAGE LIST ==========
+
+    override fun pageListRequest(chapter: SChapter): Request {
+        val t = System.currentTimeMillis()
+        val url = getChapterUrl(chapter).toHttpUrlOrNull()?.newBuilder()
+            ?.addQueryParameter("t", t.toString())
+            ?.build()?.toString() ?: getChapterUrl(chapter)
+        return GET(url, headersBuilder().add("Cache-Control", "no-cache").build())
+    }
+
+    override fun pageListParse(response: Response): List<Page> {
+        val document = response.asJsoup()
+        return document.select("#readingContent img[data-page]")
+            .mapIndexed { idx, img ->
+                Page(idx, document.location(), img.attr("abs:src"))
+            }
+    }
+
+    override fun imageUrlParse(response: Response) = throw UnsupportedOperationException()
+
+    override fun imageRequest(page: Page): Request {
+        val imgHeaders = headersBuilder().apply {
+            set("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
+            set("Referer", page.url)
+            set("Origin", baseUrl)
+        }.build()
+        return GET(page.imageUrl!!, imgHeaders)
+    }
+
+    // ========== DATE PARSER ==========
+
+    private val dateFormatterNumeric by lazy { SimpleDateFormat("dd/MM/yy", Locale("id")) }
+
+    private val dateFormatterShort by lazy { SimpleDateFormat("dd MMM yy", Locale("id")) }
+
+    private val dateFormatterLong by lazy { SimpleDateFormat("dd MMM yyyy", Locale("id")) }
+
+    private fun parseDate(date: String): Long {
+        val lower = date.lowercase().trim()
+        if (lower.isBlank()) return 0L
+
+        // Relative: Indonesian ("lalu", "hari ini") and English ("ago", "today")
+        if (lower.contains("lalu") || lower.contains("ago") ||
+            lower == "hari ini" || lower == "today"
+        ) {
+            val value = Regex("""(\d+)""").find(lower)
+                ?.groupValues?.get(1)?.toLongOrNull() ?: 1L
+            val now = System.currentTimeMillis()
+            return when {
+                lower.contains("detik") || lower.contains("second") -> now - value * 1_000L
+                lower.contains("menit") || lower.contains("minute") -> now - value * 60_000L
+                lower.contains("jam") || lower.contains("hour") -> now - value * 3_600_000L
+                lower.contains("hari") || lower.contains("day") -> now - value * 86_400_000L
+                lower.contains("minggu") || lower.contains("week") -> now - value * 7 * 86_400_000L
+                lower.contains("bulan") || lower.contains("month") -> now - value * 30L * 86_400_000L
+                lower.contains("tahun") || lower.contains("year") -> now - value * 365L * 86_400_000L
+                else -> now
+            }
+        }
+
+        // Absolute: try "dd/MM/yy", then "dd MMM yy", then "dd MMM yyyy"
+        return dateFormatterNumeric.tryParse(date)
+            .takeIf { it != 0L }
+            ?: dateFormatterShort.tryParse(date)
+                .takeIf { it != 0L }
+            ?: dateFormatterLong.tryParse(date)
+    }
 
     // ========== FILTERS ==========
 
@@ -174,132 +324,5 @@ class MGKomik : ParsedHttpSource() {
         )
 
         val selected get() = slugValues[state]
-    }
-
-    // ========== MANGA DETAILS ==========
-
-    override fun mangaDetailsParse(document: Document) = SManga.create().apply {
-        title = document.selectFirst("h1#mangaTitle")?.ownText()?.trim() ?: ""
-
-        val altTitle = document.selectFirst("h1#mangaTitle")?.attr("data-alt")?.trim()
-        val desc = document.selectFirst(".manga-description p")?.text()?.trim() ?: ""
-
-        description = if (!altTitle.isNullOrBlank()) {
-            "$desc\n\nAlternative Title: $altTitle"
-        } else {
-            desc
-        }
-
-        author = document.select(".manga-meta .meta-item")
-            .firstOrNull { it.text().startsWith("Author:") }
-            ?.text()?.removePrefix("Author:")?.trim()
-
-        genre = document.select(".genre-list .genre-tag")
-            .joinToString { it.text().trim() }
-
-        status = when (document.selectFirst(".status-badge")?.text()?.lowercase()?.trim()) {
-            "ongoing" -> SManga.ONGOING
-            "completed" -> SManga.COMPLETED
-            "hiatus" -> SManga.ON_HIATUS
-            else -> SManga.UNKNOWN
-        }
-
-        thumbnail_url = document.selectFirst("img.manga-cover-large")?.attr("abs:src")
-    }
-
-    // ========== CHAPTER LIST ==========
-
-    override fun chapterListSelector() = "ul#chapterList .chapter-list-item"
-
-    override fun chapterFromElement(element: Element) = SChapter.create().apply {
-        val a = element.selectFirst("a.chapter-link")!!
-        setUrlWithoutDomain(a.attr("href").trim())
-        name = element.selectFirst(".chapter-number")?.text()?.trim() ?: ""
-        date_upload = parseDate(element.selectFirst(".chapter-date")?.text()?.trim() ?: "")
-    }
-
-    override fun getChapterUrl(chapter: SChapter): String {
-        val url = chapter.url.replace("/manga/", "/komik/")
-        return when {
-            url.startsWith("http") -> {
-                url.replace("mgkomik.com", "web.mgkomik.cc")
-                    .replace("id.mgkomik.cc", "web.mgkomik.cc")
-            }
-            url.startsWith("//") -> "https:$url"
-            else -> baseUrl + url.let { if (it.startsWith("/")) it else "/$it" }
-        }
-    }
-
-    override fun chapterListRequest(manga: SManga): Request {
-        val t = System.currentTimeMillis()
-        val url = getMangaUrl(manga).toHttpUrlOrNull()?.newBuilder()
-            ?.addQueryParameter("t", t.toString())
-            ?.build()?.toString() ?: getMangaUrl(manga)
-        return GET(url, headersBuilder().add("Cache-Control", "no-cache").build())
-    }
-
-    override fun pageListRequest(chapter: SChapter): Request {
-        val t = System.currentTimeMillis()
-        val url = getChapterUrl(chapter).toHttpUrlOrNull()?.newBuilder()
-            ?.addQueryParameter("t", t.toString())
-            ?.build()?.toString() ?: getChapterUrl(chapter)
-        return GET(url, headersBuilder().add("Cache-Control", "no-cache").build())
-    }
-
-    // ========== DATE PARSER ==========
-
-    private val dateFormatterNumeric by lazy { SimpleDateFormat("dd/MM/yy", Locale("id")) }
-
-    private val dateFormatterShort by lazy { SimpleDateFormat("dd MMM yy", Locale("id")) }
-
-    private val dateFormatterLong by lazy { SimpleDateFormat("dd MMM yyyy", Locale("id")) }
-
-    private fun parseDate(date: String): Long {
-        val lower = date.lowercase().trim()
-        if (lower.isBlank()) return 0L
-
-        // Relative: Indonesian ("lalu", "hari ini") and English ("ago", "today")
-        if (lower.contains("lalu") || lower.contains("ago") ||
-            lower == "hari ini" || lower == "today"
-        ) {
-            val value = Regex("""(\d+)""").find(lower)
-                ?.groupValues?.get(1)?.toLongOrNull() ?: 1L
-            val now = System.currentTimeMillis()
-            return when {
-                lower.contains("detik") || lower.contains("second") -> now - value * 1_000L
-                lower.contains("menit") || lower.contains("minute") -> now - value * 60_000L
-                lower.contains("jam") || lower.contains("hour") -> now - value * 3_600_000L
-                lower.contains("hari") || lower.contains("day") -> now - value * 86_400_000L
-                lower.contains("minggu") || lower.contains("week") -> now - value * 7 * 86_400_000L
-                lower.contains("bulan") || lower.contains("month") -> now - value * 30L * 86_400_000L
-                lower.contains("tahun") || lower.contains("year") -> now - value * 365L * 86_400_000L
-                else -> now
-            }
-        }
-
-        // Absolute: try "dd/MM/yy", then "dd MMM yy", then "dd MMM yyyy"
-        return dateFormatterNumeric.tryParse(date)
-            .takeIf { it != 0L }
-            ?: dateFormatterShort.tryParse(date)
-                .takeIf { it != 0L }
-            ?: dateFormatterLong.tryParse(date)
-    }
-
-    // ========== PAGE LIST ==========
-
-    override fun pageListParse(document: Document): List<Page> = document.select("#readingContent img[data-page]")
-        .mapIndexed { idx, img ->
-            Page(idx, document.location(), img.attr("abs:src"))
-        }
-
-    override fun imageUrlParse(document: Document) = ""
-
-    override fun imageRequest(page: Page): Request {
-        val imgHeaders = headersBuilder().apply {
-            set("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
-            set("Referer", page.url)
-            set("Origin", baseUrl)
-        }.build()
-        return GET(page.imageUrl!!, imgHeaders)
     }
 }
