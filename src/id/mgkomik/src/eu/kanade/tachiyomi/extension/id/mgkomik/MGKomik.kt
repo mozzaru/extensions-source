@@ -75,7 +75,7 @@ class MGKomik :
 
             chain.proceed(builder.build())
         }
-        .rateLimit(3)
+        .rateLimit(12, 3)
         .build()
 
     override fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
