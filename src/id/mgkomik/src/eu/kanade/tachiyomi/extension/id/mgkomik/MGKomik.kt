@@ -32,24 +32,20 @@ class MGKomik : HttpSource() {
         .rateLimit(3)
         .addInterceptor { chain ->
             val request = chain.request()
+            val url = request.url.toString()
             val headers = request.headers.newBuilder().apply {
-                val url = request.url.toString()
-                if (url.contains("t=")) {
+                if (url.contains("wp-admin/admin-ajax.php") || url.contains("wp-json") || url.contains("t=")) {
                     set("X-Requested-With", "XMLHttpRequest")
-                }
-                if (url.contains("wp-admin/admin-ajax.php") || url.contains("wp-json")) {
-                    set("X-Requested-With", "XMLHttpRequest")
-                }
-
-                // Browser-like headers
-                if (request.header("Sec-Fetch-Site") == null) {
-                    set("Sec-Fetch-Site", if (url.startsWith(baseUrl)) "same-origin" else "cross-site")
-                }
-                if (request.header("Sec-Fetch-Mode") == null) {
-                    set("Sec-Fetch-Mode", "navigate")
-                }
-                if (request.header("Sec-Fetch-Dest") == null) {
+                    set("Accept", "*/*")
+                    set("Sec-Fetch-Dest", "empty")
+                    set("Sec-Fetch-Mode", "cors")
+                    set("Sec-Fetch-Site", "same-origin")
+                } else {
+                    removeAll("X-Requested-With")
                     set("Sec-Fetch-Dest", "document")
+                    set("Sec-Fetch-Mode", "navigate")
+                    set("Sec-Fetch-Site", "none")
+                    set("Sec-Fetch-User", "?1")
                 }
             }.build()
             chain.proceed(request.newBuilder().headers(headers).build())
@@ -62,6 +58,7 @@ class MGKomik : HttpSource() {
         set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
         set("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
         set("Upgrade-Insecure-Requests", "1")
+        set("Priority", "u=0, i")
     }
 
     // ========== POPULAR ==========
@@ -96,6 +93,7 @@ class MGKomik : HttpSource() {
             url.startsWith("http") -> {
                 url.replace("mgkomik.com", "web.mgkomik.cc")
                     .replace("id.mgkomik.cc", "web.mgkomik.cc")
+                    .replace("mgkomik.id", "web.mgkomik.cc")
             }
             url.startsWith("//") -> "https:$url"
             else -> baseUrl + url.let { if (it.startsWith("/")) it else "/$it" }
@@ -195,6 +193,7 @@ class MGKomik : HttpSource() {
             url.startsWith("http") -> {
                 url.replace("mgkomik.com", "web.mgkomik.cc")
                     .replace("id.mgkomik.cc", "web.mgkomik.cc")
+                    .replace("mgkomik.id", "web.mgkomik.cc")
             }
             url.startsWith("//") -> "https:$url"
             else -> baseUrl + url.let { if (it.startsWith("/")) it else "/$it" }
