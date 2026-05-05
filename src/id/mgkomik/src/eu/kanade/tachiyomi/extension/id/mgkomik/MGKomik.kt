@@ -52,7 +52,6 @@ class MGKomik :
         set("Sec-Fetch-Site", "none")
         set("Sec-Fetch-User", "?1")
         set("Upgrade-Insecure-Requests", "1")
-        set("X-Requested-With", "com.android.chrome")
     }
 
     override val client = network.cloudflareClient.newBuilder()
