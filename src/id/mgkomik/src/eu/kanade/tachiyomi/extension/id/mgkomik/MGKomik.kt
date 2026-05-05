@@ -19,7 +19,7 @@ import java.util.Locale
 class MGKomik :
     Madara(
         "MG Komik",
-        "https://id.mgkomik.cc",
+        "https://web.mgkomik.cc",
         "id",
         SimpleDateFormat("dd MMM yy", Locale.US),
     ),
@@ -46,17 +46,18 @@ class MGKomik :
 
             val builder = request.newBuilder()
 
-            // Identitas Browser (Client Hints) sinkron dengan User-Agent untuk Publik
-            builder.header("Sec-CH-UA", "\"Chromium\";v=\"$chromeVersion\", \"Not?A_Brand\";v=\"24\", \"Google Chrome\";v=\"$chromeVersion\"")
+            // Identitas Browser (Client Hints) sinkron dengan User-Agent
+            builder.header("Sec-CH-UA", "\"Chromium\";v=\"$chromeVersion\", \"Not(A:Brand\";v=\"99\", \"Google Chrome\";v=\"$chromeVersion\"")
             builder.header("Sec-CH-UA-Mobile", "?1")
             builder.header("Sec-CH-UA-Platform", "\"Android\"")
 
             if (url.contains("admin-ajax.php") || url.contains("wp-json") || url.contains("ajax")) {
-                // Request Internal (Search, Load More, Chapter List)
+                // Request Internal / AJAX (Search, Load More, Chapter List)
                 builder.header("X-Requested-With", "XMLHttpRequest")
                 builder.header("Sec-Fetch-Dest", "empty")
                 builder.header("Sec-Fetch-Mode", "cors")
                 builder.header("Sec-Fetch-Site", "same-origin")
+                builder.header("Origin", baseUrl)
                 builder.header("Referer", "$baseUrl/")
                 builder.header("Accept", "*/*")
             } else if (url.contains(Regex("""\.(jpg|jpeg|png|webp|avif|gif)""", RegexOption.IGNORE_CASE))) {
@@ -64,12 +65,12 @@ class MGKomik :
                 builder.removeHeader("X-Requested-With")
                 builder.header("Sec-Fetch-Dest", "image")
                 builder.header("Sec-Fetch-Mode", "no-cors")
-                builder.header("Sec-Fetch-Site", "same-origin")
+                builder.header("Sec-Fetch-Site", "cross-site")
                 builder.header("Referer", "$baseUrl/")
             } else {
-                // Request Halaman (Navigation)
+                // Request Halaman / Navigation (Manga details, Chapter page)
                 builder.removeHeader("X-Requested-With")
-                builder.header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
+                builder.header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
                 builder.header("Sec-Fetch-Dest", "document")
                 builder.header("Sec-Fetch-Mode", "navigate")
                 builder.header("Sec-Fetch-Site", "none")

@@ -2,7 +2,7 @@ ext {
     extName = 'MG Komik'
     extClass = '.MGKomik'
     themePkg = 'madara'
-    baseUrl = 'https://id.mgkomik.cc'
+    baseUrl = 'https://web.mgkomik.cc'
     overrideVersionCode = 19
     isNsfw = false
 }
