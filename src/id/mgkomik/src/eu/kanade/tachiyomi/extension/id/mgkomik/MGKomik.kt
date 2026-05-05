@@ -31,85 +31,55 @@ class MGKomik :
 
     override val mangaSubString = "komik"
 
-    override fun getMangaUrl(manga: SManga): String {
-        val url = manga.url.let {
-            if (it.startsWith("http")) {
-                it
-            } else if (it.startsWith("//")) {
-                "https:$it"
-            } else {
-                "$baseUrl$it"
-            }
-        }
-        return url.replace("mgkomik.com", "id.mgkomik.cc")
-            .replace("/manga/", "/$mangaSubString/")
-    }
+    // Migrasi link lama agar library user tetap aman
+    override fun getMangaUrl(manga: SManga): String = "$baseUrl${manga.url}".replace("mgkomik.com", "id.mgkomik.cc")
+        .replace("/manga/", "/$mangaSubString/")
 
     override fun getChapterUrl(chapter: SChapter): String = chapter.url.replace("mgkomik.com", "id.mgkomik.cc")
         .replace("/manga/", "/$mangaSubString/")
 
     override fun headersBuilder() = super.headersBuilder().apply {
         setRandomUserAgent(userAgentType = UserAgentType.MOBILE, filterInclude = listOf("Chrome"))
-
-        val userAgent = build().get("User-Agent").orEmpty()
-        val chromeVersion = Regex("""Chrome/(\d+)""").find(userAgent)?.groupValues?.get(1) ?: "131"
-
         set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
         set("Accept-Language", "id-ID,id;q=0.9")
-        set("Cache-Control", "max-age=0")
-        set("Sec-CH-UA", "\"Chromium\";v=\"$chromeVersion\", \"Not_A Brand\";v=\"24\"")
-        set("Sec-CH-UA-Full-Version-List", "\"Chromium\";v=\"$chromeVersion.0.0.0\", \"Not_A Brand\";v=\"24.0.0.0\"")
-        set("Sec-CH-UA-Mobile", "?1")
-        set("Sec-CH-UA-Model", "\"\"")
-        set("Sec-CH-UA-Platform", "\"Android\"")
-        set("Sec-CH-UA-Platform-Version", "\"11.0.0\"")
-        set("Sec-Fetch-Dest", "document")
-        set("Sec-Fetch-Mode", "navigate")
-        set("Sec-Fetch-Site", "none")
-        set("Sec-Fetch-User", "?1")
-        set("Upgrade-Insecure-Requests", "1")
-        set("X-Requested-With", "com.android.chrome")
     }
 
     override val client = network.cloudflareClient.newBuilder()
         .addInterceptor { chain ->
             val request = chain.request()
             val url = request.url.toString()
+            val ua = request.header("User-Agent").orEmpty()
+            val chromeVersion = CHROME_REGEX.find(ua)?.groupValues?.get(1) ?: "131"
 
-            val newRequest = request.newBuilder().apply {
-                if (url.contains("admin-ajax.php") || url.contains("wp-json")) {
-                    header("X-Requested-With", "XMLHttpRequest")
-                    header("Sec-Fetch-Dest", "empty")
-                    header("Sec-Fetch-Mode", "cors")
-                    header("Sec-Fetch-Site", "same-origin")
-                    removeHeader("Sec-Fetch-User")
-                    removeHeader("Upgrade-Insecure-Requests")
-                    header("Accept", "*/*")
-                } else if (url.contains(Regex("""\.(jpg|jpeg|png|webp|avif|gif)""", RegexOption.IGNORE_CASE))) {
-                    removeHeader("X-Requested-With")
-                    header("Sec-Fetch-Dest", "image")
-                    header("Sec-Fetch-Mode", "no-cors")
-                    header("Sec-Fetch-Site", "same-origin")
-                    removeHeader("Sec-Fetch-User")
-                    removeHeader("Upgrade-Insecure-Requests")
-                    header("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
-                } else {
-                    removeHeader("X-Requested-With")
-                    // Standard document navigation
-                    if (request.method == "GET" && !url.contains("?")) {
-                        url("$url?t=${System.currentTimeMillis() / 600000}")
-                    }
+            val builder = request.newBuilder()
+
+            // Sinkronisasi identitas browser untuk publik user
+            builder.header("Sec-CH-UA", "\"Chromium\";v=\"$chromeVersion\", \"Not_A Brand\";v=\"24\"")
+            builder.header("Sec-CH-UA-Mobile", "?1")
+            builder.header("Sec-CH-UA-Platform", "\"Android\"")
+
+            if (url.contains("admin-ajax.php") || url.contains("wp-json")) {
+                builder.header("X-Requested-With", "XMLHttpRequest")
+            } else {
+                builder.removeHeader("X-Requested-With")
+
+                // Header browser standard untuk request halaman/dokumen
+                if (request.header("Accept")?.contains("text/html") == true) {
+                    builder.header("Sec-Fetch-Dest", "document")
+                    builder.header("Sec-Fetch-Mode", "navigate")
+                    builder.header("Sec-Fetch-Site", "none")
+                    builder.header("Sec-Fetch-User", "?1")
+                    builder.header("Upgrade-Insecure-Requests", "1")
                 }
-            }.build()
+            }
 
-            chain.proceed(newRequest)
+            chain.proceed(builder.build())
         }
-        .rateLimit(9, 2)
+        .rateLimit(3)
         .build()
 
-    // ================================== Popular ======================================
-
-    override fun popularMangaSelector() = "div.page-item-detail:not(:has(a[href*='bilibilicomics.com'])), .manga__item, .post-item"
+    // Selector lebih luas agar lebih stabil
+    override fun popularMangaSelector() = "div.page-item-detail, .manga__item, .post-item"
 
     override val popularMangaUrlSelector = "div.post-title a, .manga-title a, .manga__title a, .item-thumb a"
 
@@ -123,45 +93,34 @@ class MGKomik :
         }
     }
 
-    // ================================ Chapters ================================
-
-    override val chapterUrlSuffix = ""
-
-    // ================================ Details ================================
-
+    // Selector detail tambahan
     override val mangaDetailsSelectorTitle = "div.post-title h3, div.post-title h1, #manga-title > h1, .manga-title, h1#mangaTitle"
     override val mangaDetailsSelectorAuthor = "div.author-content > a, div.manga-authors > a, .meta-item:contains(Author:) a"
     override val mangaDetailsSelectorDescription = "div.description-summary div.summary__content, div.summary_content div.post-content_item > h5 + div, div.summary_content div.manga-excerpt, .manga-about, .manga-description"
 
+    // Ambil gambar kualitas asli (bukan resize)
     override fun imageFromElement(element: Element): String? {
         val url = super.imageFromElement(element) ?: return null
         val isPage = element.parents().any { it.hasClass("reading-content") || it.hasClass("page-break") }
-        if (isPage) {
-            return url.replace(RESIZE_REGEX, "")
-                .replace(SCALED_REGEX, "")
+        return if (isPage) {
+            url.replace(RESIZE_REGEX, "").replace(SCALED_REGEX, "")
+        } else {
+            url
         }
-        return url
     }
-
-    // ================================ Filters ================================
 
     override fun getFilterList(): FilterList {
         launchIO { fetchGenres() }
 
         val filters = super.getFilterList().list.toMutableList()
 
-        filters += if (genresList.isNotEmpty()) {
-            listOf(
+        if (genresList.isNotEmpty()) {
+            filters += listOf(
                 Filter.Separator(),
                 GenreContentFilter(
                     title = intl["genre_filter_title"],
                     options = genresList.map { it.name to it.id },
                 ),
-            )
-        } else {
-            listOf(
-                Filter.Separator(),
-                Filter.Header(intl["genre_missing_warning"]),
             )
         }
 
@@ -190,6 +149,7 @@ class MGKomik :
     }
 
     companion object {
+        private val CHROME_REGEX = """Chrome/(\d+)""".toRegex()
         private val RESIZE_REGEX = """-\d+x\d+(?=\.(jpg|jpeg|png|webp))""".toRegex()
         private val SCALED_REGEX = """-scaled(?=\.(jpg|jpeg|png|webp))""".toRegex()
     }
