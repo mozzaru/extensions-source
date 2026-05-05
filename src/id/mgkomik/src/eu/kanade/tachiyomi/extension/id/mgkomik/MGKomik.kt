@@ -26,7 +26,7 @@ class MGKomik : HttpSource() {
     override val lang = "id"
     override val supportsLatest = true
 
-    override val id = 5845004992097969882
+    override val id = 5845004992097969882L
 
     override val client: OkHttpClient = network.cloudflareClient.newBuilder()
         .rateLimit(3)
@@ -34,18 +34,26 @@ class MGKomik : HttpSource() {
             val request = chain.request()
             val url = request.url.toString()
             val headers = request.headers.newBuilder().apply {
-                if (url.contains("wp-admin/admin-ajax.php") || url.contains("wp-json") || url.contains("t=")) {
-                    set("X-Requested-With", "XMLHttpRequest")
-                    set("Accept", "*/*")
-                    set("Sec-Fetch-Dest", "empty")
-                    set("Sec-Fetch-Mode", "cors")
-                    set("Sec-Fetch-Site", "same-origin")
-                } else {
-                    removeAll("X-Requested-With")
-                    set("Sec-Fetch-Dest", "document")
-                    set("Sec-Fetch-Mode", "navigate")
-                    set("Sec-Fetch-Site", "none")
-                    set("Sec-Fetch-User", "?1")
+                when {
+                    url.contains("admin-ajax.php") || url.contains("wp-json") -> {
+                        set("X-Requested-With", "XMLHttpRequest")
+                        set("Sec-Fetch-Dest", "empty")
+                        set("Sec-Fetch-Mode", "cors")
+                        set("Sec-Fetch-Site", "same-origin")
+                    }
+                    url.contains("/uploads/") || url.contains(".jpg") || url.contains(".png") || url.contains(".webp") -> {
+                        removeAll("X-Requested-With")
+                        set("Sec-Fetch-Dest", "image")
+                        set("Sec-Fetch-Mode", "no-cors")
+                        set("Sec-Fetch-Site", "same-site")
+                    }
+                    else -> {
+                        removeAll("X-Requested-With")
+                        set("Sec-Fetch-Dest", "document")
+                        set("Sec-Fetch-Mode", "navigate")
+                        set("Sec-Fetch-Site", "same-origin")
+                        set("Sec-Fetch-User", "?1")
+                    }
                 }
             }.build()
             chain.proceed(request.newBuilder().headers(headers).build())
@@ -53,19 +61,18 @@ class MGKomik : HttpSource() {
         .build()
 
     override fun headersBuilder() = super.headersBuilder().apply {
-        set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36")
+        set("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Mobile Safari/537.36")
         set("Referer", "$baseUrl/")
         set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
         set("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
         set("Upgrade-Insecure-Requests", "1")
-        set("Priority", "u=0, i")
     }
 
     // ========== POPULAR ==========
 
     override fun popularMangaRequest(page: Int): Request {
         val t = System.currentTimeMillis()
-        return GET("$baseUrl/komik/?order_by=views&page=$page&t=$t", headersBuilder().add("Cache-Control", "no-cache").build())
+        return GET("$baseUrl/komik/?order_by=views&page=$page&t=$t", headers)
     }
 
     override fun popularMangaParse(response: Response): MangasPage {
@@ -89,22 +96,19 @@ class MGKomik : HttpSource() {
 
     override fun getMangaUrl(manga: SManga): String {
         val url = manga.url.replace("/manga/", "/komik/")
-        return when {
-            url.startsWith("http") -> {
-                url.replace("mgkomik.com", "web.mgkomik.cc")
-                    .replace("id.mgkomik.cc", "web.mgkomik.cc")
-                    .replace("mgkomik.id", "web.mgkomik.cc")
-            }
+        val absoluteUrl = when {
+            url.startsWith("http") -> url.replace(Regex("https?://(web\\.)?(mgkomik\\.(com|cc|id)|id\\.mgkomik\\.cc)"), baseUrl)
             url.startsWith("//") -> "https:$url"
-            else -> baseUrl + url.let { if (it.startsWith("/")) it else "/$it" }
+            else -> baseUrl + (if (url.startsWith("/")) "" else "/") + url
         }
+        return absoluteUrl.replace(Regex("(?<!:)/{2,}"), "/")
     }
 
     // ========== LATEST ==========
 
     override fun latestUpdatesRequest(page: Int): Request {
         val t = System.currentTimeMillis()
-        return GET("$baseUrl/komik/?order_by=latest&page=$page&t=$t", headersBuilder().add("Cache-Control", "no-cache").build())
+        return GET("$baseUrl/komik/?order_by=latest&page=$page&t=$t", headers)
     }
 
     override fun latestUpdatesParse(response: Response): MangasPage = popularMangaParse(response)
@@ -114,7 +118,7 @@ class MGKomik : HttpSource() {
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
         val t = System.currentTimeMillis()
         if (query.isNotBlank()) {
-            return GET("$baseUrl/search/?q=${query.trim()}&page=$page&t=$t", headersBuilder().add("Cache-Control", "no-cache").build())
+            return GET("$baseUrl/search/?q=${query.trim()}&page=$page&t=$t", headers)
         }
 
         val urlBuilder = "$baseUrl/komik/?page=$page&t=$t".toHttpUrlOrNull()!!.newBuilder()
@@ -126,7 +130,7 @@ class MGKomik : HttpSource() {
                 else -> {}
             }
         }
-        return GET(urlBuilder.build().toString(), headersBuilder().add("Cache-Control", "no-cache").build())
+        return GET(urlBuilder.build().toString(), headers)
     }
 
     override fun searchMangaParse(response: Response): MangasPage = popularMangaParse(response)
@@ -189,25 +193,19 @@ class MGKomik : HttpSource() {
 
     override fun getChapterUrl(chapter: SChapter): String {
         val url = chapter.url.replace("/manga/", "/komik/")
-        return when {
-            url.startsWith("http") -> {
-                url.replace("mgkomik.com", "web.mgkomik.cc")
-                    .replace("id.mgkomik.cc", "web.mgkomik.cc")
-                    .replace("mgkomik.id", "web.mgkomik.cc")
-            }
+        val absoluteUrl = when {
+            url.startsWith("http") -> url.replace(Regex("https?://(web\\.)?(mgkomik\\.(com|cc|id)|id\\.mgkomik\\.cc)"), baseUrl)
             url.startsWith("//") -> "https:$url"
-            else -> baseUrl + url.let { if (it.startsWith("/")) it else "/$it" }
+            else -> baseUrl + (if (url.startsWith("/")) "" else "/") + url
         }
+        return absoluteUrl.replace(Regex("(?<!:)/{2,}"), "/")
     }
 
     // ========== PAGE LIST ==========
 
     override fun pageListRequest(chapter: SChapter): Request {
-        val t = System.currentTimeMillis()
-        val url = getChapterUrl(chapter).toHttpUrlOrNull()?.newBuilder()
-            ?.addQueryParameter("t", t.toString())
-            ?.build()?.toString() ?: getChapterUrl(chapter)
-        return GET(url, headersBuilder().add("Cache-Control", "no-cache").build())
+        val url = getChapterUrl(chapter)
+        return GET(url, headersBuilder().set("Referer", url.substringBeforeLast("/") + "/").add("Cache-Control", "no-cache").build())
     }
 
     override fun pageListParse(response: Response): List<Page> {
@@ -224,7 +222,6 @@ class MGKomik : HttpSource() {
         val imgHeaders = headersBuilder().apply {
             set("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
             set("Referer", page.url)
-            set("Origin", baseUrl)
         }.build()
         return GET(page.imageUrl!!, imgHeaders)
     }
