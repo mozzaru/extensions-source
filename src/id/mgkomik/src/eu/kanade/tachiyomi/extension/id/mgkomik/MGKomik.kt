@@ -7,6 +7,7 @@ import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
+import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import keiyoushi.lib.randomua.UserAgentType
 import keiyoushi.lib.randomua.addRandomUAPreference
@@ -30,40 +31,74 @@ class MGKomik :
 
     override val mangaSubString = "komik"
 
-    override fun getMangaUrl(manga: SManga) = "$baseUrl${manga.url}"
+    override fun getMangaUrl(manga: SManga): String {
+        val url = manga.url.let {
+            if (it.startsWith("http")) {
+                it
+            } else if (it.startsWith("//")) {
+                "https:$it"
+            } else {
+                "$baseUrl$it"
+            }
+        }
+        return url.replace("mgkomik.com", "id.mgkomik.cc")
+            .replace("/manga/", "/$mangaSubString/")
+    }
+
+    override fun getChapterUrl(chapter: SChapter): String = chapter.url.replace("mgkomik.com", "id.mgkomik.cc")
+        .replace("/manga/", "/$mangaSubString/")
 
     override fun headersBuilder() = super.headersBuilder().apply {
         setRandomUserAgent(userAgentType = UserAgentType.MOBILE, filterInclude = listOf("Chrome"))
+
+        val userAgent = build().get("User-Agent").orEmpty()
+        val chromeVersion = Regex("""Chrome/(\d+)""").find(userAgent)?.groupValues?.get(1) ?: "131"
+
         set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
         set("Accept-Language", "id-ID,id;q=0.9")
+        set("Cache-Control", "max-age=0")
+        set("Sec-CH-UA", "\"Chromium\";v=\"$chromeVersion\", \"Not_A Brand\";v=\"24\"")
+        set("Sec-CH-UA-Full-Version-List", "\"Chromium\";v=\"$chromeVersion.0.0.0\", \"Not_A Brand\";v=\"24.0.0.0\"")
+        set("Sec-CH-UA-Mobile", "?1")
+        set("Sec-CH-UA-Model", "\"\"")
+        set("Sec-CH-UA-Platform", "\"Android\"")
+        set("Sec-CH-UA-Platform-Version", "\"11.0.0\"")
+        set("Sec-Fetch-Dest", "document")
+        set("Sec-Fetch-Mode", "navigate")
+        set("Sec-Fetch-Site", "none")
+        set("Sec-Fetch-User", "?1")
         set("Upgrade-Insecure-Requests", "1")
+        set("X-Requested-With", "com.android.chrome")
     }
 
     override val client = network.cloudflareClient.newBuilder()
         .addInterceptor { chain ->
             val request = chain.request()
             val url = request.url.toString()
-            val userAgent = request.header("User-Agent").orEmpty()
 
-            if (url.contains("admin-ajax.php") || url.contains("wp-json")) {
-                return@addInterceptor chain.proceed(
-                    request.newBuilder()
-                        .header("X-Requested-With", "XMLHttpRequest")
-                        .build(),
-                )
-            }
-
-            val chromeVersion = Regex("""Chrome/(\d+)""").find(userAgent)?.groupValues?.get(1) ?: "131"
             val newRequest = request.newBuilder().apply {
-                removeHeader("X-Requested-With")
-                if (request.header("Accept")?.contains("text/html") == true) {
-                    header("Sec-CH-UA", "\"Chromium\";v=\"$chromeVersion\", \"Not_A Brand\";v=\"24\"")
-                    header("Sec-CH-UA-Mobile", "?1")
-                    header("Sec-CH-UA-Platform", "\"Android\"")
-                    header("Sec-Fetch-Dest", "document")
-                    header("Sec-Fetch-Mode", "navigate")
-                    header("Sec-Fetch-Site", "none")
-                    header("Sec-Fetch-User", "?1")
+                if (url.contains("admin-ajax.php") || url.contains("wp-json")) {
+                    header("X-Requested-With", "XMLHttpRequest")
+                    header("Sec-Fetch-Dest", "empty")
+                    header("Sec-Fetch-Mode", "cors")
+                    header("Sec-Fetch-Site", "same-origin")
+                    removeHeader("Sec-Fetch-User")
+                    removeHeader("Upgrade-Insecure-Requests")
+                    header("Accept", "*/*")
+                } else if (url.contains(Regex("""\.(jpg|jpeg|png|webp|avif|gif)""", RegexOption.IGNORE_CASE))) {
+                    removeHeader("X-Requested-With")
+                    header("Sec-Fetch-Dest", "image")
+                    header("Sec-Fetch-Mode", "no-cors")
+                    header("Sec-Fetch-Site", "same-origin")
+                    removeHeader("Sec-Fetch-User")
+                    removeHeader("Upgrade-Insecure-Requests")
+                    header("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+                } else {
+                    removeHeader("X-Requested-With")
+                    // Standard document navigation
+                    if (request.method == "GET" && !url.contains("?")) {
+                        url("$url?t=${System.currentTimeMillis() / 600000}")
+                    }
                 }
             }.build()
 
@@ -74,17 +109,39 @@ class MGKomik :
 
     // ================================== Popular ======================================
 
+    override fun popularMangaSelector() = "div.page-item-detail:not(:has(a[href*='bilibilicomics.com'])), .manga__item, .post-item"
+
+    override val popularMangaUrlSelector = "div.post-title a, .manga-title a, .manga__title a, .item-thumb a"
+
     override fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
-        element.select("div.item-thumb a").let {
+        element.selectFirst(popularMangaUrlSelector)!!.let {
             setUrlWithoutDomain(it.attr("abs:href"))
-            title = it.attr("title")
-            thumbnail_url = it.select("img").attr("abs:src")
+            title = it.attr("title").ifEmpty { it.text() }
+        }
+        element.selectFirst("img")?.let {
+            thumbnail_url = imageFromElement(it)
         }
     }
 
     // ================================ Chapters ================================
 
     override val chapterUrlSuffix = ""
+
+    // ================================ Details ================================
+
+    override val mangaDetailsSelectorTitle = "div.post-title h3, div.post-title h1, #manga-title > h1, .manga-title, h1#mangaTitle"
+    override val mangaDetailsSelectorAuthor = "div.author-content > a, div.manga-authors > a, .meta-item:contains(Author:) a"
+    override val mangaDetailsSelectorDescription = "div.description-summary div.summary__content, div.summary_content div.post-content_item > h5 + div, div.summary_content div.manga-excerpt, .manga-about, .manga-description"
+
+    override fun imageFromElement(element: Element): String? {
+        val url = super.imageFromElement(element) ?: return null
+        val isPage = element.parents().any { it.hasClass("reading-content") || it.hasClass("page-break") }
+        if (isPage) {
+            return url.replace(RESIZE_REGEX, "")
+                .replace(SCALED_REGEX, "")
+        }
+        return url
+    }
 
     // ================================ Filters ================================
 
@@ -130,5 +187,10 @@ class MGKomik :
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         screen.addRandomUAPreference()
+    }
+
+    companion object {
+        private val RESIZE_REGEX = """-\d+x\d+(?=\.(jpg|jpeg|png|webp))""".toRegex()
+        private val SCALED_REGEX = """-scaled(?=\.(jpg|jpeg|png|webp))""".toRegex()
     }
 }
