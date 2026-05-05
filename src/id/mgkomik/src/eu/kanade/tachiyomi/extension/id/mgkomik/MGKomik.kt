@@ -34,7 +34,6 @@ class MGKomik :
 
     override fun headersBuilder() = super.headersBuilder().apply {
         setRandomUserAgent(userAgentType = UserAgentType.MOBILE, filterInclude = listOf("Chrome"))
-        set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
         set("Accept-Language", "id-ID,id;q=0.9")
     }
 
@@ -47,33 +46,42 @@ class MGKomik :
 
             val builder = request.newBuilder()
 
-            // On-point Client Hints sinkron dengan User-Agent untuk Publik
-            builder.header("Sec-CH-UA", "\"Chromium\";v=\"$chromeVersion\", \"Not_A Brand\";v=\"24\"")
+            // On-point Browser Identity (Client Hints)
+            builder.header("Sec-CH-UA", "\"Google Chrome\";v=\"$chromeVersion\", \"Chromium\";v=\"$chromeVersion\", \"Not A(Brand\";v=\"24\"")
             builder.header("Sec-CH-UA-Mobile", "?1")
             builder.header("Sec-CH-UA-Platform", "\"Android\"")
-            builder.header("Sec-CH-UA-Full-Version-List", "\"Chromium\";v=\"$chromeVersion.0.0.0\", \"Not_A Brand\";v=\"24.0.0.0\"")
-            builder.header("Sec-CH-UA-Platform-Version", "\"11.0.0\"")
-            builder.header("Sec-CH-UA-Model", "\"\"")
+            builder.header("Sec-CH-UA-Full-Version-List", "\"Google Chrome\";v=\"$chromeVersion.0.0.0\", \"Chromium\";v=\"$chromeVersion.0.0.0\", \"Not A(Brand\";v=\"24.0.0.0\"")
 
-            if (url.contains("admin-ajax.php") || url.contains("wp-json")) {
+            val isAjax = request.header("X-Requested-With") == "XMLHttpRequest" ||
+                url.contains("admin-ajax.php") ||
+                url.contains("wp-json") ||
+                url.contains("/ajax/chapters")
+
+            if (isAjax) {
                 builder.header("X-Requested-With", "XMLHttpRequest")
                 builder.header("Sec-Fetch-Dest", "empty")
                 builder.header("Sec-Fetch-Mode", "cors")
                 builder.header("Sec-Fetch-Site", "same-origin")
-
-                // Gunakan Referer yang spesifik jika tersedia untuk menghindari 403
-                val referer = request.header("Referer") ?: "$baseUrl/"
-                builder.header("Referer", referer)
-
-                builder.header("Accept", "*/*")
+                builder.header("Referer", request.header("Referer") ?: "$baseUrl/")
+                if (request.method == "POST") {
+                    builder.header("Origin", baseUrl)
+                }
             } else {
                 builder.removeHeader("X-Requested-With")
-                if (request.header("Accept")?.contains("text/html") == true) {
+                val accept = request.header("Accept").orEmpty()
+                if (accept.contains("text/html") || request.header("Sec-Fetch-Dest") == "document") {
                     builder.header("Sec-Fetch-Dest", "document")
                     builder.header("Sec-Fetch-Mode", "navigate")
                     builder.header("Sec-Fetch-Site", "none")
                     builder.header("Sec-Fetch-User", "?1")
                     builder.header("Upgrade-Insecure-Requests", "1")
+                } else if (url.contains(Regex("""\.(jpg|jpeg|png|webp|avif|gif)""", RegexOption.IGNORE_CASE))) {
+                    builder.header("Sec-Fetch-Dest", "image")
+                    builder.header("Sec-Fetch-Mode", "no-cors")
+                    builder.header("Sec-Fetch-Site", "same-origin")
+                    if (request.header("Referer") == null) {
+                        builder.header("Referer", "$baseUrl/")
+                    }
                 }
             }
 
@@ -91,7 +99,9 @@ class MGKomik :
 
     override fun getFilterList(): FilterList {
         launchIO { fetchGenres() }
+
         val filters = super.getFilterList().list.toMutableList()
+
         if (genresList.isNotEmpty()) {
             filters += listOf(
                 Filter.Separator(),
@@ -101,10 +111,15 @@ class MGKomik :
                 ),
             )
         }
+
         return FilterList(filters)
     }
 
-    private class GenreContentFilter(title: String, options: List<Pair<String, String>>) : UriPartFilter(title, options.toTypedArray())
+    private class GenreContentFilter(title: String, options: List<Pair<String, String>>) :
+        UriPartFilter(
+            title,
+            options.toTypedArray(),
+        )
 
     override fun genresRequest() = GET("$baseUrl/$mangaSubString", headers)
 
