@@ -7,6 +7,7 @@ import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
+import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import keiyoushi.lib.randomua.UserAgentType
 import keiyoushi.lib.randomua.addRandomUAPreference
@@ -21,7 +22,7 @@ class MGKomik :
         "MG Komik",
         "https://web.mgkomik.cc",
         "id",
-        SimpleDateFormat("dd MMM yy", Locale.US),
+        SimpleDateFormat("dd MMM yy", Locale("id")),
     ),
     ConfigurableSource {
     override val useLoadMoreRequest = LoadMoreStrategy.Always
@@ -54,7 +55,6 @@ class MGKomik :
             builder.header("Sec-CH-UA-Full-Version-List", "\"Chromium\";v=\"$chromeVersion.0.0.0\", \"Not?A_Brand\";v=\"24.0.0.0\", \"Google Chrome\";v=\"$chromeVersion.0.0.0\"")
 
             if (url.contains("admin-ajax.php") || url.contains("wp-json") || url.contains("ajax")) {
-                // Request Internal / AJAX (Search, Load More, Chapter List)
                 builder.header("X-Requested-With", "XMLHttpRequest")
                 builder.header("Sec-Fetch-Dest", "empty")
                 builder.header("Sec-Fetch-Mode", "cors")
@@ -63,14 +63,12 @@ class MGKomik :
                 builder.header("Referer", "$baseUrl/")
                 builder.header("Accept", "*/*")
             } else if (url.contains(Regex("""\.(jpg|jpeg|png|webp|avif|gif)""", RegexOption.IGNORE_CASE))) {
-                // Request Gambar
                 builder.removeHeader("X-Requested-With")
                 builder.header("Sec-Fetch-Dest", "image")
                 builder.header("Sec-Fetch-Mode", "no-cors")
                 builder.header("Sec-Fetch-Site", "cross-site")
                 builder.header("Referer", "$baseUrl/")
             } else {
-                // Request Halaman / Navigation (Manga details, Chapter page, Listings)
                 builder.removeHeader("X-Requested-With")
                 builder.header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
                 builder.header("Sec-Fetch-Dest", "document")
@@ -85,14 +83,36 @@ class MGKomik :
         .rateLimit(9, 2)
         .build()
 
-    // Selector lebih inklusif agar manga tetap muncul meski layout berubah sedikit
-    override fun popularMangaSelector() = "div.page-item-detail, .manga__item, .post-item"
+    // Selector listing diperluas untuk web baru
+    override fun popularMangaSelector() = "div.page-item-detail, .manga__item, .post-item, .item-manga"
 
     override fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
-        val link = element.selectFirst("div.item-thumb a, div.post-title a, a:has(img)")!!
+        val link = element.selectFirst("a:has(img), div.item-thumb a, div.post-title a, .manga__item-title a")!!
         setUrlWithoutDomain(link.attr("abs:href"))
-        title = link.attr("title").ifEmpty { link.selectFirst("h3, h4")?.text() ?: link.text() }
+        title = link.attr("title").ifEmpty {
+            element.selectFirst(".manga__item-title, .post-title, h3, h4")?.text() ?: link.text()
+        }
         thumbnail_url = element.selectFirst("img")?.let { imageFromElement(it) }
+    }
+
+    // Details selector untuk web baru
+    override val mangaDetailsSelectorTitle = "h1, .manga-title, .post-title"
+    override val mangaDetailsSelectorDescription = ".manga-about, .summary__content, .manga-description, .description-summary"
+    override val mangaDetailsSelectorAuthor = ".author-content, .meta-item:contains(Author:)"
+    override val mangaDetailsSelectorArtist = ".artist-content"
+    override val mangaDetailsSelectorGenre = ".genres-content a, .genre-tag, .manga-genre a"
+    override val mangaDetailsSelectorStatus = ".post-status, .status-badge, .manga-status"
+
+    // Chapter selector untuk web baru
+    override fun chapterListSelector() = "li.chapter-list-item, li.wp-manga-chapter, .chapter-item"
+
+    override fun chapterFromElement(element: Element): SChapter = SChapter.create().apply {
+        val link = element.selectFirst("a")!!
+        setUrlWithoutDomain(link.attr("abs:href"))
+        name = element.selectFirst(".chapter-name, .chapter-link, a")?.text() ?: link.text()
+        date_upload = element.selectFirst(".chapter-release-date, .chapter-date, .date")?.text()?.let {
+            parseChapterDate(it)
+        } ?: 0L
     }
 
     override fun getFilterList(): FilterList {
@@ -124,7 +144,7 @@ class MGKomik :
     override fun parseGenres(document: Document): List<Genre> {
         val genres = mutableListOf<Genre>()
         genres += Genre("All", "")
-        genres += document.select(".row.genres li a").map { a ->
+        genres += document.select(".row.genres li a, .genres-list a").map { a ->
             Genre(a.text(), a.absUrl("href"))
         }
         return genres
