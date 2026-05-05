@@ -7,7 +7,6 @@ import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
-import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import keiyoushi.lib.randomua.UserAgentType
 import keiyoushi.lib.randomua.addRandomUAPreference
@@ -31,12 +30,7 @@ class MGKomik :
 
     override val mangaSubString = "komik"
 
-    // Migrasi link lama agar library user tetap aman
-    override fun getMangaUrl(manga: SManga): String = "$baseUrl${manga.url}".replace("mgkomik.com", "id.mgkomik.cc")
-        .replace("/manga/", "/$mangaSubString/")
-
-    override fun getChapterUrl(chapter: SChapter): String = chapter.url.replace("mgkomik.com", "id.mgkomik.cc")
-        .replace("/manga/", "/$mangaSubString/")
+    override fun getMangaUrl(manga: SManga) = "$baseUrl${manga.url}"
 
     override fun headersBuilder() = super.headersBuilder().apply {
         setRandomUserAgent(userAgentType = UserAgentType.MOBILE, filterInclude = listOf("Chrome"))
@@ -53,7 +47,6 @@ class MGKomik :
 
             val builder = request.newBuilder()
 
-            // Sinkronisasi identitas browser untuk publik user
             builder.header("Sec-CH-UA", "\"Chromium\";v=\"$chromeVersion\", \"Not_A Brand\";v=\"24\"")
             builder.header("Sec-CH-UA-Mobile", "?1")
             builder.header("Sec-CH-UA-Platform", "\"Android\"")
@@ -63,7 +56,6 @@ class MGKomik :
             } else {
                 builder.removeHeader("X-Requested-With")
 
-                // Header browser standard untuk request halaman/dokumen
                 if (request.header("Accept")?.contains("text/html") == true) {
                     builder.header("Sec-Fetch-Dest", "document")
                     builder.header("Sec-Fetch-Mode", "navigate")
@@ -78,34 +70,16 @@ class MGKomik :
         .rateLimit(3)
         .build()
 
-    // Selector lebih luas agar lebih stabil
-    override fun popularMangaSelector() = "div.page-item-detail, .manga__item, .post-item"
-
-    override val popularMangaUrlSelector = "div.post-title a, .manga-title a, .manga__title a, .item-thumb a"
+    // Selector utama tetap Madara standard agar simple
+    override fun popularMangaSelector() = "div.page-item-detail, .manga__item"
 
     override fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
-        element.selectFirst(popularMangaUrlSelector)!!.let {
+        element.select("div.item-thumb a, div.post-title a").first()!!.let {
             setUrlWithoutDomain(it.attr("abs:href"))
             title = it.attr("title").ifEmpty { it.text() }
         }
-        element.selectFirst("img")?.let {
+        element.select("img").first()?.let {
             thumbnail_url = imageFromElement(it)
-        }
-    }
-
-    // Selector detail tambahan
-    override val mangaDetailsSelectorTitle = "div.post-title h3, div.post-title h1, #manga-title > h1, .manga-title, h1#mangaTitle"
-    override val mangaDetailsSelectorAuthor = "div.author-content > a, div.manga-authors > a, .meta-item:contains(Author:) a"
-    override val mangaDetailsSelectorDescription = "div.description-summary div.summary__content, div.summary_content div.post-content_item > h5 + div, div.summary_content div.manga-excerpt, .manga-about, .manga-description"
-
-    // Ambil gambar kualitas asli (bukan resize)
-    override fun imageFromElement(element: Element): String? {
-        val url = super.imageFromElement(element) ?: return null
-        val isPage = element.parents().any { it.hasClass("reading-content") || it.hasClass("page-break") }
-        return if (isPage) {
-            url.replace(RESIZE_REGEX, "").replace(SCALED_REGEX, "")
-        } else {
-            url
         }
     }
 
@@ -150,7 +124,5 @@ class MGKomik :
 
     companion object {
         private val CHROME_REGEX = """Chrome/(\d+)""".toRegex()
-        private val RESIZE_REGEX = """-\d+x\d+(?=\.(jpg|jpeg|png|webp))""".toRegex()
-        private val SCALED_REGEX = """-scaled(?=\.(jpg|jpeg|png|webp))""".toRegex()
     }
 }
