@@ -34,55 +34,41 @@ class MGKomik :
 
     override fun headersBuilder() = super.headersBuilder().apply {
         setRandomUserAgent(userAgentType = UserAgentType.MOBILE, filterInclude = listOf("Chrome"))
+        val ua = build().get("User-Agent").orEmpty()
+        val chromeVersion = CHROME_REGEX.find(ua)?.groupValues?.get(1) ?: "131"
+
+        set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
         set("Accept-Language", "id-ID,id;q=0.9")
+        set("Upgrade-Insecure-Requests", "1")
+
+        set("Sec-CH-UA", "\"Chromium\";v=\"$chromeVersion\", \"Not.A/Brand\";v=\"8\"")
+        set("Sec-CH-UA-Mobile", "?1")
+        set("Sec-CH-UA-Platform", "\"Android\"")
+        set("Sec-CH-UA-Full-Version-List", "\"Chromium\";v=\"$chromeVersion.0.0.0\", \"Not.A/Brand\";v=\"8.0.0.0\"")
+        set("Sec-CH-UA-Platform-Version", "\"11.0.0\"")
+
+        set("Sec-Fetch-Dest", "document")
+        set("Sec-Fetch-Mode", "navigate")
+        set("Sec-Fetch-Site", "none")
+        set("Sec-Fetch-User", "?1")
     }
 
     override val client = network.cloudflareClient.newBuilder()
         .addInterceptor { chain ->
             val request = chain.request()
             val url = request.url.toString()
-            val ua = request.header("User-Agent").orEmpty()
-            val chromeVersion = CHROME_REGEX.find(ua)?.groupValues?.get(1) ?: "131"
 
             val builder = request.newBuilder()
-
-            // On-point Browser Identity (Client Hints)
-            builder.header("Sec-CH-UA", "\"Google Chrome\";v=\"$chromeVersion\", \"Chromium\";v=\"$chromeVersion\", \"Not A(Brand\";v=\"24\"")
-            builder.header("Sec-CH-UA-Mobile", "?1")
-            builder.header("Sec-CH-UA-Platform", "\"Android\"")
-            builder.header("Sec-CH-UA-Full-Version-List", "\"Google Chrome\";v=\"$chromeVersion.0.0.0\", \"Chromium\";v=\"$chromeVersion.0.0.0\", \"Not A(Brand\";v=\"24.0.0.0\"")
-
-            val isAjax = request.header("X-Requested-With") == "XMLHttpRequest" ||
-                url.contains("admin-ajax.php") ||
-                url.contains("wp-json") ||
-                url.contains("/ajax/chapters")
-
-            if (isAjax) {
+            if (url.contains("admin-ajax.php") || url.contains("wp-json") || url.contains("/ajax/chapters")) {
                 builder.header("X-Requested-With", "XMLHttpRequest")
                 builder.header("Sec-Fetch-Dest", "empty")
                 builder.header("Sec-Fetch-Mode", "cors")
                 builder.header("Sec-Fetch-Site", "same-origin")
-                builder.header("Referer", request.header("Referer") ?: "$baseUrl/")
-                if (request.method == "POST") {
-                    builder.header("Origin", baseUrl)
-                }
+                builder.header("Accept", "*/*")
+                builder.removeHeader("Sec-Fetch-User")
+                builder.removeHeader("Upgrade-Insecure-Requests")
             } else {
                 builder.removeHeader("X-Requested-With")
-                val accept = request.header("Accept").orEmpty()
-                if (accept.contains("text/html") || request.header("Sec-Fetch-Dest") == "document") {
-                    builder.header("Sec-Fetch-Dest", "document")
-                    builder.header("Sec-Fetch-Mode", "navigate")
-                    builder.header("Sec-Fetch-Site", "none")
-                    builder.header("Sec-Fetch-User", "?1")
-                    builder.header("Upgrade-Insecure-Requests", "1")
-                } else if (url.contains(Regex("""\.(jpg|jpeg|png|webp|avif|gif)""", RegexOption.IGNORE_CASE))) {
-                    builder.header("Sec-Fetch-Dest", "image")
-                    builder.header("Sec-Fetch-Mode", "no-cors")
-                    builder.header("Sec-Fetch-Site", "same-origin")
-                    if (request.header("Referer") == null) {
-                        builder.header("Referer", "$baseUrl/")
-                    }
-                }
             }
 
             chain.proceed(builder.build())
@@ -91,10 +77,13 @@ class MGKomik :
         .build()
 
     override fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
-        val link = element.selectFirst("div.item-thumb a, div.post-title a")!!
-        setUrlWithoutDomain(link.attr("abs:href"))
-        title = link.attr("title").ifEmpty { link.text() }
-        thumbnail_url = element.selectFirst("img")?.let { imageFromElement(it) }
+        element.select("div.item-thumb a, div.post-title a").first()?.let {
+            setUrlWithoutDomain(it.attr("abs:href"))
+            title = it.attr("title").ifEmpty { it.text() }
+        }
+        element.select("img").first()?.let {
+            thumbnail_url = imageFromElement(it)
+        }
     }
 
     override fun getFilterList(): FilterList {
