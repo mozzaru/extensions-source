@@ -60,7 +60,11 @@ class MGKomik :
                 builder.header("Sec-Fetch-Dest", "empty")
                 builder.header("Sec-Fetch-Mode", "cors")
                 builder.header("Sec-Fetch-Site", "same-origin")
-                builder.header("Referer", "$baseUrl/")
+
+                // Gunakan Referer yang spesifik jika tersedia untuk menghindari 403
+                val referer = request.header("Referer") ?: "$baseUrl/"
+                builder.header("Referer", referer)
+
                 builder.header("Accept", "*/*")
             } else {
                 builder.removeHeader("X-Requested-With")
