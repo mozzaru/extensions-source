@@ -34,23 +34,7 @@ class MGKomik :
 
     override fun headersBuilder() = super.headersBuilder().apply {
         setRandomUserAgent(userAgentType = UserAgentType.MOBILE, filterInclude = listOf("Chrome"))
-
-        val userAgent = build().get("User-Agent").orEmpty()
-        val chromeVersion = Regex("""Chrome/(\d+)""").find(userAgent)?.groupValues?.get(1) ?: "131"
-
-        set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
         set("Accept-Language", "id-ID,id;q=0.9")
-        set("Cache-Control", "max-age=0")
-        set("Sec-CH-UA", "\"Chromium\";v=\"$chromeVersion\", \"Not_A Brand\";v=\"24\"")
-        set("Sec-CH-UA-Full-Version-List", "\"Chromium\";v=\"$chromeVersion.0.0.0\", \"Not_A Brand\";v=\"24.0.0.0\"")
-        set("Sec-CH-UA-Mobile", "?1")
-        set("Sec-CH-UA-Model", "\"\"")
-        set("Sec-CH-UA-Platform", "\"Android\"")
-        set("Sec-CH-UA-Platform-Version", "\"11.0.0\"")
-        set("Sec-Fetch-Dest", "document")
-        set("Sec-Fetch-Mode", "navigate")
-        set("Sec-Fetch-Site", "none")
-        set("Sec-Fetch-User", "?1")
         set("Upgrade-Insecure-Requests", "1")
     }
 
@@ -58,15 +42,31 @@ class MGKomik :
         .addInterceptor { chain ->
             val request = chain.request()
             val url = request.url.toString()
-            val headers = request.headers.newBuilder().apply {
-                if (url.contains("admin-ajax.php") || url.contains("wp-json")) {
-                    set("X-Requested-With", "XMLHttpRequest")
-                } else {
-                    removeAll("X-Requested-With")
+            val userAgent = request.header("User-Agent").orEmpty()
+
+            if (url.contains("admin-ajax.php") || url.contains("wp-json")) {
+                return@addInterceptor chain.proceed(
+                    request.newBuilder()
+                        .header("X-Requested-With", "XMLHttpRequest")
+                        .build(),
+                )
+            }
+
+            val chromeVersion = Regex("""Chrome/(\d+)""").find(userAgent)?.groupValues?.get(1) ?: "131"
+            val newRequest = request.newBuilder().apply {
+                removeHeader("X-Requested-With")
+                if (request.header("Accept")?.contains("text/html") == true) {
+                    header("Sec-CH-UA", "\"Chromium\";v=\"$chromeVersion\", \"Not_A Brand\";v=\"24\"")
+                    header("Sec-CH-UA-Mobile", "?1")
+                    header("Sec-CH-UA-Platform", "\"Android\"")
+                    header("Sec-Fetch-Dest", "document")
+                    header("Sec-Fetch-Mode", "navigate")
+                    header("Sec-Fetch-Site", "none")
+                    header("Sec-Fetch-User", "?1")
                 }
             }.build()
 
-            chain.proceed(request.newBuilder().headers(headers).build())
+            chain.proceed(newRequest)
         }
         .rateLimit(9, 2)
         .build()
