@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.extension.id.mgkomik
 
 import eu.kanade.tachiyomi.network.GET
+import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
@@ -10,6 +11,7 @@ import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.util.asJsoup
 import okhttp3.Headers
+import okhttp3.Interceptor
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.nodes.Element
@@ -30,6 +32,8 @@ class MGKomik : HttpSource() {
     override val client = network.cloudflareClient.newBuilder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
+        .rateLimit(12, 3)
+        .addInterceptor(::uaInterceptor)
         .build()
 
     private val dateFormat = SimpleDateFormat("dd MMM yy", Locale.US)
@@ -41,6 +45,28 @@ class MGKomik : HttpSource() {
         .add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
         .add("Accept-Language", "id-ID,id;q=0.9")
         .add("Referer", "$baseUrl/")
+        .add("Sec-CH-UA", "\"Not A(Brand\";v=\"8\", \"Chromium\";v=\"141\", \"Google Chrome\";v=\"141\"")
+        .add("Sec-CH-UA-Mobile", "?1")
+        .add("Sec-CH-UA-Platform", "\"Android\"")
+        .add("Sec-Fetch-Dest", "document")
+        .add("Sec-Fetch-Mode", "navigate")
+        .add("Sec-Fetch-Site", "same-origin")
+        .add("Sec-Fetch-User", "?1")
+        .add("Upgrade-Insecure-Requests", "1")
+        .add("X-Requested-With", "com.android.chrome")
+
+    private fun uaInterceptor(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+        val url = request.url.toString()
+        val newRequest = request.newBuilder()
+            .header("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36")
+
+        if (url.contains("admin-ajax.php") || url.contains("wp-json")) {
+            newRequest.header("X-Requested-With", "XMLHttpRequest")
+        }
+
+        return chain.proceed(newRequest.build())
+    }
 
     private fun pageHeaders(referer: String) = headersBuilder()
         .set("Referer", referer)
@@ -48,15 +74,13 @@ class MGKomik : HttpSource() {
 
     // ========== POPULAR ==========
 
-    override fun popularMangaRequest(page: Int) =
-        GET("$baseUrl/komik/?order_by=trending&page=$page", headers)
+    override fun popularMangaRequest(page: Int) = GET("$baseUrl/komik/?order_by=trending&page=$page", headers)
 
     override fun popularMangaParse(response: Response) = listingParse(response)
 
     // ========== LATEST ==========
 
-    override fun latestUpdatesRequest(page: Int) =
-        GET("$baseUrl/komik/?order_by=latest&page=$page", headers)
+    override fun latestUpdatesRequest(page: Int) = GET("$baseUrl/komik/?order_by=latest&page=$page", headers)
 
     override fun latestUpdatesParse(response: Response) = listingParse(response)
 
@@ -97,27 +121,24 @@ class MGKomik : HttpSource() {
                 ?: return null
             title = (linkEl.selectFirst("div.manga-title")?.text() ?: linkEl.text())
                 .trim().takeIf { it.isNotBlank() } ?: return null
-            val rawUrl = linkEl.attr("href")
-            val normalized = rawUrl.replace("/manga/", "/komik/")
-            url = if (normalized.startsWith("http")) normalized else "$baseUrl$normalized"
+            url = linkEl.attr("abs:href")
             cover = el.selectFirst("img.manga-cover")?.attr("abs:src").orEmpty()
         }
 
-        val finalUrl = url.replace("/manga/", "/komik/")
-
         return SManga.create().apply {
             this.title = title
-            this.url = finalUrl
+            this.url = getUrl(url)
             thumbnail_url = cover
         }
     }
 
     // ========== MANGA DETAIL ==========
 
-    override fun mangaDetailsRequest(manga: SManga): Request {
-        val url = manga.url.replace("/manga/", "/komik/")
-        return GET(url, headers)
-    }
+    override fun getMangaUrl(manga: SManga): String = "$baseUrl${getUrl(manga.url)}"
+
+    override fun getChapterUrl(chapter: SChapter): String = "$baseUrl${getUrl(chapter.url)}"
+
+    override fun mangaDetailsRequest(manga: SManga): Request = GET(getMangaUrl(manga), headers)
 
     override fun mangaDetailsParse(response: Response): SManga {
         val doc = response.asJsoup()
@@ -145,42 +166,42 @@ class MGKomik : HttpSource() {
 
     // ========== CHAPTER LIST ==========
 
-    override fun chapterListRequest(manga: SManga): Request {
-        val url = manga.url.replace("/manga/", "/komik/")
-        return GET(url, headers)
-    }
+    override fun chapterListRequest(manga: SManga): Request = GET(getMangaUrl(manga), headers)
 
-    override fun chapterListParse(response: Response): List<SChapter> =
-        response.asJsoup()
-            .select("#chapterList .chapter-list-item")
-            .map { el ->
-                val link = el.selectFirst("a.chapter-link")!!
-                val num = link.selectFirst(".chapter-number")?.text().orEmpty()
-                val date = link.selectFirst(".chapter-date")?.text().orEmpty()
-                SChapter.create().apply {
-                    name = num
-                    url = link.attr("abs:href")
-                    chapter_number = parseChapterNum(num)
-                    date_upload = parseDate(date)
-                }
+    override fun chapterListParse(response: Response): List<SChapter> = response.asJsoup()
+        .select("#chapterList .chapter-list-item")
+        .map { el ->
+            val link = el.selectFirst("a.chapter-link")!!
+            val num = link.selectFirst(".chapter-number")?.text().orEmpty()
+            val date = link.selectFirst(".chapter-date")?.text().orEmpty()
+            SChapter.create().apply {
+                name = num
+                url = getUrl(link.attr("abs:href"))
+                chapter_number = parseChapterNum(num)
+                date_upload = parseDate(date)
             }
+        }
 
     // ========== PAGE LIST ==========
 
     override fun pageListRequest(chapter: SChapter): Request {
-        val mangaUrl = chapter.url.substringBefore("/chapter-") + "/"
-        return GET(chapter.url, pageHeaders(mangaUrl))
+        val url = getChapterUrl(chapter)
+        val mangaUrl = url.substringBefore("/chapter-") + "/"
+        return GET(url, pageHeaders(mangaUrl))
     }
 
-    override fun pageListParse(response: Response): List<Page> =
-        response.asJsoup()
-            .select(
-                ".reading-content img, .chapter-content img, " +
-                    ".reader-area img, img.wp-manga-chapter-img",
-            )
-            .mapIndexed { i, img ->
-                Page(i, "", img.attr("abs:src").ifBlank { img.attr("abs:data-src") })
-            }
+    override fun pageListParse(response: Response): List<Page> = response.asJsoup()
+        .select(
+            ".reading-content img, .chapter-content img, " +
+                ".reader-area img, img.wp-manga-chapter-img",
+        )
+        .mapIndexed { i, img ->
+            val url = img.attr("abs:src").ifBlank { img.attr("abs:data-src") }
+            Page(i, "", cleanImageUrl(url))
+        }
+
+    private fun cleanImageUrl(url: String): String = url.replace(Regex("-\\d+x\\d+(?=\\.(jpg|jpeg|png|webp))"), "")
+        .replace(Regex("-scaled(?=\\.(jpg|jpeg|png|webp))"), "")
 
     override fun imageRequest(page: Page) = GET(page.imageUrl!!, pageHeaders("$baseUrl/"))
 
@@ -274,8 +295,12 @@ class MGKomik : HttpSource() {
 
     // ========== HELPERS ==========
 
-    private fun parseChapterNum(name: String): Float =
-        Regex("""(\d+(?:\.\d+)?)""").find(name)?.groupValues?.get(1)?.toFloatOrNull() ?: -1f
+    private fun getUrl(url: String): String = url.replace(Regex("https?://(id|web)\\.mgkomik\\.cc"), "")
+        .replace(Regex("//(id|web)\\.mgkomik\\.cc"), "")
+        .replace("/manga/", "/komik/")
+        .let { if (it.startsWith("/")) it else "/$it" }
+
+    private fun parseChapterNum(name: String): Float = Regex("""(\d+(?:\.\d+)?)""").find(name)?.groupValues?.get(1)?.toFloatOrNull() ?: -1f
 
     private fun parseDate(raw: String): Long {
         if (raw.isBlank()) return 0L

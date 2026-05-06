@@ -2,7 +2,7 @@ ext {
     extName = 'MG Komik'
     extClass = '.MGKomik'
     baseUrl = 'https://web.mgkomik.cc'
-    extVersionCode = 20
+    extVersionCode = 21
     isNsfw = false
 }
 
