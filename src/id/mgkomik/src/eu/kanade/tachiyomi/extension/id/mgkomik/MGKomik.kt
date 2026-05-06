@@ -5,6 +5,7 @@ import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.SManga
+import okhttp3.Request
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.text.SimpleDateFormat
@@ -17,11 +18,28 @@ class MGKomik :
         "id",
         SimpleDateFormat("dd MMM yyyy", Locale("id")),
     ) {
-    override val useLoadMoreRequest = LoadMoreStrategy.AutoDetect
+    override val useLoadMoreRequest = LoadMoreStrategy.Always
 
     override val useNewChapterEndpoint = false
 
     override val mangaSubString = "komik"
+
+    override fun popularMangaRequest(page: Int): Request = super.popularMangaRequest(page).addTimestamp()
+
+    override fun latestUpdatesRequest(page: Int): Request = super.latestUpdatesRequest(page).addTimestamp()
+
+    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request = super.searchMangaRequest(page, query, filters).addTimestamp()
+
+    override fun mangaDetailsRequest(manga: SManga): Request = super.mangaDetailsRequest(manga).addTimestamp()
+
+    override fun chapterListRequest(manga: SManga): Request = super.chapterListRequest(manga).addTimestamp()
+
+    private fun Request.addTimestamp(): Request {
+        val url = this.url.newBuilder()
+            .addQueryParameter("t", System.currentTimeMillis().toString())
+            .build()
+        return this.newBuilder().url(url).build()
+    }
 
     override fun headersBuilder() = super.headersBuilder().apply {
         set("User-Agent", USER_AGENT)
