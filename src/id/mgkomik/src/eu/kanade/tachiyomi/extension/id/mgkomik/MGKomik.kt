@@ -1,7 +1,6 @@
 package eu.kanade.tachiyomi.extension.id.mgkomik
 
 import eu.kanade.tachiyomi.multisrc.madara.Madara
-import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
@@ -25,22 +24,33 @@ class MGKomik :
     override val mangaSubString = "komik"
 
     override fun headersBuilder() = super.headersBuilder().apply {
-        set("Sec-Fetch-Site", "same-origin")
-        set("Upgrade-Insecure-Requests", "1")
-        set("Referer", "$baseUrl/")
+        set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
+        set("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
+        set("Sec-Fetch-Dest", "document")
+        set("Sec-Fetch-Mode", "navigate")
         set("Sec-Fetch-Site", "none")
+        set("Sec-Fetch-User", "?1")
+        set("Upgrade-Insecure-Requests", "1")
+        set("X-Requested-With", "com.android.chrome")
     }
 
     override val client = network.cloudflareClient.newBuilder()
         .addInterceptor { chain ->
             val request = chain.request()
-            val headers = request.headers.newBuilder().apply {
-                removeAll("X-Requested-With")
-            }.build()
+            val url = request.url.toString()
+            val headers = request.headers.newBuilder()
 
-            chain.proceed(request.newBuilder().headers(headers).build())
+            if (url.contains("admin-ajax.php") || url.contains("wp-json")) {
+                headers.set("X-Requested-With", "XMLHttpRequest")
+            } else if (request.header("X-Requested-With") == "XMLHttpRequest") {
+                // Do nothing, keep it
+            } else {
+                headers.removeAll("X-Requested-With")
+            }
+
+            chain.proceed(request.newBuilder().headers(headers.build()).build())
         }
-        .rateLimit(9, 2)
+        .rateLimit(12, 3)
         .build()
 
     // ================================== Popular ======================================
@@ -87,8 +97,6 @@ class MGKomik :
             title,
             options.toTypedArray(),
         )
-
-    override fun genresRequest() = GET("$baseUrl/$mangaSubString", headers)
 
     override fun parseGenres(document: Document): List<Genre> {
         val genres = mutableListOf<Genre>()
