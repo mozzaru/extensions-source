@@ -24,28 +24,30 @@ class MGKomik :
     override val mangaSubString = "komik"
 
     override fun headersBuilder() = super.headersBuilder().apply {
+        set("User-Agent", USER_AGENT)
         set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
         set("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
-        set("Sec-Fetch-Dest", "document")
-        set("Sec-Fetch-Mode", "navigate")
-        set("Sec-Fetch-Site", "none")
-        set("Sec-Fetch-User", "?1")
+        set("Referer", "$baseUrl/")
         set("Upgrade-Insecure-Requests", "1")
-        set("X-Requested-With", "com.android.chrome")
     }
 
     override val client = network.cloudflareClient.newBuilder()
         .addInterceptor { chain ->
             val request = chain.request()
-            val url = request.url.toString()
+            val url = request.url
             val headers = request.headers.newBuilder()
 
-            if (url.contains("admin-ajax.php") || url.contains("wp-json")) {
+            if (url.encodedPath.contains("admin-ajax.php") || url.encodedPath.contains("wp-json")) {
                 headers.set("X-Requested-With", "XMLHttpRequest")
-            } else if (request.header("X-Requested-With") == "XMLHttpRequest") {
-                // Do nothing, keep it
+                headers.set("Sec-Fetch-Dest", "empty")
+                headers.set("Sec-Fetch-Mode", "cors")
+                headers.set("Sec-Fetch-Site", "same-origin")
             } else {
-                headers.removeAll("X-Requested-With")
+                headers.set("X-Requested-With", "com.android.chrome")
+                headers.set("Sec-Fetch-Dest", "document")
+                headers.set("Sec-Fetch-Mode", "navigate")
+                headers.set("Sec-Fetch-Site", "none")
+                headers.set("Sec-Fetch-User", "?1")
             }
 
             chain.proceed(request.newBuilder().headers(headers.build()).build())
@@ -105,5 +107,9 @@ class MGKomik :
             Genre(a.text(), a.absUrl("href"))
         }
         return genres
+    }
+
+    companion object {
+        private const val USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36"
     }
 }
