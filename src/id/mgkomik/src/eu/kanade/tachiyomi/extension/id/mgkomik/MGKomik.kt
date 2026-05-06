@@ -13,6 +13,7 @@ import okhttp3.Headers
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.nodes.Element
+import rx.Observable
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
@@ -46,17 +47,37 @@ class MGKomik : HttpSource() {
         .set("Referer", referer)
         .build()
 
+    // ========== URL NORMALIZATION ==========
+    // Handles URLs from old Madara extension (relative paths, old domain, /manga/ prefix)
+    // and new HttpSource extension (absolute URLs).
+
+    private fun normalizeUrl(rawUrl: String): String {
+        // Already absolute with current domain
+        if (rawUrl.startsWith(baseUrl)) {
+            return rawUrl.replace("/manga/", "/komik/")
+        }
+
+        // Absolute URL with old domain (id.mgkomik.cc or mgkomik.cc variants)
+        if (rawUrl.startsWith("http")) {
+            val withoutDomain = rawUrl.replace(Regex("""^https?://[^/]+"""), "")
+            return "$baseUrl${withoutDomain.replace("/manga/", "/komik/")}"
+        }
+
+        // Relative path from old Madara setUrlWithoutDomain()
+        // e.g. "/komik/judul-manga/" or "/manga/judul-manga/"
+        val normalized = rawUrl.replace("/manga/", "/komik/")
+        return "$baseUrl$normalized"
+    }
+
     // ========== POPULAR ==========
 
-    override fun popularMangaRequest(page: Int) =
-        GET("$baseUrl/komik/?order_by=trending&page=$page", headers)
+    override fun popularMangaRequest(page: Int) = GET("$baseUrl/komik/?order_by=trending&page=$page", headers)
 
     override fun popularMangaParse(response: Response) = listingParse(response)
 
     // ========== LATEST ==========
 
-    override fun latestUpdatesRequest(page: Int) =
-        GET("$baseUrl/komik/?order_by=latest&page=$page", headers)
+    override fun latestUpdatesRequest(page: Int) = GET("$baseUrl/komik/?order_by=latest&page=$page", headers)
 
     override fun latestUpdatesParse(response: Response) = listingParse(response)
 
@@ -98,26 +119,26 @@ class MGKomik : HttpSource() {
             title = (linkEl.selectFirst("div.manga-title")?.text() ?: linkEl.text())
                 .trim().takeIf { it.isNotBlank() } ?: return null
             val rawUrl = linkEl.attr("href")
-            val normalized = rawUrl.replace("/manga/", "/komik/")
-            url = if (normalized.startsWith("http")) normalized else "$baseUrl$normalized"
+            url = normalizeUrl(rawUrl)
             cover = el.selectFirst("img.manga-cover")?.attr("abs:src").orEmpty()
         }
 
-        val finalUrl = url.replace("/manga/", "/komik/")
-
         return SManga.create().apply {
             this.title = title
-            this.url = finalUrl
+            this.url = normalizeUrl(url)
             thumbnail_url = cover
         }
     }
 
     // ========== MANGA DETAIL ==========
+    // fetchMangaDetails is overridden to handle old Madara relative URLs stored in library.
 
-    override fun mangaDetailsRequest(manga: SManga): Request {
-        val url = manga.url.replace("/manga/", "/komik/")
-        return GET(url, headers)
+    override fun fetchMangaDetails(manga: SManga): Observable<SManga> {
+        val fixedManga = manga.apply { url = normalizeUrl(url) }
+        return super.fetchMangaDetails(fixedManga)
     }
+
+    override fun mangaDetailsRequest(manga: SManga): Request = GET(normalizeUrl(manga.url), headers)
 
     override fun mangaDetailsParse(response: Response): SManga {
         val doc = response.asJsoup()
@@ -144,43 +165,54 @@ class MGKomik : HttpSource() {
     }
 
     // ========== CHAPTER LIST ==========
+    // fetchChapterList is overridden to handle old Madara relative URLs stored in library.
 
-    override fun chapterListRequest(manga: SManga): Request {
-        val url = manga.url.replace("/manga/", "/komik/")
-        return GET(url, headers)
+    override fun fetchChapterList(manga: SManga): Observable<List<SChapter>> {
+        val fixedManga = manga.apply { url = normalizeUrl(url) }
+        return super.fetchChapterList(fixedManga)
     }
 
-    override fun chapterListParse(response: Response): List<SChapter> =
-        response.asJsoup()
-            .select("#chapterList .chapter-list-item")
-            .map { el ->
-                val link = el.selectFirst("a.chapter-link")!!
-                val num = link.selectFirst(".chapter-number")?.text().orEmpty()
-                val date = link.selectFirst(".chapter-date")?.text().orEmpty()
-                SChapter.create().apply {
-                    name = num
-                    url = link.attr("abs:href")
-                    chapter_number = parseChapterNum(num)
-                    date_upload = parseDate(date)
-                }
+    override fun chapterListRequest(manga: SManga): Request = GET(normalizeUrl(manga.url), headers)
+
+    override fun chapterListParse(response: Response): List<SChapter> = response.asJsoup()
+        .select("#chapterList .chapter-list-item")
+        .map { el ->
+            val link = el.selectFirst("a.chapter-link")!!
+            val num = link.selectFirst(".chapter-number")?.text().orEmpty()
+            val date = link.selectFirst(".chapter-date")?.text().orEmpty()
+            SChapter.create().apply {
+                name = num
+                url = link.attr("abs:href")
+                chapter_number = parseChapterNum(num)
+                date_upload = parseDate(date)
             }
+        }
 
     // ========== PAGE LIST ==========
 
-    override fun pageListRequest(chapter: SChapter): Request {
-        val mangaUrl = chapter.url.substringBefore("/chapter-") + "/"
-        return GET(chapter.url, pageHeaders(mangaUrl))
+    override fun fetchPageList(chapter: SChapter): Observable<List<Page>> {
+        val fixedChapter = chapter.apply { url = normalizeUrl(url) }
+        return super.fetchPageList(fixedChapter)
     }
 
-    override fun pageListParse(response: Response): List<Page> =
-        response.asJsoup()
-            .select(
-                ".reading-content img, .chapter-content img, " +
-                    ".reader-area img, img.wp-manga-chapter-img",
-            )
-            .mapIndexed { i, img ->
-                Page(i, "", img.attr("abs:src").ifBlank { img.attr("abs:data-src") })
-            }
+    override fun pageListRequest(chapter: SChapter): Request {
+        val chapterUrl = normalizeUrl(chapter.url)
+        // Derive manga URL for referer: strip the chapter segment
+        val referer = chapterUrl
+            .replace(Regex("""/chapter-[^/]+/?$"""), "/")
+            .ifBlank { "$baseUrl/" }
+        return GET(chapterUrl, pageHeaders(referer))
+    }
+
+    override fun pageListParse(response: Response): List<Page> = response.asJsoup()
+        .select(
+            ".reading-content img, .chapter-content img, " +
+                ".reader-area img, img.wp-manga-chapter-img, " +
+                "div.page-break img", // Madara page-break selector as fallback
+        )
+        .mapIndexed { i, img ->
+            Page(i, "", img.attr("abs:src").ifBlank { img.attr("abs:data-src") })
+        }
 
     override fun imageRequest(page: Page) = GET(page.imageUrl!!, pageHeaders("$baseUrl/"))
 
@@ -274,8 +306,7 @@ class MGKomik : HttpSource() {
 
     // ========== HELPERS ==========
 
-    private fun parseChapterNum(name: String): Float =
-        Regex("""(\d+(?:\.\d+)?)""").find(name)?.groupValues?.get(1)?.toFloatOrNull() ?: -1f
+    private fun parseChapterNum(name: String): Float = Regex("""(\d+(?:\.\d+)?)""").find(name)?.groupValues?.get(1)?.toFloatOrNull() ?: -1f
 
     private fun parseDate(raw: String): Long {
         if (raw.isBlank()) return 0L
