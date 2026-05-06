@@ -15,9 +15,9 @@ class MGKomik :
         "MG Komik",
         "https://id.mgkomik.cc",
         "id",
-        SimpleDateFormat("dd MMM yy", Locale.US),
+        SimpleDateFormat("dd MMM yyyy", Locale("id")),
     ) {
-    override val useLoadMoreRequest = LoadMoreStrategy.Always
+    override val useLoadMoreRequest = LoadMoreStrategy.AutoDetect
 
     override val useNewChapterEndpoint = false
 
@@ -25,12 +25,13 @@ class MGKomik :
 
     override fun headersBuilder() = super.headersBuilder().apply {
         set("User-Agent", USER_AGENT)
-        set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
+        set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
         set("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
-        set("Referer", "$baseUrl/")
-        set("Sec-CH-UA", "\"Chromium\";v=\"$CH_VERSION\", \"Not.A/Brand\";v=\"8\", \"Google Chrome\";v=\"$CH_VERSION\"")
+        set("DNT", "1")
+        set("Sec-CH-UA", "\"Chromium\";v=\"$CH_VERSION\", \"Not.A/Brand\";v=\"24\", \"Google Chrome\";v=\"$CH_VERSION\"")
         set("Sec-CH-UA-Mobile", "?1")
         set("Sec-CH-UA-Platform", "\"Android\"")
+        set("Sec-GPC", "1")
         set("Upgrade-Insecure-Requests", "1")
     }
 
@@ -40,17 +41,26 @@ class MGKomik :
             val url = request.url
             val headers = request.headers.newBuilder()
 
-            if (url.encodedPath.contains("admin-ajax.php") || url.encodedPath.contains("wp-json")) {
+            val path = url.encodedPath
+            if (path.contains("admin-ajax.php") || path.contains("wp-json") || request.header("X-Requested-With") == "XMLHttpRequest") {
                 headers.set("X-Requested-With", "XMLHttpRequest")
                 headers.set("Sec-Fetch-Dest", "empty")
                 headers.set("Sec-Fetch-Mode", "cors")
                 headers.set("Sec-Fetch-Site", "same-origin")
+                headers.removeAll("Upgrade-Insecure-Requests")
+            } else if (path.endsWith(".jpg") || path.endsWith(".jpeg") || path.endsWith(".png") || path.endsWith(".webp") || path.contains("photon")) {
+                headers.removeAll("X-Requested-With")
+                headers.set("Sec-Fetch-Dest", "image")
+                headers.set("Sec-Fetch-Mode", "no-cors")
+                headers.set("Sec-Fetch-Site", "cross-site")
+                headers.removeAll("Upgrade-Insecure-Requests")
             } else {
-                headers.set("X-Requested-With", "com.android.chrome")
+                headers.removeAll("X-Requested-With")
                 headers.set("Sec-Fetch-Dest", "document")
                 headers.set("Sec-Fetch-Mode", "navigate")
-                headers.set("Sec-Fetch-Site", "none")
+                headers.set("Sec-Fetch-Site", if (request.header("Referer") != null) "same-origin" else "none")
                 headers.set("Sec-Fetch-User", "?1")
+                headers.set("Priority", "u=0, i")
             }
 
             chain.proceed(request.newBuilder().headers(headers.build()).build())
