@@ -38,7 +38,17 @@ class MGKomik :
     override val useNewChapterEndpoint = true
     override val mangaSubString = "komik"
 
-    override fun getMangaUrl(manga: SManga): String = "$baseUrl${manga.url}"
+    override fun getMangaUrl(manga: SManga): String = when {
+        manga.url.startsWith("http") -> manga.url
+        manga.url.startsWith("//") -> "https:${manga.url}"
+        else -> super.getMangaUrl(manga)
+    }
+
+    override fun getChapterUrl(chapter: SChapter): String = when {
+        chapter.url.startsWith("http") -> chapter.url
+        chapter.url.startsWith("//") -> "https:${chapter.url}"
+        else -> super.getChapterUrl(chapter)
+    }
 
     // =============================== Requests ===============================
 
@@ -76,7 +86,7 @@ class MGKomik :
     override fun genresRequest(): Request = super.genresRequest().addSameOriginNavHeaders()
 
     override fun xhrChaptersRequest(mangaUrl: String): Request = POST(
-        "$mangaUrl/ajax/chapters/",
+        "${mangaUrl.trimEnd('/')}/ajax/chapters/",
         headers.newBuilder()
             .set("Referer", mangaUrl)
             .set("X-Requested-With", "XMLHttpRequest")
@@ -122,6 +132,7 @@ class MGKomik :
             .removeAll("Upgrade-Insecure-Requests")
             .removeAll("Cache-Control")
             .removeAll("Priority")
+            .removeAll("X-Requested-With")
             .removeAll("Sec-CH-UA-Arch")
             .removeAll("Sec-CH-UA-Bitness")
             .removeAll("Sec-CH-UA-Full-Version")
@@ -182,7 +193,10 @@ class MGKomik :
             // CDN image — domain berbeda dari baseUrl
             val isCdnImage = isImage && !host.contains("mgkomik.cc")
 
-            val isReading = segments.size >= 4 && segments[0] == mangaSubString && segments[1] != "page"
+            val isReading = segments.size >= 3 &&
+                (segments[0] == mangaSubString || segments[0] == "manga") &&
+                segments[1].isNotBlank() && segments[2].isNotBlank() &&
+                segments[1] != "page"
 
             when {
                 isAjax -> {
