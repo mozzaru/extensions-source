@@ -29,7 +29,7 @@ class MGKomik :
     // =============================== Requests ===============================
 
     override fun popularMangaRequest(page: Int): Request {
-        val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
+        val url = "$baseUrl/$mangaSubString/${if (page > 1) "page/$page/" else ""}".toHttpUrl().newBuilder()
             .addQueryParameter("m_orderby", "views")
             .addQueryParameter("t", System.currentTimeMillis().toString())
             .build()
@@ -38,7 +38,7 @@ class MGKomik :
     }
 
     override fun latestUpdatesRequest(page: Int): Request {
-        val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
+        val url = "$baseUrl/$mangaSubString/${if (page > 1) "page/$page/" else ""}".toHttpUrl().newBuilder()
             .addQueryParameter("m_orderby", "latest")
             .addQueryParameter("t", System.currentTimeMillis().toString())
             .build()
@@ -48,7 +48,7 @@ class MGKomik :
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request = if (query.isNotBlank()) {
         super.searchMangaRequest(page, query, filters).addTimestamp()
     } else {
-        val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
+        val url = "$baseUrl/$mangaSubString/${if (page > 1) "page/$page/" else ""}".toHttpUrl().newBuilder()
         url.addQueryParameter("t", System.currentTimeMillis().toString())
 
         filters.forEach { filter ->
@@ -86,14 +86,17 @@ class MGKomik :
     override fun headersBuilder() = super.headersBuilder().apply {
         set("User-Agent", USER_AGENT)
         set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
-        set("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
+        set("Accept-Language", "id-ID,id;q=0.9")
         set("DNT", "1")
-        set("Sec-CH-UA", "\"Chromium\";v=\"$CH_VERSION\", \"Not.A/Brand\";v=\"8\"")
+        set("Sec-CH-UA", "\"Chromium\";v=\"147\", \"Not.A/Brand\";v=\"8\"")
+        set("Sec-CH-UA-Arch", "\"\"")
+        set("Sec-CH-UA-Bitness", "\"\"")
+        set("Sec-CH-UA-Full-Version", "\"147.0.7727.93\"")
+        set("Sec-CH-UA-Full-Version-List", "\"Chromium\";v=\"147.0.7727.93\", \"Not.A/Brand\";v=\"8.0.0.0\"")
         set("Sec-CH-UA-Mobile", "?1")
+        set("Sec-CH-UA-Model", "\"RMX2103\"")
         set("Sec-CH-UA-Platform", "\"Android\"")
         set("Sec-CH-UA-Platform-Version", "\"11.0.0\"")
-        set("Sec-CH-UA-Full-Version-List", "\"Chromium\";v=\"147.0.7727.93\", \"Not.A/Brand\";v=\"8.0.0.0\"")
-        set("Sec-CH-UA-Model", "\"RMX2103\"")
         set("Sec-GPC", "1")
         set("Upgrade-Insecure-Requests", "1")
     }
@@ -124,7 +127,7 @@ class MGKomik :
                 headers.set("Sec-Fetch-Site", if (request.header("Referer") != null) "same-origin" else "none")
                 headers.set("Sec-Fetch-User", "?1")
                 headers.set("Priority", "u=0, i")
-                headers.set("Cache-Control", "no-cache")
+                headers.set("Cache-Control", "max-age=0")
             }
 
             chain.proceed(request.newBuilder().headers(headers.build()).build())
