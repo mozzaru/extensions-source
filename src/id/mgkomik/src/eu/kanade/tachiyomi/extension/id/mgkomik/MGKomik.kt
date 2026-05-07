@@ -36,7 +36,9 @@ class MGKomik :
         "id",
         SimpleDateFormat("dd MMM yy", Locale.US),
     ) {
-    override val useLoadMoreRequest = LoadMoreStrategy.Always
+    // FIX 1: Matikan LoadMore agar tidak pakai AJAX POST
+    // AJAX POST diblock oleh interceptor → return "0" → manga kosong
+    override val useLoadMoreRequest = LoadMoreStrategy.Never
     override val useNewChapterEndpoint = false
     override val mangaSubString = "komik"
 
@@ -57,9 +59,16 @@ class MGKomik :
         set("sec-fetch-user", "?1")
     }
 
+    // FIX 2: Override request URL dengan query yang benar
+    // Madara base tidak append ?m_orderby → page jadi generic/search kosong
+    override fun popularMangaRequest(page: Int): Request =
+        GET("$baseUrl/$mangaSubString/?m_orderby=views&page=$page", headers)
+
+    override fun latestUpdatesRequest(page: Int): Request =
+        GET("$baseUrl/$mangaSubString/?m_orderby=latest&page=$page", headers)
+
     inner class SmartWebViewInterceptor : Interceptor {
         private val mainHandler = Handler(Looper.getMainLooper())
-        // Batasi hanya 1 WebView aktif sekaligus
         private val webViewSemaphore = Semaphore(1)
 
         override fun intercept(chain: Interceptor.Chain): Response {
@@ -67,7 +76,11 @@ class MGKomik :
             val url = request.url.toString()
             val method = request.method
 
-            if (!url.contains("mgkomik.cc") || method != "GET") {
+            // FIX 3: Skip admin-ajax.php (POST dan GET) — tidak perlu WebView
+            if (!url.contains("mgkomik.cc") ||
+                method != "GET" ||
+                url.contains("admin-ajax.php")
+            ) {
                 android.util.Log.d("MGKomik", "=== SKIP: $url")
                 return chain.proceed(request)
             }
@@ -88,12 +101,9 @@ class MGKomik :
             var htmlContent = ""
             var finalUrl = originalUrl
 
-            // Tunggu giliran — max 30 detik antri
             android.util.Log.d("MGKomik", "=== ANTRI SEMAPHORE: $originalUrl")
             val acquired = webViewSemaphore.tryAcquire(30, TimeUnit.SECONDS)
-            if (!acquired) {
-                throw IOException("Semaphore timeout: $originalUrl")
-            }
+            if (!acquired) throw IOException("Semaphore timeout: $originalUrl")
             android.util.Log.d("MGKomik", "=== DAPAT SEMAPHORE: $originalUrl")
 
             try {
@@ -148,8 +158,13 @@ class MGKomik :
                                             .replace("\\'", "'")
                                             .replace("\\\\", "\\")
 
+                                        // FIX 4: Log title dan URL final untuk debug
+                                        val titleMatch = Regex("<title>(.*?)</title>")
+                                            .find(htmlContent)?.groupValues?.get(1) ?: "null"
                                         android.util.Log.d("MGKomik", "=== WV HTML LENGTH: ${htmlContent.length}")
+                                        android.util.Log.d("MGKomik", "=== WV TITLE: $titleMatch")
                                         android.util.Log.d("MGKomik", "=== WV HAS ITEM-THUMB: ${htmlContent.contains("item-thumb")}")
+                                        android.util.Log.d("MGKomik", "=== WV HAS TAB-THUMB: ${htmlContent.contains("tab-thumb")}")
                                         android.util.Log.d("MGKomik", "=== WV FINAL URL: $finalUrl")
 
                                         latch.countDown()
@@ -171,6 +186,7 @@ class MGKomik :
                         }
                     }
 
+                    android.util.Log.d("MGKomik", "=== WV LOAD URL: $originalUrl")
                     webView.loadUrl(originalUrl)
                 }
 
@@ -200,31 +216,48 @@ class MGKomik :
         }
     }
 
+    // FIX 5: Parse dari struktur HTML nyata (tab-thumb, bukan item-thumb)
+    // Struktur: div.tab-thumb.c-image-hover > a[href][title] > img[src]
+    override fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
+        val a = element.select("div.tab-thumb a").firstOrNull()
+            ?: element.select("div.item-thumb a").firstOrNull()
+        android.util.Log.d("MGKomik", "=== MANGA FROM ELEMENT: title=${a?.attr("title")}, href=${a?.attr("abs:href")}")
+        a?.let {
+            setUrlWithoutDomain(it.attr("abs:href"))
+            title = it.attr("title")
+            thumbnail_url = it.select("img").attr("abs:src")
+        }
+    }
+
+    // FIX 6: Selector untuk popular/latest — pakai struktur search result
+    // Yang muncul di /komik/?m_orderby=xxx adalah format search result
+    override fun popularMangaSelector() = "div.c-tabs-item__content"
+    override fun latestUpdatesSelector() = "div.c-tabs-item__content"
+
+    override fun latestUpdatesFromElement(element: Element): SManga =
+        popularMangaFromElement(element)
+
+    // FIX 7: Tidak ada next page di search result format ini, pakai wp-pagenavi
+    override fun popularMangaNextPageSelector() = "div.wp-pagenavi a.nextpostslink"
+    override fun latestUpdatesNextPageSelector() = "div.wp-pagenavi a.nextpostslink"
+
     override fun popularMangaParse(response: Response): MangasPage {
         val document = response.asJsoup()
-        val items = document.select("div.item-thumb a")
         android.util.Log.d("MGKomik", "=== PARSE popularMangaParse: baseUri=${document.baseUri()}")
-        android.util.Log.d("MGKomik", "=== PARSE item-thumb count=${items.size}")
-        android.util.Log.d("MGKomik", "=== PARSE first title=${items.first()?.attr("title")}")
-        android.util.Log.d("MGKomik", "=== PARSE first href=${items.first()?.attr("abs:href")}")
+        android.util.Log.d("MGKomik", "=== PARSE title=${document.title()}")
+        android.util.Log.d("MGKomik", "=== PARSE tab-thumb count=${document.select("div.tab-thumb").size}")
+        android.util.Log.d("MGKomik", "=== PARSE item-thumb count=${document.select("div.item-thumb").size}")
+        android.util.Log.d("MGKomik", "=== PARSE c-tabs-item__content count=${document.select("div.c-tabs-item__content").size}")
         return super.popularMangaParse(response)
     }
 
     override fun latestUpdatesParse(response: Response): MangasPage {
         val document = response.asJsoup()
-        val items = document.select("div.item-thumb a")
         android.util.Log.d("MGKomik", "=== PARSE latestUpdatesParse: baseUri=${document.baseUri()}")
-        android.util.Log.d("MGKomik", "=== PARSE item-thumb count=${items.size}")
+        android.util.Log.d("MGKomik", "=== PARSE title=${document.title()}")
+        android.util.Log.d("MGKomik", "=== PARSE tab-thumb count=${document.select("div.tab-thumb").size}")
+        android.util.Log.d("MGKomik", "=== PARSE c-tabs-item__content count=${document.select("div.c-tabs-item__content").size}")
         return super.latestUpdatesParse(response)
-    }
-
-    override fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
-        element.select("div.item-thumb a").let {
-            android.util.Log.d("MGKomik", "=== MANGA: title=${it.attr("title")}, href=${it.attr("abs:href")}")
-            setUrlWithoutDomain(it.attr("abs:href"))
-            title = it.attr("title")
-            thumbnail_url = it.select("img").attr("abs:src")
-        }
     }
 
     override val chapterUrlSuffix = ""
