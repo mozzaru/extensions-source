@@ -6,6 +6,7 @@ import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
+import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
@@ -30,7 +31,7 @@ class MGKomik :
 
     override fun popularMangaRequest(page: Int): Request {
         val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
-            .addQueryParameter("m_orderby", "views")
+            .addQueryParameter("m_orderby", "trending")
             .build()
         return GET(url, firstNavHeaders())
     }
@@ -64,7 +65,6 @@ class MGKomik :
     override fun genresRequest(): Request =
         super.genresRequest().addSameOriginNavHeaders()
 
-    // Chapter AJAX endpoint with correct same-origin headers
     override fun xhrChaptersRequest(mangaUrl: String): Request =
         POST(
             "$mangaUrl/ajax/chapters/",
@@ -74,13 +74,35 @@ class MGKomik :
                 .set("Sec-Fetch-Dest", "empty")
                 .set("Sec-Fetch-Mode", "cors")
                 .set("Sec-Fetch-Site", "same-origin")
+                .set("Origin", baseUrl)
                 .removeAll("Sec-Fetch-User")
+                .removeAll("Upgrade-Insecure-Requests")
                 .build(),
         )
 
-    // =============================== Headers ===============================
+    override fun pageListRequest(chapter: SChapter): Request {
+        val chapterUrl = chapter.url.let {
+            if (it.startsWith("http")) it else "$baseUrl$it"
+        }
+        val mangaUrl = chapterUrl.trimEnd('/')
+            .substringBeforeLast("/")
+            .trimEnd('/') + "/"
 
-    /** Fresh top-level navigation — no Referer, sec-fetch-site=none */
+        return GET(
+            chapterUrl,
+            headers.newBuilder()
+                .set("Referer", mangaUrl)
+                .set("Cache-Control", "max-age=0")
+                .set("Sec-Fetch-Dest", "document")
+                .set("Sec-Fetch-Mode", "navigate")
+                .set("Sec-Fetch-Site", "same-origin")
+                .set("Sec-Fetch-User", "?1")
+                .build(),
+        )
+    }
+
+    // =============================== Headers ================================
+
     private fun firstNavHeaders() = headers.newBuilder()
         .removeAll("Referer")
         .set("Cache-Control", "max-age=0")
@@ -90,7 +112,6 @@ class MGKomik :
         .set("Sec-Fetch-User", "?1")
         .build()
 
-    /** Same-origin navigation — with Referer, sec-fetch-site=same-origin */
     private fun Request.addSameOriginNavHeaders(): Request = newBuilder()
         .header("Referer", "$baseUrl/$mangaSubString/")
         .header("Cache-Control", "max-age=0")
@@ -104,17 +125,15 @@ class MGKomik :
         set("User-Agent", USER_AGENT)
         set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
         set("Accept-Language", "id-ID,id;q=0.9")
-        set("DNT", "1")
         set("Sec-CH-UA", "\"Chromium\";v=\"$CH_VERSION\", \"Not.A/Brand\";v=\"8\"")
         set("Sec-CH-UA-Arch", "\"\"")
         set("Sec-CH-UA-Bitness", "\"\"")
         set("Sec-CH-UA-Full-Version", "\"$CH_VERSION.0.7727.93\"")
         set("Sec-CH-UA-Full-Version-List", "\"Chromium\";v=\"$CH_VERSION.0.7727.93\", \"Not.A/Brand\";v=\"8.0.0.0\"")
         set("Sec-CH-UA-Mobile", "?1")
-        set("Sec-CH-UA-Model", "\"RMX2103\"")
+        set("Sec-CH-UA-Model", "\"Redmi Note 9\"")
         set("Sec-CH-UA-Platform", "\"Android\"")
         set("Sec-CH-UA-Platform-Version", "\"11.0.0\"")
-        set("Sec-GPC", "1")
         set("Upgrade-Insecure-Requests", "1")
         set("Priority", "u=0, i")
     }
@@ -122,43 +141,72 @@ class MGKomik :
     override val client = network.cloudflareClient.newBuilder()
         .addInterceptor { chain ->
             val request = chain.request()
-            val path = request.url.encodedPath
+            val url = request.url
+            val host = url.host
+            val path = url.encodedPath
             val newHeaders = request.headers.newBuilder()
 
+            val isAjax = path.contains("admin-ajax.php") ||
+                path.contains("wp-json") ||
+                path.contains("/ajax/")
+
+            val isImage = path.endsWith(".jpg") || path.endsWith(".jpeg") ||
+                path.endsWith(".png") || path.endsWith(".webp") ||
+                path.endsWith(".gif") || path.contains("/thumbs/")
+
+            // CDN image — domain berbeda dari baseUrl
+            val isCdnImage = isImage && host != "id.mgkomik.cc"
+
             when {
-                path.contains("admin-ajax.php") || path.contains("wp-json") || path.contains("/ajax/") -> {
-                    // AJAX / chapter endpoint
+                isAjax -> {
                     newHeaders.set("X-Requested-With", "XMLHttpRequest")
                     newHeaders.set("Sec-Fetch-Dest", "empty")
                     newHeaders.set("Sec-Fetch-Mode", "cors")
                     newHeaders.set("Sec-Fetch-Site", "same-origin")
                     newHeaders.set("Origin", baseUrl)
                     newHeaders.removeAll("Sec-Fetch-User")
+                    newHeaders.removeAll("Upgrade-Insecure-Requests")
                 }
-                path.endsWith(".jpg") || path.endsWith(".jpeg") ||
-                    path.endsWith(".png") || path.endsWith(".webp") ||
-                    path.contains("/thumbs/") -> {
-                    // Images — no Sec-Fetch-* headers per HAR
-                    newHeaders.removeAll("X-Requested-With")
+
+                isCdnImage -> {
+                    newHeaders.set("Referer", "$baseUrl/")
                     newHeaders.removeAll("Sec-Fetch-Dest")
                     newHeaders.removeAll("Sec-Fetch-Mode")
                     newHeaders.removeAll("Sec-Fetch-Site")
                     newHeaders.removeAll("Sec-Fetch-User")
+                    newHeaders.removeAll("X-Requested-With")
                     newHeaders.removeAll("Cache-Control")
-                    newHeaders.removeAll("Priority")
+                    newHeaders.removeAll("Upgrade-Insecure-Requests")
+                    newHeaders.removeAll("Sec-CH-UA-Arch")
+                    newHeaders.removeAll("Sec-CH-UA-Bitness")
+                    newHeaders.removeAll("Sec-CH-UA-Full-Version")
+                    newHeaders.removeAll("Sec-CH-UA-Full-Version-List")
+                    newHeaders.removeAll("Sec-CH-UA-Model")
+                    newHeaders.removeAll("Sec-CH-UA-Platform-Version")
                 }
+
+                isImage -> {
+                    // Image di domain utama — same-site, hapus nav headers
+                    newHeaders.removeAll("Sec-Fetch-Dest")
+                    newHeaders.removeAll("Sec-Fetch-Mode")
+                    newHeaders.removeAll("Sec-Fetch-Site")
+                    newHeaders.removeAll("Sec-Fetch-User")
+                    newHeaders.removeAll("X-Requested-With")
+                    newHeaders.removeAll("Cache-Control")
+                    newHeaders.removeAll("Upgrade-Insecure-Requests")
+                }
+
                 else -> {
-                    // Document navigation
                     newHeaders.removeAll("X-Requested-With")
                 }
             }
 
             chain.proceed(request.newBuilder().headers(newHeaders.build()).build())
         }
-        .rateLimit(3) // raised from 2 → 3 for faster chapter + cover loading
+        .rateLimit(3)
         .build()
 
-    // =============================== Selectors ===============================
+    // =============================== Selectors ==============================
 
     override fun popularMangaSelector() = "div.page-item-detail.manga"
 
@@ -169,41 +217,19 @@ class MGKomik :
         thumbnail_url = element.selectFirst("img")?.let { imageFromElement(it) }
     }
 
-    // Site uses wp-pagenavi — only selectors that actually exist in the HTML
     override fun popularMangaNextPageSelector() = "div.wp-pagenavi a.page, div.wp-pagenavi a.last"
 
-    override val mangaDetailsSelectorTitle = ".manga-title, h1#mangaTitle, div.post-title h3, div.post-title h1, #manga-title > h1"
-    override val mangaDetailsSelectorAuthor = ".meta-item:contains(Author:) .meta-value, div.author-content > a, div.manga-authors > a"
-    override val mangaDetailsSelectorStatus = ".status-badge, div.summary-content, div.summary-heading:contains(Status) + div"
-    override val mangaDetailsSelectorDescription = ".manga-description p, div.description-summary div.summary__content, div.summary_content div.post-content_item > h5 + div, div.summary_content div.manga-excerpt"
-    override val mangaDetailsSelectorThumbnail = ".manga-cover-large, div.summary_image img"
-    override val mangaDetailsSelectorGenre = ".genre-tag, div.genres-content a"
+    override val mangaDetailsSelectorTitle = "div.post-title h1, div.post-title h3"
+    override val mangaDetailsSelectorAuthor = "div.author-content > a"
+    override val mangaDetailsSelectorStatus = "div.summary-heading:contains(Status) + div.summary-content"
+    override val mangaDetailsSelectorDescription = "div.description-summary div.summary__content p"
+    override val mangaDetailsSelectorThumbnail = "div.summary_image img"
+    override val mangaDetailsSelectorGenre = "div.genres-content a"
 
-    override fun chapterListSelector() = "li.chapter-list-item, li.wp-manga-chapter"
+    override fun chapterListSelector() = "li.wp-manga-chapter"
 
-    // =============================== Images =================================
+    // ================================ Dates =================================
 
-    // Override to pick the smallest srcset image for faster thumbnail loading
-    override fun imageFromElement(element: Element): String? = when {
-        element.hasAttr("data-src") -> element.attr("abs:data-src")
-        element.hasAttr("data-lazy-src") -> element.attr("abs:data-lazy-src")
-        element.hasAttr("data-cfsrc") -> element.attr("abs:data-cfsrc")
-        element.hasAttr("srcset") -> element.attr("srcset")
-            .split(",")
-            .mapNotNull { entry ->
-                val parts = entry.trim().split(" ")
-                val url = parts.firstOrNull()?.takeIf { it.startsWith("http") } ?: return@mapNotNull null
-                val width = parts.lastOrNull()?.removeSuffix("w")?.toIntOrNull() ?: 0
-                url to width
-            }
-            .minByOrNull { it.second } // smallest resolution = fastest thumbnail
-            ?.first
-        else -> element.attr("abs:src")
-    }
-
-    // ================================ Dates ==================================
-
-    // Site date format: "30 Apr 26" = dd MMM yy (Locale.US)
     override fun parseChapterDate(date: String?): Long {
         date ?: return 0L
         val trimmed = date.trim()
@@ -230,7 +256,7 @@ class MGKomik :
         return super.parseChapterDate(trimmed)
     }
 
-    // ================================ Filters ================================
+    // ================================ Filters ===============================
 
     override fun getFilterList(): FilterList {
         launchIO { fetchGenres() }
@@ -264,6 +290,8 @@ class MGKomik :
 
     companion object {
         private const val CH_VERSION = "147"
-        private const val USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/$CH_VERSION.0.0.0 Mobile Safari/537.36"
+
+        private const val USER_AGENT =
+            "Mozilla/5.0 (Linux; Android 11; Redmi Note 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/$CH_VERSION.0.0.0 Mobile Safari/537.36"
     }
 }
