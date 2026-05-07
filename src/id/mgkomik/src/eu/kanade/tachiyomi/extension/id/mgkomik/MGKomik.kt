@@ -42,29 +42,27 @@ class MGKomik :
         return GET(url, headers)
     }
 
-    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
-        return if (query.isNotBlank()) {
-            val request = super.searchMangaRequest(page, query, filters)
-            val url = request.url.newBuilder()
-                .addQueryParameter("t", System.currentTimeMillis().toString())
-                .build()
-            request.newBuilder().url(url).build()
-        } else {
-            val url = "$baseUrl/$mangaSubString/${if (page > 1) "page/$page/" else ""}".toHttpUrl().newBuilder()
-            url.addQueryParameter("t", System.currentTimeMillis().toString())
+    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request = if (query.isNotBlank()) {
+        val request = super.searchMangaRequest(page, query, filters)
+        val url = request.url.newBuilder()
+            .addQueryParameter("t", System.currentTimeMillis().toString())
+            .build()
+        request.newBuilder().url(url).build()
+    } else {
+        val url = "$baseUrl/$mangaSubString/${if (page > 1) "page/$page/" else ""}".toHttpUrl().newBuilder()
+        url.addQueryParameter("t", System.currentTimeMillis().toString())
 
-            filters.forEach { filter ->
-                when (filter) {
-                    is OrderByFilter -> {
-                        if (filter.state != 0) {
-                            url.addQueryParameter("m_orderby", filter.toUriPart())
-                        }
+        filters.forEach { filter ->
+            when (filter) {
+                is OrderByFilter -> {
+                    if (filter.state != 0) {
+                        url.addQueryParameter("m_orderby", filter.toUriPart())
                     }
-                    else -> {}
                 }
+                else -> {}
             }
-            GET(url.build(), headers)
         }
+        GET(url.build(), headers)
     }
 
     override fun mangaDetailsRequest(manga: SManga): Request {
@@ -86,9 +84,9 @@ class MGKomik :
     override fun headersBuilder() = super.headersBuilder().apply {
         set("User-Agent", USER_AGENT)
         set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
-        set("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
+        set("Accept-Language", "id-ID,id;q=0.9")
         set("DNT", "1")
-        set("Sec-CH-UA", "\"Chromium\";v=\"$CH_VERSION\", \"Google Chrome\";v=\"$CH_VERSION\", \"Not.A/Brand\";v=\"99\"")
+        set("Sec-CH-UA", "\"Chromium\";v=\"$CH_VERSION\", \"Not.A/Brand\";v=\"8\", \"Google Chrome\";v=\"$CH_VERSION\"")
         set("Sec-CH-UA-Mobile", "?1")
         set("Sec-CH-UA-Platform", "\"Android\"")
         set("Sec-GPC", "1")
@@ -113,7 +111,7 @@ class MGKomik :
                 headers.set("Sec-Fetch-Mode", "no-cors")
                 headers.set("Sec-Fetch-Site", "cross-site")
             } else {
-                headers.set("X-Requested-With", "com.android.chrome")
+                headers.removeAll("X-Requested-With")
                 headers.set("Sec-Fetch-Dest", "document")
                 headers.set("Sec-Fetch-Mode", "navigate")
                 headers.set("Sec-Fetch-Site", if (request.header("Referer") != null) "same-origin" else "none")
@@ -181,7 +179,7 @@ class MGKomik :
     }
 
     companion object {
-        private const val CH_VERSION = "141"
+        private const val CH_VERSION = "147"
         private const val USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/$CH_VERSION.0.0.0 Mobile Safari/537.36"
     }
 }
