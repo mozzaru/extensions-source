@@ -6,6 +6,7 @@ import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
+import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -101,6 +102,28 @@ class MGKomik :
         )
     }
 
+    override fun imageRequest(page: Page): Request {
+        val imageUrl = page.imageUrl ?: page.url
+        val imageHeaders = headersBuilder()
+            .set("Referer", "$baseUrl/")
+            .set("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
+            .removeAll("Sec-Fetch-Dest")
+            .removeAll("Sec-Fetch-Mode")
+            .removeAll("Sec-Fetch-Site")
+            .removeAll("Sec-Fetch-User")
+            .removeAll("Upgrade-Insecure-Requests")
+            .removeAll("Cache-Control")
+            .removeAll("Priority")
+            .removeAll("Sec-CH-UA-Arch")
+            .removeAll("Sec-CH-UA-Bitness")
+            .removeAll("Sec-CH-UA-Full-Version")
+            .removeAll("Sec-CH-UA-Full-Version-List")
+            .removeAll("Sec-CH-UA-Model")
+            .removeAll("Sec-CH-UA-Platform-Version")
+            .build()
+        return GET(imageUrl, imageHeaders)
+    }
+
     // =============================== Headers ================================
 
     private fun firstNavHeaders() = headers.newBuilder()
@@ -131,7 +154,7 @@ class MGKomik :
         set("Sec-CH-UA-Full-Version", "\"$CH_VERSION.0.7727.93\"")
         set("Sec-CH-UA-Full-Version-List", "\"Chromium\";v=\"$CH_VERSION.0.7727.93\", \"Not.A/Brand\";v=\"8.0.0.0\"")
         set("Sec-CH-UA-Mobile", "?1")
-        set("Sec-CH-UA-Model", "\"Redmi Note 9\"")
+        set("Sec-CH-UA-Model", "\"RMX2103\"")
         set("Sec-CH-UA-Platform", "\"Android\"")
         set("Sec-CH-UA-Platform-Version", "\"11.0.0\"")
         set("Upgrade-Insecure-Requests", "1")
@@ -141,67 +164,29 @@ class MGKomik :
     override val client = network.cloudflareClient.newBuilder()
         .addInterceptor { chain ->
             val request = chain.request()
-            val url = request.url
-            val host = url.host
-            val path = url.encodedPath
-            val newHeaders = request.headers.newBuilder()
-
+            val path = request.url.encodedPath
             val isAjax = path.contains("admin-ajax.php") ||
                 path.contains("wp-json") ||
                 path.contains("/ajax/")
 
-            val isImage = path.endsWith(".jpg") || path.endsWith(".jpeg") ||
-                path.endsWith(".png") || path.endsWith(".webp") ||
-                path.endsWith(".gif") || path.contains("/thumbs/")
-
-            // CDN image — domain berbeda dari baseUrl
-            val isCdnImage = isImage && host != "id.mgkomik.cc"
-
-            when {
-                isAjax -> {
-                    newHeaders.set("X-Requested-With", "XMLHttpRequest")
-                    newHeaders.set("Sec-Fetch-Dest", "empty")
-                    newHeaders.set("Sec-Fetch-Mode", "cors")
-                    newHeaders.set("Sec-Fetch-Site", "same-origin")
-                    newHeaders.set("Origin", baseUrl)
-                    newHeaders.removeAll("Sec-Fetch-User")
-                    newHeaders.removeAll("Upgrade-Insecure-Requests")
-                }
-
-                isCdnImage -> {
-                    newHeaders.set("Referer", "$baseUrl/")
-                    newHeaders.removeAll("Sec-Fetch-Dest")
-                    newHeaders.removeAll("Sec-Fetch-Mode")
-                    newHeaders.removeAll("Sec-Fetch-Site")
-                    newHeaders.removeAll("Sec-Fetch-User")
-                    newHeaders.removeAll("X-Requested-With")
-                    newHeaders.removeAll("Cache-Control")
-                    newHeaders.removeAll("Upgrade-Insecure-Requests")
-                    newHeaders.removeAll("Sec-CH-UA-Arch")
-                    newHeaders.removeAll("Sec-CH-UA-Bitness")
-                    newHeaders.removeAll("Sec-CH-UA-Full-Version")
-                    newHeaders.removeAll("Sec-CH-UA-Full-Version-List")
-                    newHeaders.removeAll("Sec-CH-UA-Model")
-                    newHeaders.removeAll("Sec-CH-UA-Platform-Version")
-                }
-
-                isImage -> {
-                    // Image di domain utama — same-site, hapus nav headers
-                    newHeaders.removeAll("Sec-Fetch-Dest")
-                    newHeaders.removeAll("Sec-Fetch-Mode")
-                    newHeaders.removeAll("Sec-Fetch-Site")
-                    newHeaders.removeAll("Sec-Fetch-User")
-                    newHeaders.removeAll("X-Requested-With")
-                    newHeaders.removeAll("Cache-Control")
-                    newHeaders.removeAll("Upgrade-Insecure-Requests")
-                }
-
-                else -> {
-                    newHeaders.removeAll("X-Requested-With")
-                }
+            if (isAjax) {
+                val newHeaders = request.headers.newBuilder()
+                    .set("X-Requested-With", "XMLHttpRequest")
+                    .set("Sec-Fetch-Dest", "empty")
+                    .set("Sec-Fetch-Mode", "cors")
+                    .set("Sec-Fetch-Site", "same-origin")
+                    .set("Origin", baseUrl)
+                    .removeAll("Sec-Fetch-User")
+                    .removeAll("Upgrade-Insecure-Requests")
+                    .build()
+                chain.proceed(request.newBuilder().headers(newHeaders).build())
+            } else {
+                chain.proceed(
+                    request.newBuilder()
+                        .removeHeader("X-Requested-With")
+                        .build(),
+                )
             }
-
-            chain.proceed(request.newBuilder().headers(newHeaders.build()).build())
         }
         .rateLimit(3)
         .build()
@@ -292,6 +277,6 @@ class MGKomik :
         private const val CH_VERSION = "147"
 
         private const val USER_AGENT =
-            "Mozilla/5.0 (Linux; Android 11; Redmi Note 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/$CH_VERSION.0.0.0 Mobile Safari/537.36"
+            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/$CH_VERSION.0.0.0 Mobile Safari/537.36"
     }
 }
