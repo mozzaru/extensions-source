@@ -10,6 +10,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
+import java.text.ParseException
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -22,14 +23,14 @@ class MGKomik :
     ) {
     override val useLoadMoreRequest = LoadMoreStrategy.Never
 
-    override val useNewChapterEndpoint = false
+    override val useNewChapterEndpoint = true
 
     override val mangaSubString = "komik"
 
     // =============================== Requests ===============================
 
     override fun popularMangaRequest(page: Int): Request {
-        val url = "$baseUrl/$mangaSubString/${if (page > 1) "page/$page/" else ""}".toHttpUrl().newBuilder()
+        val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
             .addQueryParameter("m_orderby", "views")
             .addQueryParameter("t", System.currentTimeMillis().toString())
             .build()
@@ -38,7 +39,7 @@ class MGKomik :
     }
 
     override fun latestUpdatesRequest(page: Int): Request {
-        val url = "$baseUrl/$mangaSubString/${if (page > 1) "page/$page/" else ""}".toHttpUrl().newBuilder()
+        val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
             .addQueryParameter("m_orderby", "latest")
             .addQueryParameter("t", System.currentTimeMillis().toString())
             .build()
@@ -48,7 +49,7 @@ class MGKomik :
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request = if (query.isNotBlank()) {
         super.searchMangaRequest(page, query, filters).addTimestamp()
     } else {
-        val url = "$baseUrl/$mangaSubString/${if (page > 1) "page/$page/" else ""}".toHttpUrl().newBuilder()
+        val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
         url.addQueryParameter("t", System.currentTimeMillis().toString())
 
         filters.forEach { filter ->
@@ -127,7 +128,7 @@ class MGKomik :
                 headers.set("Sec-Fetch-Site", if (request.header("Referer") != null) "same-origin" else "none")
                 headers.set("Sec-Fetch-User", "?1")
                 headers.set("Priority", "u=0, i")
-                headers.set("Cache-Control", "max-age=0")
+                headers.set("Cache-Control", "no-cache")
             }
 
             chain.proceed(request.newBuilder().headers(headers.build()).build())
@@ -148,6 +149,8 @@ class MGKomik :
         }
     }
 
+    override fun popularMangaNextPageSelector() = "div.nav-previous, nav.navigation-ajax, a.nextpostslink, a.next, .pagination a:contains(Next)"
+
     override val mangaDetailsSelectorTitle = ".manga-title, h1#mangaTitle, div.post-title h3, div.post-title h1, #manga-title > h1"
     override val mangaDetailsSelectorAuthor = ".meta-item:contains(Author:) .meta-value, div.author-content > a, div.manga-authors > a"
     override val mangaDetailsSelectorStatus = ".status-badge, div.summary-content, div.summary-heading:contains(Status) + div"
@@ -156,6 +159,37 @@ class MGKomik :
     override val mangaDetailsSelectorGenre = ".genre-tag, div.genres-content a"
 
     override fun chapterListSelector() = "li.chapter-list-item, li.wp-manga-chapter"
+
+    // ================================ Dates ==================================
+
+    override fun parseChapterDate(date: String?): Long {
+        date ?: return 0L
+
+        if (date.contains("ago", ignoreCase = true) || date.contains("yang lalu", ignoreCase = true)) {
+            return parseRelativeDate(date)
+        }
+
+        val dateFormats = listOf(
+            "dd MMM yyyy" to Locale("id"),
+            "dd MMM yyyy" to Locale.US,
+            "dd MMM yy" to Locale("id"),
+            "dd MMM yy" to Locale.US,
+            "dd/MM/yyyy" to Locale.US,
+            "MMMM d, yyyy" to Locale.US,
+            "MMMM d, yyyy" to Locale("id"),
+            "dd/MM/yy" to Locale.US,
+            "yyyy-MM-dd" to Locale.US,
+        )
+
+        for ((pattern, locale) in dateFormats) {
+            try {
+                return SimpleDateFormat(pattern, locale).parse(date)?.time ?: 0L
+            } catch (_: ParseException) {
+            }
+        }
+
+        return super.parseChapterDate(date)
+    }
 
     // ================================ Filters ================================
 
