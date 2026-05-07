@@ -23,7 +23,7 @@ class MGKomik :
     ) {
     override val useLoadMoreRequest = LoadMoreStrategy.Never
 
-    override val useNewChapterEndpoint = true
+    override val useNewChapterEndpoint = false
 
     override val mangaSubString = "komik"
 
@@ -133,15 +133,15 @@ class MGKomik :
 
             chain.proceed(request.newBuilder().headers(headers.build()).build())
         }
-        .rateLimit(2)
+        .rateLimit(3)
         .build()
 
     // =============================== Selectors ===============================
 
-    override fun popularMangaSelector() = "div.page-item-detail:not(:has(a[href*='bilibilicomics.com'])), .manga__item, .post-item"
+    override fun popularMangaSelector() = "div.page-item-detail:not(:has(a[href*='bilibilicomics.com'])), .manga__item, .post-item, .c-tabs-item__content"
 
     override fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
-        val titleElement = element.selectFirst(".manga-title a, .post-title a, h3 a, h2 a, a:has(h3), a:has(h2)")
+        val titleElement = element.selectFirst(".manga-title a, .post-title a, h3 a, h2 a, a:has(h3), a:has(h2), .item-thumb a")
         title = titleElement?.text()?.trim() ?: element.select("img").attr("alt").trim()
         setUrlWithoutDomain(titleElement?.attr("abs:href").orEmpty())
         element.selectFirst("img")?.let {
@@ -165,7 +165,26 @@ class MGKomik :
     override fun parseChapterDate(date: String?): Long {
         date ?: return 0L
 
-        if (date.contains("ago", ignoreCase = true) || date.contains("yang lalu", ignoreCase = true)) {
+        val dateLow = date.lowercase()
+        if (dateLow.contains("hari ini") || dateLow.contains("today")) {
+            return java.util.Calendar.getInstance().apply {
+                set(java.util.Calendar.HOUR_OF_DAY, 0)
+                set(java.util.Calendar.MINUTE, 0)
+                set(java.util.Calendar.SECOND, 0)
+                set(java.util.Calendar.MILLISECOND, 0)
+            }.timeInMillis
+        }
+        if (dateLow.contains("kemarin") || dateLow.contains("yesterday")) {
+            return java.util.Calendar.getInstance().apply {
+                add(java.util.Calendar.DAY_OF_YEAR, -1)
+                set(java.util.Calendar.HOUR_OF_DAY, 0)
+                set(java.util.Calendar.MINUTE, 0)
+                set(java.util.Calendar.SECOND, 0)
+                set(java.util.Calendar.MILLISECOND, 0)
+            }.timeInMillis
+        }
+
+        if (dateLow.contains("ago") || dateLow.contains("yang lalu")) {
             return parseRelativeDate(date)
         }
 
