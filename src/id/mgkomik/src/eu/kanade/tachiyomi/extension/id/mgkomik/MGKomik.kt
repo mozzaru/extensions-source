@@ -29,51 +29,46 @@ class MGKomik :
     // =============================== Requests ===============================
 
     override fun popularMangaRequest(page: Int): Request {
-        val url = "$baseUrl/$mangaSubString/${if (page > 1) "page/$page/" else ""}".toHttpUrl().newBuilder()
+        val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
             .addQueryParameter("m_orderby", "views")
             .addQueryParameter("t", System.currentTimeMillis().toString())
             .build()
-        // Start without referer to get Sec-Fetch-Site: none
+        // First request: no referer to get Sec-Fetch-Site: none
         return GET(url, headers.newBuilder().removeAll("Referer").build())
     }
 
     override fun latestUpdatesRequest(page: Int): Request {
-        val url = "$baseUrl/$mangaSubString/${if (page > 1) "page/$page/" else ""}".toHttpUrl().newBuilder()
+        val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
             .addQueryParameter("m_orderby", "latest")
             .addQueryParameter("t", System.currentTimeMillis().toString())
             .build()
         return GET(url, headers.newBuilder().removeAll("Referer").build())
     }
 
-    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
-        return if (query.isNotBlank()) {
-            super.searchMangaRequest(page, query, filters).addTimestamp()
-        } else {
-            val url = "$baseUrl/$mangaSubString/${if (page > 1) "page/$page/" else ""}".toHttpUrl().newBuilder()
-            url.addQueryParameter("t", System.currentTimeMillis().toString())
+    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request = if (query.isNotBlank()) {
+        super.searchMangaRequest(page, query, filters).addTimestamp()
+    } else {
+        val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
+        url.addQueryParameter("t", System.currentTimeMillis().toString())
 
-            filters.forEach { filter ->
-                when (filter) {
-                    is OrderByFilter -> {
-                        if (filter.state != 0) {
-                            url.addQueryParameter("m_orderby", filter.toUriPart())
-                        }
+        filters.forEach { filter ->
+            when (filter) {
+                is OrderByFilter -> {
+                    if (filter.state != 0) {
+                        url.addQueryParameter("m_orderby", filter.toUriPart())
                     }
-                    else -> {}
                 }
+                else -> {}
             }
-            GET(url.build(), headers.newBuilder().removeAll("Referer").build())
         }
+        GET(url.build(), headers.newBuilder().removeAll("Referer").build())
     }
 
-    override fun mangaDetailsRequest(manga: SManga): Request =
-        super.mangaDetailsRequest(manga).addTimestamp()
+    override fun mangaDetailsRequest(manga: SManga): Request = super.mangaDetailsRequest(manga).addTimestamp()
 
-    override fun chapterListRequest(manga: SManga): Request =
-        super.chapterListRequest(manga).addTimestamp()
+    override fun chapterListRequest(manga: SManga): Request = super.chapterListRequest(manga).addTimestamp()
 
-    override fun genresRequest(): Request =
-        super.genresRequest().addTimestamp()
+    override fun genresRequest(): Request = super.genresRequest().addTimestamp()
 
     private fun Request.addTimestamp(): Request {
         val url = this.url.newBuilder()
@@ -119,18 +114,19 @@ class MGKomik :
                 headers.set("Sec-Fetch-Mode", "no-cors")
                 headers.set("Sec-Fetch-Site", "cross-site")
             } else {
-                // Documents - Identify as pure browser navigation to avoid detection
-                headers.removeAll("X-Requested-With")
+                // Documents - Identity parity with System WebView
+                headers.set("X-Requested-With", "com.android.chrome")
                 headers.set("Sec-Fetch-Dest", "document")
                 headers.set("Sec-Fetch-Mode", "navigate")
                 headers.set("Sec-Fetch-Site", if (request.header("Referer") != null) "same-origin" else "none")
                 headers.set("Sec-Fetch-User", "?1")
                 headers.set("Priority", "u=0, i")
+                headers.set("Cache-Control", "no-cache")
             }
 
             chain.proceed(request.newBuilder().headers(headers.build()).build())
         }
-        .rateLimit(12, 3)
+        .rateLimit(2)
         .build()
 
     // =============================== Selectors ===============================
@@ -141,7 +137,9 @@ class MGKomik :
         val titleElement = element.selectFirst(".manga-title a, .post-title a, h3 a, h2 a, a:has(h3), a:has(h2)")
         title = titleElement?.text()?.trim() ?: element.select("img").attr("alt").trim()
         setUrlWithoutDomain(titleElement?.attr("abs:href").orEmpty())
-        thumbnail_url = imageFromElement(element.selectFirst("img")!!)
+        element.selectFirst("img")?.let {
+            thumbnail_url = imageFromElement(it)
+        }
     }
 
     override val mangaDetailsSelectorTitle = ".manga-title, h1#mangaTitle, div.post-title h3, div.post-title h1, #manga-title > h1"
