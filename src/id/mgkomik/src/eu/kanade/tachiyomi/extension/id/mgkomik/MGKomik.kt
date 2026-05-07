@@ -43,7 +43,7 @@ class MGKomik :
 
     override fun popularMangaRequest(page: Int): Request {
         val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
-            .addQueryParameter("m_orderby", "views")
+            .addQueryParameter("m_orderby", "trending")
             .build()
         return GET(url, firstNavHeaders())
     }
@@ -197,7 +197,7 @@ class MGKomik :
                 }
 
                 else -> {
-                    // Standard navigation - keep spoofed X-Requested-With if provided in headersBuilder
+                    // Navigation
                 }
             }
 
@@ -409,7 +409,14 @@ class MGKomik :
 
         private fun extractModel(ua: String): String? {
             val matcher = ANDROID_MODEL_PATTERN.matcher(ua)
-            return if (matcher.find()) matcher.group(1)?.trim() else null
+            var model: String? = null
+            while (matcher.find()) {
+                val group = matcher.group(1)?.trim() ?: continue
+                if (!group.startsWith("Android") && !group.contains("Build") && group != "wv") {
+                    model = group
+                }
+            }
+            return model
         }
 
         private fun detectBrowserBrands(ua: String, brands: MutableList<String>) {
