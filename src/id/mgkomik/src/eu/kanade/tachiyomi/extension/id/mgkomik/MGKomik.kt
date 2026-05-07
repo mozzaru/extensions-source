@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.os.Handler
 import android.os.Looper
 import android.webkit.CookieManager
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import eu.kanade.tachiyomi.multisrc.madara.Madara
@@ -41,12 +42,14 @@ class MGKomik :
     override val mangaSubString = "komik"
 
     override val client = network.cloudflareClient.newBuilder()
-        .addInterceptor(SmartWebViewInterceptor())
+        .addInterceptor(CloudflareWebViewInterceptor())
         .build()
 
     override fun headersBuilder() = super.headersBuilder().apply {
         set("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Mobile Safari/537.36")
         set("Referer", "$baseUrl/")
+        set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+        set("Accept-Language", "id-ID,id;q=0.9,en;q=0.8")
         set("Upgrade-Insecure-Requests", "1")
         set("sec-ch-ua", "\"Chromium\";v=\"147\", \"Not.A/Brand\";v=\"8\"")
         set("sec-ch-ua-mobile", "?1")
@@ -57,16 +60,26 @@ class MGKomik :
         set("sec-fetch-user", "?1")
     }
 
+    // ===================== Requests =====================
+
     override fun popularMangaRequest(page: Int): Request =
         GET("$baseUrl/$mangaSubString/?m_orderby=views&page=$page", headers)
 
     override fun latestUpdatesRequest(page: Int): Request =
         GET("$baseUrl/$mangaSubString/?m_orderby=latest&page=$page", headers)
 
+    // ===================== Selectors =====================
+
     override fun popularMangaSelector() = "div.page-item-detail"
     override fun latestUpdatesSelector() = "div.page-item-detail"
-    override fun popularMangaNextPageSelector() = "div.wp-pagenavi a.nextpostslink"
-    override fun latestUpdatesNextPageSelector() = "div.wp-pagenavi a.nextpostslink"
+
+    // Fix: pakai selector yang lebih luas untuk pagination
+    override fun popularMangaNextPageSelector() =
+        "div.wp-pagenavi a.nextpostslink, .navigation-ajax + div a[href*='page'], a.next.page-numbers"
+
+    override fun latestUpdatesNextPageSelector() = popularMangaNextPageSelector()
+
+    // ===================== Parsing =====================
 
     override fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
         val a = element.selectFirst("div.item-thumb a")!!
@@ -75,8 +88,11 @@ class MGKomik :
             ?.text()?.trim()
             ?: a.attr("title").ifEmpty { "NO TITLE" }
         thumbnail_url = element.selectFirst("div.item-thumb img")
-            ?.let { it.attr("abs:data-src").ifEmpty { null } ?: it.attr("abs:src") }
-        android.util.Log.d("MGKomik", "=== MANGA: title=$title, url=$url, thumb=$thumbnail_url")
+            ?.let { img ->
+                img.attr("abs:data-src").ifEmpty { null }
+                    ?: img.attr("abs:src").ifEmpty { null }
+            }
+        android.util.Log.d("MGKomik", "MANGA: title=$title url=$url thumb=$thumbnail_url")
     }
 
     override fun latestUpdatesFromElement(element: Element): SManga =
@@ -84,168 +100,23 @@ class MGKomik :
 
     override fun popularMangaParse(response: Response): MangasPage {
         val document = response.asJsoup()
-        android.util.Log.d("MGKomik", "=== PARSE popular: url=${document.baseUri()}, title=${document.title()}")
+        android.util.Log.d("MGKomik", "PARSE popular: url=${document.baseUri()} title=${document.title()}")
         val mangas = document.select(popularMangaSelector()).map { popularMangaFromElement(it) }
         val hasNextPage = document.selectFirst(popularMangaNextPageSelector()) != null
-        android.util.Log.d("MGKomik", "=== PARSE popular: count=${mangas.size}, hasNext=$hasNextPage")
+        android.util.Log.d("MGKomik", "PARSE popular: count=${mangas.size} hasNext=$hasNextPage")
         return MangasPage(mangas, hasNextPage)
     }
 
     override fun latestUpdatesParse(response: Response): MangasPage {
         val document = response.asJsoup()
-        android.util.Log.d("MGKomik", "=== PARSE latest: url=${document.baseUri()}, title=${document.title()}")
+        android.util.Log.d("MGKomik", "PARSE latest: url=${document.baseUri()} title=${document.title()}")
         val mangas = document.select(latestUpdatesSelector()).map { latestUpdatesFromElement(it) }
         val hasNextPage = document.selectFirst(latestUpdatesNextPageSelector()) != null
-        android.util.Log.d("MGKomik", "=== PARSE latest: count=${mangas.size}, hasNext=$hasNextPage")
+        android.util.Log.d("MGKomik", "PARSE latest: count=${mangas.size} hasNext=$hasNextPage")
         return MangasPage(mangas, hasNextPage)
     }
 
-    inner class SmartWebViewInterceptor : Interceptor {
-        private val mainHandler = Handler(Looper.getMainLooper())
-        private val webViewSemaphore = Semaphore(1)
-
-        override fun intercept(chain: Interceptor.Chain): Response {
-            val request = chain.request()
-            val url = request.url.toString()
-
-            // Skip: bukan mgkomik, bukan GET, ajax, atau request GAMBAR
-            if (!url.contains("mgkomik.cc") ||
-                request.method != "GET" ||
-                url.contains("admin-ajax.php") ||
-                url.contains("/wp-content/uploads/")
-            ) {
-                android.util.Log.d("MGKomik", "=== SKIP: $url")
-                return chain.proceed(request)
-            }
-
-            android.util.Log.d("MGKomik", "=== WEBVIEW FETCH: $url")
-            return try {
-                fetchWithWebView(request)
-            } catch (e: Exception) {
-                android.util.Log.e("MGKomik", "=== ERROR: ${e.message}")
-                throw e
-            }
-        }
-
-        @SuppressLint("SetJavaScriptEnabled")
-        private fun fetchWithWebView(request: Request): Response {
-            val originalUrl = request.url.toString()
-            val latch = CountDownLatch(1)
-            var htmlContent = ""
-            var finalUrl = originalUrl
-
-            android.util.Log.d("MGKomik", "=== ANTRI SEMAPHORE: $originalUrl")
-            val acquired = webViewSemaphore.tryAcquire(30, TimeUnit.SECONDS)
-            if (!acquired) throw IOException("Semaphore timeout: $originalUrl")
-            android.util.Log.d("MGKomik", "=== DAPAT SEMAPHORE: $originalUrl")
-
-            try {
-                mainHandler.post {
-                    val appContext = try {
-                        Class.forName("android.app.ActivityThread")
-                            .getMethod("currentApplication")
-                            .invoke(null) as android.content.Context
-                    } catch (e: Exception) {
-                        android.util.Log.e("MGKomik", "=== CONTEXT ERROR: ${e.message}")
-                        latch.countDown()
-                        return@post
-                    }
-
-                    val webView = WebView(appContext)
-                    webView.settings.apply {
-                        javaScriptEnabled = true
-                        domStorageEnabled = true
-                        userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Mobile Safari/537.36"
-                        blockNetworkImage = true
-                        loadsImagesAutomatically = false
-                    }
-
-                    CookieManager.getInstance().apply {
-                        setAcceptCookie(true)
-                        setAcceptThirdPartyCookies(webView, true)
-                    }
-
-                    var pageFinishedCount = 0
-
-                    webView.webViewClient = object : WebViewClient() {
-                        override fun onPageFinished(view: WebView, url: String?) {
-                            pageFinishedCount++
-                            finalUrl = url ?: finalUrl
-                            android.util.Log.d("MGKomik", "=== WV onPageFinished #$pageFinishedCount: $url")
-
-                            val countAtDelay = pageFinishedCount
-                            mainHandler.postDelayed({
-                                if (pageFinishedCount == countAtDelay && latch.count > 0) {
-                                    android.util.Log.d("MGKomik", "=== WV STABIL: $finalUrl")
-                                    view.evaluateJavascript(
-                                        "(function() { return document.documentElement.outerHTML; })()",
-                                    ) { html ->
-                                        htmlContent = html
-                                            .removeSurrounding("\"")
-                                            .replace("\\u003C", "<")
-                                            .replace("\\u003E", ">")
-                                            .replace("\\u0026", "&")
-                                            .replace("\\\"", "\"")
-                                            .replace("\\n", "\n")
-                                            .replace("\\t", "\t")
-                                            .replace("\\'", "'")
-                                            .replace("\\\\", "\\")
-
-                                        val titleMatch = Regex("<title>(.*?)</title>")
-                                            .find(htmlContent)?.groupValues?.get(1) ?: "null"
-                                        android.util.Log.d("MGKomik", "=== WV HTML LENGTH: ${htmlContent.length}")
-                                        android.util.Log.d("MGKomik", "=== WV TITLE: $titleMatch")
-                                        android.util.Log.d("MGKomik", "=== WV HAS TAB-THUMB: ${htmlContent.contains("tab-thumb")}")
-                                        android.util.Log.d("MGKomik", "=== WV FINAL URL: $finalUrl")
-
-                                        latch.countDown()
-                                        view.destroy()
-                                    }
-                                }
-                            }, 3000)
-                        }
-
-                        override fun onReceivedError(
-                            view: WebView?,
-                            errorCode: Int,
-                            description: String?,
-                            failingUrl: String?,
-                        ) {
-                            android.util.Log.e("MGKomik", "=== WV ERROR: $errorCode $description")
-                            latch.countDown()
-                            view?.destroy()
-                        }
-                    }
-
-                    android.util.Log.d("MGKomik", "=== WV LOAD URL: $originalUrl")
-                    webView.loadUrl(originalUrl)
-                }
-
-                val completed = latch.await(25, TimeUnit.SECONDS)
-                android.util.Log.d("MGKomik", "=== WV LATCH: completed=$completed, len=${htmlContent.length}")
-
-                if (!completed || htmlContent.isBlank()) {
-                    throw IOException("WebView timeout: $originalUrl")
-                }
-
-                val finalRequest = request.newBuilder()
-                    .url(finalUrl.toHttpUrl())
-                    .build()
-
-                return Response.Builder()
-                    .request(finalRequest)
-                    .protocol(Protocol.HTTP_1_1)
-                    .code(200)
-                    .message("OK")
-                    .header("Content-Type", "text/html; charset=utf-8")
-                    .body(htmlContent.toResponseBody("text/html; charset=utf-8".toMediaType()))
-                    .build()
-            } finally {
-                webViewSemaphore.release()
-                android.util.Log.d("MGKomik", "=== RELEASE SEMAPHORE: $originalUrl")
-            }
-        }
-    }
+    // ===================== Genre Filter =====================
 
     override val chapterUrlSuffix = ""
 
@@ -282,7 +153,160 @@ class MGKomik :
         }
         return genres
     }
+
+    // ===================== WebView Interceptor =====================
+
+    inner class CloudflareWebViewInterceptor : Interceptor {
+        private val mainHandler = Handler(Looper.getMainLooper())
+
+        // Semaphore 1: WebView harus jalan satu per satu di main thread
+        private val webViewSemaphore = Semaphore(1)
+
+        override fun intercept(chain: Interceptor.Chain): Response {
+            val request = chain.request()
+            val url = request.url.toString()
+
+            // Lewati request yang tidak perlu WebView:
+            // - Bukan domain mgkomik
+            // - Bukan GET
+            // - AJAX request
+            // - File gambar (uploads)
+            if (!url.contains("mgkomik.cc") ||
+                request.method != "GET" ||
+                url.contains("admin-ajax.php") ||
+                url.contains("/wp-content/uploads/")
+            ) {
+                android.util.Log.d("MGKomik", "SKIP: $url")
+                return chain.proceed(request)
+            }
+
+            android.util.Log.d("MGKomik", "WEBVIEW: $url")
+            return fetchWithWebView(request)
+        }
+
+        @SuppressLint("SetJavaScriptEnabled")
+        private fun fetchWithWebView(request: Request): Response {
+            val originalUrl = request.url.toString()
+            val latch = CountDownLatch(1)
+            var htmlContent = ""
+            var finalUrl = originalUrl
+
+            // Tunggu giliran (max 30 detik)
+            if (!webViewSemaphore.tryAcquire(30, TimeUnit.SECONDS)) {
+                android.util.Log.e("MGKomik", "SEMAPHORE TIMEOUT: $originalUrl")
+                throw IOException("WebView semaphore timeout for: $originalUrl")
+            }
+            android.util.Log.d("MGKomik", "SEMAPHORE ACQUIRED: $originalUrl")
+
+            try {
+                mainHandler.post {
+                    val appContext = try {
+                        Class.forName("android.app.ActivityThread")
+                            .getMethod("currentApplication")
+                            .invoke(null) as android.content.Context
+                    } catch (e: Exception) {
+                        android.util.Log.e("MGKomik", "CONTEXT ERROR: ${e.message}")
+                        latch.countDown()
+                        return@post
+                    }
+
+                    val webView = WebView(appContext)
+                    webView.settings.apply {
+                        javaScriptEnabled = true
+                        domStorageEnabled = true
+                        userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Mobile Safari/537.36"
+                        // Blokir gambar agar halaman lebih cepat load
+                        blockNetworkImage = true
+                        loadsImagesAutomatically = false
+                    }
+
+                    CookieManager.getInstance().apply {
+                        setAcceptCookie(true)
+                        setAcceptThirdPartyCookies(webView, true)
+                    }
+
+                    webView.webViewClient = object : WebViewClient() {
+                        private var loadCount = 0
+
+                        override fun onPageFinished(view: WebView, url: String?) {
+                            loadCount++
+                            finalUrl = url ?: finalUrl
+                            android.util.Log.d("MGKomik", "PAGE_FINISHED #$loadCount: $finalUrl")
+
+                            // Tunggu 2.5 detik setelah halaman selesai load.
+                            // Jika tidak ada load baru dalam waktu itu, ambil HTML.
+                            val countAtDelay = loadCount
+                            mainHandler.postDelayed({
+                                if (loadCount != countAtDelay || latch.count == 0L) return@postDelayed
+
+                                android.util.Log.d("MGKomik", "STABLE: $finalUrl")
+                                view.evaluateJavascript("document.documentElement.outerHTML") { raw ->
+                                    htmlContent = raw
+                                        .removeSurrounding("\"")
+                                        .replace("\\u003C", "<")
+                                        .replace("\\u003E", ">")
+                                        .replace("\\u0026", "&")
+                                        .replace("\\\"", "\"")
+                                        .replace("\\n", "\n")
+                                        .replace("\\t", "\t")
+                                        .replace("\\'", "'")
+                                        .replace("\\\\", "\\")
+
+                                    val title = Regex("<title>(.*?)</title>").find(htmlContent)?.groupValues?.get(1) ?: "-"
+                                    android.util.Log.d("MGKomik", "HTML len=${htmlContent.length} title=$title url=$finalUrl")
+
+                                    latch.countDown()
+                                    view.destroy()
+                                }
+                            }, 2500)
+                        }
+
+                        override fun onReceivedError(
+                            view: WebView?,
+                            errorCode: Int,
+                            description: String?,
+                            failingUrl: String?,
+                        ) {
+                            // Hanya hentikan jika error di URL utama
+                            if (failingUrl == originalUrl || failingUrl == finalUrl) {
+                                android.util.Log.e("MGKomik", "WV_ERROR $errorCode $description @ $failingUrl")
+                                latch.countDown()
+                                view?.destroy()
+                            }
+                        }
+
+                        // Blokir resource tidak penting agar lebih cepat
+                        override fun shouldOverrideUrlLoading(
+                            view: WebView?,
+                            request: WebResourceRequest?,
+                        ): Boolean {
+                            return false // Izinkan semua navigasi (redirect CF)
+                        }
+                    }
+
+                    android.util.Log.d("MGKomik", "WV_LOAD: $originalUrl")
+                    webView.loadUrl(originalUrl)
+                }
+
+                val completed = latch.await(25, TimeUnit.SECONDS)
+                android.util.Log.d("MGKomik", "LATCH: completed=$completed len=${htmlContent.length} url=$originalUrl")
+
+                if (!completed || htmlContent.isBlank()) {
+                    throw IOException("WebView timeout for: $originalUrl")
+                }
+
+                return Response.Builder()
+                    .request(request.newBuilder().url(finalUrl.toHttpUrl()).build())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .header("Content-Type", "text/html; charset=utf-8")
+                    .body(htmlContent.toResponseBody("text/html; charset=utf-8".toMediaType()))
+                    .build()
+            } finally {
+                webViewSemaphore.release()
+                android.util.Log.d("MGKomik", "SEMAPHORE RELEASED: $originalUrl")
+            }
+        }
+    }
 }
-
-
-
