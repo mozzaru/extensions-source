@@ -36,8 +36,6 @@ class MGKomik :
         "id",
         SimpleDateFormat("dd MMM yy", Locale.US),
     ) {
-    // FIX 1: Matikan LoadMore agar tidak pakai AJAX POST
-    // AJAX POST diblock oleh interceptor → return "0" → manga kosong
     override val useLoadMoreRequest = LoadMoreStrategy.Never
     override val useNewChapterEndpoint = false
     override val mangaSubString = "komik"
@@ -59,13 +57,48 @@ class MGKomik :
         set("sec-fetch-user", "?1")
     }
 
-    // FIX 2: Override request URL dengan query yang benar
-    // Madara base tidak append ?m_orderby → page jadi generic/search kosong
     override fun popularMangaRequest(page: Int): Request =
         GET("$baseUrl/$mangaSubString/?m_orderby=views&page=$page", headers)
 
     override fun latestUpdatesRequest(page: Int): Request =
         GET("$baseUrl/$mangaSubString/?m_orderby=latest&page=$page", headers)
+
+    override fun popularMangaSelector() = "div.page-item-detail"
+    override fun latestUpdatesSelector() = "div.page-item-detail"
+    override fun popularMangaNextPageSelector() = "div.wp-pagenavi a.nextpostslink"
+    override fun latestUpdatesNextPageSelector() = "div.wp-pagenavi a.nextpostslink"
+
+    override fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
+        val a = element.selectFirst("div.item-thumb a")!!
+        setUrlWithoutDomain(a.attr("abs:href"))
+        title = element.selectFirst("div.post-title a, div.item-summary .post-title a")
+            ?.text()?.trim()
+            ?: a.attr("title").ifEmpty { "NO TITLE" }
+        thumbnail_url = element.selectFirst("div.item-thumb img")
+            ?.let { it.attr("abs:data-src").ifEmpty { null } ?: it.attr("abs:src") }
+        android.util.Log.d("MGKomik", "=== MANGA: title=$title, url=$url, thumb=$thumbnail_url")
+    }
+
+    override fun latestUpdatesFromElement(element: Element): SManga =
+        popularMangaFromElement(element)
+
+    override fun popularMangaParse(response: Response): MangasPage {
+        val document = response.asJsoup()
+        android.util.Log.d("MGKomik", "=== PARSE popular: url=${document.baseUri()}, title=${document.title()}")
+        val mangas = document.select(popularMangaSelector()).map { popularMangaFromElement(it) }
+        val hasNextPage = document.selectFirst(popularMangaNextPageSelector()) != null
+        android.util.Log.d("MGKomik", "=== PARSE popular: count=${mangas.size}, hasNext=$hasNextPage")
+        return MangasPage(mangas, hasNextPage)
+    }
+
+    override fun latestUpdatesParse(response: Response): MangasPage {
+        val document = response.asJsoup()
+        android.util.Log.d("MGKomik", "=== PARSE latest: url=${document.baseUri()}, title=${document.title()}")
+        val mangas = document.select(latestUpdatesSelector()).map { latestUpdatesFromElement(it) }
+        val hasNextPage = document.selectFirst(latestUpdatesNextPageSelector()) != null
+        android.util.Log.d("MGKomik", "=== PARSE latest: count=${mangas.size}, hasNext=$hasNextPage")
+        return MangasPage(mangas, hasNextPage)
+    }
 
     inner class SmartWebViewInterceptor : Interceptor {
         private val mainHandler = Handler(Looper.getMainLooper())
@@ -74,12 +107,12 @@ class MGKomik :
         override fun intercept(chain: Interceptor.Chain): Response {
             val request = chain.request()
             val url = request.url.toString()
-            val method = request.method
 
-            // FIX 3: Skip admin-ajax.php (POST dan GET) — tidak perlu WebView
+            // Skip: bukan mgkomik, bukan GET, ajax, atau request GAMBAR
             if (!url.contains("mgkomik.cc") ||
-                method != "GET" ||
-                url.contains("admin-ajax.php")
+                request.method != "GET" ||
+                url.contains("admin-ajax.php") ||
+                url.contains("/wp-content/uploads/")
             ) {
                 android.util.Log.d("MGKomik", "=== SKIP: $url")
                 return chain.proceed(request)
@@ -89,8 +122,8 @@ class MGKomik :
             return try {
                 fetchWithWebView(request)
             } catch (e: Exception) {
-                android.util.Log.e("MGKomik", "=== ERROR: ${e.message}, fallback OkHttp")
-                chain.proceed(request)
+                android.util.Log.e("MGKomik", "=== ERROR: ${e.message}")
+                throw e
             }
         }
 
@@ -158,12 +191,10 @@ class MGKomik :
                                             .replace("\\'", "'")
                                             .replace("\\\\", "\\")
 
-                                        // FIX 4: Log title dan URL final untuk debug
                                         val titleMatch = Regex("<title>(.*?)</title>")
                                             .find(htmlContent)?.groupValues?.get(1) ?: "null"
                                         android.util.Log.d("MGKomik", "=== WV HTML LENGTH: ${htmlContent.length}")
                                         android.util.Log.d("MGKomik", "=== WV TITLE: $titleMatch")
-                                        android.util.Log.d("MGKomik", "=== WV HAS ITEM-THUMB: ${htmlContent.contains("item-thumb")}")
                                         android.util.Log.d("MGKomik", "=== WV HAS TAB-THUMB: ${htmlContent.contains("tab-thumb")}")
                                         android.util.Log.d("MGKomik", "=== WV FINAL URL: $finalUrl")
 
@@ -216,50 +247,6 @@ class MGKomik :
         }
     }
 
-    // FIX 5: Parse dari struktur HTML nyata (tab-thumb, bukan item-thumb)
-    // Struktur: div.tab-thumb.c-image-hover > a[href][title] > img[src]
-    override fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
-        val a = element.select("div.tab-thumb a").firstOrNull()
-            ?: element.select("div.item-thumb a").firstOrNull()
-        android.util.Log.d("MGKomik", "=== MANGA FROM ELEMENT: title=${a?.attr("title")}, href=${a?.attr("abs:href")}")
-        a?.let {
-            setUrlWithoutDomain(it.attr("abs:href"))
-            title = it.attr("title")
-            thumbnail_url = it.select("img").attr("abs:src")
-        }
-    }
-
-    // FIX 6: Selector untuk popular/latest — pakai struktur search result
-    // Yang muncul di /komik/?m_orderby=xxx adalah format search result
-    override fun popularMangaSelector() = "div.c-tabs-item__content"
-    override fun latestUpdatesSelector() = "div.c-tabs-item__content"
-
-    override fun latestUpdatesFromElement(element: Element): SManga =
-        popularMangaFromElement(element)
-
-    // FIX 7: Tidak ada next page di search result format ini, pakai wp-pagenavi
-    override fun popularMangaNextPageSelector() = "div.wp-pagenavi a.nextpostslink"
-    override fun latestUpdatesNextPageSelector() = "div.wp-pagenavi a.nextpostslink"
-
-    override fun popularMangaParse(response: Response): MangasPage {
-        val document = response.asJsoup()
-        android.util.Log.d("MGKomik", "=== PARSE popularMangaParse: baseUri=${document.baseUri()}")
-        android.util.Log.d("MGKomik", "=== PARSE title=${document.title()}")
-        android.util.Log.d("MGKomik", "=== PARSE tab-thumb count=${document.select("div.tab-thumb").size}")
-        android.util.Log.d("MGKomik", "=== PARSE item-thumb count=${document.select("div.item-thumb").size}")
-        android.util.Log.d("MGKomik", "=== PARSE c-tabs-item__content count=${document.select("div.c-tabs-item__content").size}")
-        return super.popularMangaParse(response)
-    }
-
-    override fun latestUpdatesParse(response: Response): MangasPage {
-        val document = response.asJsoup()
-        android.util.Log.d("MGKomik", "=== PARSE latestUpdatesParse: baseUri=${document.baseUri()}")
-        android.util.Log.d("MGKomik", "=== PARSE title=${document.title()}")
-        android.util.Log.d("MGKomik", "=== PARSE tab-thumb count=${document.select("div.tab-thumb").size}")
-        android.util.Log.d("MGKomik", "=== PARSE c-tabs-item__content count=${document.select("div.c-tabs-item__content").size}")
-        return super.latestUpdatesParse(response)
-    }
-
     override val chapterUrlSuffix = ""
 
     override fun getFilterList(): FilterList {
@@ -296,3 +283,6 @@ class MGKomik :
         return genres
     }
 }
+
+
+
