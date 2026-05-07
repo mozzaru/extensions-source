@@ -33,7 +33,8 @@ class MGKomik :
             .addQueryParameter("m_orderby", "views")
             .addQueryParameter("t", System.currentTimeMillis().toString())
             .build()
-        return GET(url, headers.newBuilder().set("Referer", "$baseUrl/").build())
+        // Start without referer to get Sec-Fetch-Site: none
+        return GET(url, headers.newBuilder().removeAll("Referer").build())
     }
 
     override fun latestUpdatesRequest(page: Int): Request {
@@ -41,65 +42,47 @@ class MGKomik :
             .addQueryParameter("m_orderby", "latest")
             .addQueryParameter("t", System.currentTimeMillis().toString())
             .build()
-        return GET(url, headers.newBuilder().set("Referer", "$baseUrl/").build())
+        return GET(url, headers.newBuilder().removeAll("Referer").build())
     }
 
-    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request = if (query.isNotBlank()) {
-        val request = super.searchMangaRequest(page, query, filters)
-        val url = request.url.newBuilder()
-            .addQueryParameter("t", System.currentTimeMillis().toString())
-            .build()
-        request.newBuilder()
-            .url(url)
-            .headers(headers.newBuilder().set("Referer", "$baseUrl/").build())
-            .build()
-    } else {
-        val url = "$baseUrl/$mangaSubString/${if (page > 1) "page/$page/" else ""}".toHttpUrl().newBuilder()
-        url.addQueryParameter("t", System.currentTimeMillis().toString())
+    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
+        return if (query.isNotBlank()) {
+            super.searchMangaRequest(page, query, filters).addTimestamp()
+        } else {
+            val url = "$baseUrl/$mangaSubString/${if (page > 1) "page/$page/" else ""}".toHttpUrl().newBuilder()
+            url.addQueryParameter("t", System.currentTimeMillis().toString())
 
-        filters.forEach { filter ->
-            when (filter) {
-                is OrderByFilter -> {
-                    if (filter.state != 0) {
-                        url.addQueryParameter("m_orderby", filter.toUriPart())
+            filters.forEach { filter ->
+                when (filter) {
+                    is OrderByFilter -> {
+                        if (filter.state != 0) {
+                            url.addQueryParameter("m_orderby", filter.toUriPart())
+                        }
                     }
+                    else -> {}
                 }
-                else -> {}
             }
+            GET(url.build(), headers.newBuilder().removeAll("Referer").build())
         }
-        GET(url.build(), headers.newBuilder().set("Referer", "$baseUrl/").build())
     }
 
-    override fun mangaDetailsRequest(manga: SManga): Request {
-        val request = super.mangaDetailsRequest(manga)
-        val url = request.url.newBuilder()
-            .addQueryParameter("t", System.currentTimeMillis().toString())
-            .build()
-        return request.newBuilder()
-            .url(url)
-            .headers(headers.newBuilder().set("Referer", "$baseUrl/").build())
-            .build()
-    }
+    override fun mangaDetailsRequest(manga: SManga): Request =
+        super.mangaDetailsRequest(manga).addTimestamp()
 
-    override fun chapterListRequest(manga: SManga): Request {
-        val request = super.chapterListRequest(manga)
-        val url = request.url.newBuilder()
-            .addQueryParameter("t", System.currentTimeMillis().toString())
-            .build()
-        return request.newBuilder()
-            .url(url)
-            .headers(headers.newBuilder().set("Referer", "$baseUrl/").build())
-            .build()
-    }
+    override fun chapterListRequest(manga: SManga): Request =
+        super.chapterListRequest(manga).addTimestamp()
 
-    override fun genresRequest(): Request {
-        val request = super.genresRequest()
-        val url = request.url.newBuilder()
+    override fun genresRequest(): Request =
+        super.genresRequest().addTimestamp()
+
+    private fun Request.addTimestamp(): Request {
+        val url = this.url.newBuilder()
             .addQueryParameter("t", System.currentTimeMillis().toString())
             .build()
-        return request.newBuilder()
+        return this.newBuilder()
             .url(url)
-            .headers(headers.newBuilder().set("Referer", "$baseUrl/").build())
+            .header("Cache-Control", "no-cache")
+            .header("Referer", "$baseUrl/$mangaSubString/")
             .build()
     }
 
@@ -107,10 +90,10 @@ class MGKomik :
 
     override fun headersBuilder() = super.headersBuilder().apply {
         set("User-Agent", USER_AGENT)
-        set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
-        set("Accept-Language", "id-ID,id;q=0.9")
+        set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
+        set("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
         set("DNT", "1")
-        set("Sec-CH-UA", "\"Chromium\";v=\"$CH_VERSION\", \"Not.A/Brand\";v=\"8\"")
+        set("Sec-CH-UA", "\"Chromium\";v=\"$CH_VERSION\", \"Google Chrome\";v=\"$CH_VERSION\", \"Not.A/Brand\";v=\"99\"")
         set("Sec-CH-UA-Mobile", "?1")
         set("Sec-CH-UA-Platform", "\"Android\"")
         set("Sec-GPC", "1")
@@ -143,12 +126,11 @@ class MGKomik :
                 headers.set("Sec-Fetch-Site", if (request.header("Referer") != null) "same-origin" else "none")
                 headers.set("Sec-Fetch-User", "?1")
                 headers.set("Priority", "u=0, i")
-                headers.set("Cache-Control", "no-cache")
             }
 
             chain.proceed(request.newBuilder().headers(headers.build()).build())
         }
-        .rateLimit(2)
+        .rateLimit(12, 3)
         .build()
 
     // =============================== Selectors ===============================
