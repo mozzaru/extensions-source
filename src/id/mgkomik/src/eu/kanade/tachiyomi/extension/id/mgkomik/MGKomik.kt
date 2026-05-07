@@ -88,9 +88,12 @@ class MGKomik :
         set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
         set("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
         set("DNT", "1")
-        set("Sec-CH-UA", "\"Chromium\";v=\"$CH_VERSION\", \"Google Chrome\";v=\"$CH_VERSION\", \"Not.A/Brand\";v=\"99\"")
+        set("Sec-CH-UA", "\"Chromium\";v=\"$CH_VERSION\", \"Not.A/Brand\";v=\"8\"")
         set("Sec-CH-UA-Mobile", "?1")
         set("Sec-CH-UA-Platform", "\"Android\"")
+        set("Sec-CH-UA-Platform-Version", "\"11.0.0\"")
+        set("Sec-CH-UA-Full-Version-List", "\"Chromium\";v=\"147.0.7727.93\", \"Not.A/Brand\";v=\"8.0.0.0\"")
+        set("Sec-CH-UA-Model", "\"RMX2103\"")
         set("Sec-GPC", "1")
         set("Upgrade-Insecure-Requests", "1")
     }
@@ -114,8 +117,8 @@ class MGKomik :
                 headers.set("Sec-Fetch-Mode", "no-cors")
                 headers.set("Sec-Fetch-Site", "cross-site")
             } else {
-                // Documents - Identity parity with System WebView
-                headers.set("X-Requested-With", "com.android.chrome")
+                // Documents - Removing X-Requested-With for pure browser mimicry
+                headers.removeAll("X-Requested-With")
                 headers.set("Sec-Fetch-Dest", "document")
                 headers.set("Sec-Fetch-Mode", "navigate")
                 headers.set("Sec-Fetch-Site", if (request.header("Referer") != null) "same-origin" else "none")
@@ -192,7 +195,7 @@ class MGKomik :
     }
 
     companion object {
-        private const val CH_VERSION = "141"
+        private const val CH_VERSION = "147"
         private const val USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/$CH_VERSION.0.0.0 Mobile Safari/537.36"
     }
 }
