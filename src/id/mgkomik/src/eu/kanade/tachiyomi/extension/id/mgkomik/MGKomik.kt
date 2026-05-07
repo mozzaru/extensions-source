@@ -38,7 +38,6 @@ class MGKomik :
     override fun popularMangaRequest(page: Int): Request {
         val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
             .addQueryParameter("m_orderby", "trending")
-            .addQueryParameter("t", System.currentTimeMillis().toString())
             .build()
         return GET(url, firstNavHeaders())
     }
@@ -46,7 +45,6 @@ class MGKomik :
     override fun latestUpdatesRequest(page: Int): Request {
         val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
             .addQueryParameter("m_orderby", "latest")
-            .addQueryParameter("t", System.currentTimeMillis().toString())
             .build()
         return GET(url, firstNavHeaders())
     }
@@ -71,7 +69,7 @@ class MGKomik :
     override fun genresRequest(): Request = super.genresRequest().addSameOriginNavHeaders()
 
     override fun xhrChaptersRequest(mangaUrl: String): Request = POST(
-        "${mangaUrl.trimEnd('/')}/ajax/chapters/",
+        "$mangaUrl/ajax/chapters/",
         headers.newBuilder()
             .set("Referer", mangaUrl)
             .set("X-Requested-With", "XMLHttpRequest")
@@ -131,7 +129,7 @@ class MGKomik :
 
     private fun firstNavHeaders() = headers.newBuilder()
         .removeAll("Referer")
-        .set("Cache-Control", "no-cache")
+        .set("Cache-Control", "max-age=0")
         .set("Sec-Fetch-Dest", "document")
         .set("Sec-Fetch-Mode", "navigate")
         .set("Sec-Fetch-Site", "none")
@@ -140,7 +138,7 @@ class MGKomik :
 
     private fun Request.addSameOriginNavHeaders(): Request = newBuilder()
         .header("Referer", "$baseUrl/$mangaSubString/")
-        .header("Cache-Control", "no-cache")
+        .header("Cache-Control", "max-age=0")
         .header("Sec-Fetch-Dest", "document")
         .header("Sec-Fetch-Mode", "navigate")
         .header("Sec-Fetch-Site", "same-origin")
