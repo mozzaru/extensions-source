@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.extension.id.mgkomik
 
 import eu.kanade.tachiyomi.multisrc.madara.Madara
 import eu.kanade.tachiyomi.network.GET
+import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
@@ -22,9 +23,7 @@ class MGKomik :
         SimpleDateFormat("dd MMM yy", Locale.US),
     ) {
     override val useLoadMoreRequest = LoadMoreStrategy.Never
-
     override val useNewChapterEndpoint = true
-
     override val mangaSubString = "komik"
 
     // =============================== Requests ===============================
@@ -33,7 +32,6 @@ class MGKomik :
         val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
             .addQueryParameter("m_orderby", "views")
             .build()
-        // HAR: first navigation has sec-fetch-site=none, no Referer, cache-control: max-age=0
         return GET(url, firstNavHeaders())
     }
 
@@ -48,14 +46,9 @@ class MGKomik :
         super.searchMangaRequest(page, query, filters).addSameOriginNavHeaders()
     } else {
         val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
-
         filters.forEach { filter ->
             when (filter) {
-                is OrderByFilter -> {
-                    if (filter.state != 0) {
-                        url.addQueryParameter("m_orderby", filter.toUriPart())
-                    }
-                }
+                is OrderByFilter -> if (filter.state != 0) url.addQueryParameter("m_orderby", filter.toUriPart())
                 else -> {}
             }
         }
@@ -71,10 +64,23 @@ class MGKomik :
     override fun genresRequest(): Request =
         super.genresRequest().addSameOriginNavHeaders()
 
-    /**
-     * Headers for a fresh top-level navigation (no Referer, sec-fetch-site=none).
-     * Matches HAR: GET /komik/?m_orderby=views
-     */
+    // Chapter AJAX endpoint with correct same-origin headers
+    override fun xhrChaptersRequest(mangaUrl: String): Request =
+        POST(
+            "$mangaUrl/ajax/chapters/",
+            headers.newBuilder()
+                .set("Referer", mangaUrl)
+                .set("X-Requested-With", "XMLHttpRequest")
+                .set("Sec-Fetch-Dest", "empty")
+                .set("Sec-Fetch-Mode", "cors")
+                .set("Sec-Fetch-Site", "same-origin")
+                .removeAll("Sec-Fetch-User")
+                .build(),
+        )
+
+    // =============================== Headers ===============================
+
+    /** Fresh top-level navigation — no Referer, sec-fetch-site=none */
     private fun firstNavHeaders() = headers.newBuilder()
         .removeAll("Referer")
         .set("Cache-Control", "max-age=0")
@@ -84,9 +90,7 @@ class MGKomik :
         .set("Sec-Fetch-User", "?1")
         .build()
 
-    /**
-     * Headers for same-origin navigation (with Referer, sec-fetch-site=same-origin).
-     */
+    /** Same-origin navigation — with Referer, sec-fetch-site=same-origin */
     private fun Request.addSameOriginNavHeaders(): Request = newBuilder()
         .header("Referer", "$baseUrl/$mangaSubString/")
         .header("Cache-Control", "max-age=0")
@@ -96,18 +100,16 @@ class MGKomik :
         .header("Sec-Fetch-User", "?1")
         .build()
 
-    // =============================== Headers ===============================
-
     override fun headersBuilder() = super.headersBuilder().apply {
         set("User-Agent", USER_AGENT)
         set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
         set("Accept-Language", "id-ID,id;q=0.9")
         set("DNT", "1")
-        set("Sec-CH-UA", "\"Chromium\";v=\"147\", \"Not.A/Brand\";v=\"8\"")
+        set("Sec-CH-UA", "\"Chromium\";v=\"$CH_VERSION\", \"Not.A/Brand\";v=\"8\"")
         set("Sec-CH-UA-Arch", "\"\"")
         set("Sec-CH-UA-Bitness", "\"\"")
-        set("Sec-CH-UA-Full-Version", "\"147.0.7727.93\"")
-        set("Sec-CH-UA-Full-Version-List", "\"Chromium\";v=\"147.0.7727.93\", \"Not.A/Brand\";v=\"8.0.0.0\"")
+        set("Sec-CH-UA-Full-Version", "\"$CH_VERSION.0.7727.93\"")
+        set("Sec-CH-UA-Full-Version-List", "\"Chromium\";v=\"$CH_VERSION.0.7727.93\", \"Not.A/Brand\";v=\"8.0.0.0\"")
         set("Sec-CH-UA-Mobile", "?1")
         set("Sec-CH-UA-Model", "\"RMX2103\"")
         set("Sec-CH-UA-Platform", "\"Android\"")
@@ -120,13 +122,12 @@ class MGKomik :
     override val client = network.cloudflareClient.newBuilder()
         .addInterceptor { chain ->
             val request = chain.request()
-            val url = request.url
+            val path = request.url.encodedPath
             val newHeaders = request.headers.newBuilder()
 
-            val path = url.encodedPath
             when {
-                path.contains("admin-ajax.php") || path.contains("wp-json") -> {
-                    // AJAX requests
+                path.contains("admin-ajax.php") || path.contains("wp-json") || path.contains("/ajax/") -> {
+                    // AJAX / chapter endpoint
                     newHeaders.set("X-Requested-With", "XMLHttpRequest")
                     newHeaders.set("Sec-Fetch-Dest", "empty")
                     newHeaders.set("Sec-Fetch-Mode", "cors")
@@ -137,7 +138,7 @@ class MGKomik :
                 path.endsWith(".jpg") || path.endsWith(".jpeg") ||
                     path.endsWith(".png") || path.endsWith(".webp") ||
                     path.contains("/thumbs/") -> {
-                    // HAR shows images are sent WITHOUT any Sec-Fetch-* headers
+                    // Images — no Sec-Fetch-* headers per HAR
                     newHeaders.removeAll("X-Requested-With")
                     newHeaders.removeAll("Sec-Fetch-Dest")
                     newHeaders.removeAll("Sec-Fetch-Mode")
@@ -147,24 +148,18 @@ class MGKomik :
                     newHeaders.removeAll("Priority")
                 }
                 else -> {
-                    // Document navigation — per-request headers already applied
+                    // Document navigation
                     newHeaders.removeAll("X-Requested-With")
                 }
             }
 
             chain.proceed(request.newBuilder().headers(newHeaders.build()).build())
         }
-        .rateLimit(2)
+        .rateLimit(3) // raised from 2 → 3 for faster chapter + cover loading
         .build()
 
     // =============================== Selectors ===============================
 
-    // HTML: <div class="page-item-detail manga">
-    //   <div class="item-thumb"><a href="..."><img ...></a></div>
-    //   <div class="item-summary">
-    //     <div class="post-title font-title"><h3 class="h5"><a href="...">Title</a></h3></div>
-    //   </div>
-    // </div>
     override fun popularMangaSelector() = "div.page-item-detail.manga"
 
     override fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
@@ -174,7 +169,8 @@ class MGKomik :
         thumbnail_url = element.selectFirst("img")?.let { imageFromElement(it) }
     }
 
-    override fun popularMangaNextPageSelector() = "div.wp-pagenavi a.page, div.wp-pagenavi a.last, div.nav-previous, nav.navigation-ajax, a.nextpostslink, a.next, .pagination a:contains(Next)"
+    // Site uses wp-pagenavi — only selectors that actually exist in the HTML
+    override fun popularMangaNextPageSelector() = "div.wp-pagenavi a.page, div.wp-pagenavi a.last"
 
     override val mangaDetailsSelectorTitle = ".manga-title, h1#mangaTitle, div.post-title h3, div.post-title h1, #manga-title > h1"
     override val mangaDetailsSelectorAuthor = ".meta-item:contains(Author:) .meta-value, div.author-content > a, div.manga-authors > a"
@@ -185,9 +181,29 @@ class MGKomik :
 
     override fun chapterListSelector() = "li.chapter-list-item, li.wp-manga-chapter"
 
+    // =============================== Images =================================
+
+    // Override to pick the smallest srcset image for faster thumbnail loading
+    override fun imageFromElement(element: Element): String? = when {
+        element.hasAttr("data-src") -> element.attr("abs:data-src")
+        element.hasAttr("data-lazy-src") -> element.attr("abs:data-lazy-src")
+        element.hasAttr("data-cfsrc") -> element.attr("abs:data-cfsrc")
+        element.hasAttr("srcset") -> element.attr("srcset")
+            .split(",")
+            .mapNotNull { entry ->
+                val parts = entry.trim().split(" ")
+                val url = parts.firstOrNull()?.takeIf { it.startsWith("http") } ?: return@mapNotNull null
+                val width = parts.lastOrNull()?.removeSuffix("w")?.toIntOrNull() ?: 0
+                url to width
+            }
+            .minByOrNull { it.second } // smallest resolution = fastest thumbnail
+            ?.first
+        else -> element.attr("abs:src")
+    }
+
     // ================================ Dates ==================================
 
-    // Site uses "30 Apr 26" = dd MMM yy Locale.US (confirmed from HTML)
+    // Site date format: "30 Apr 26" = dd MMM yy (Locale.US)
     override fun parseChapterDate(date: String?): Long {
         date ?: return 0L
         val trimmed = date.trim()
@@ -196,7 +212,7 @@ class MGKomik :
             return parseRelativeDate(trimmed)
         }
 
-        val dateFormats = listOf(
+        val formats = listOf(
             SimpleDateFormat("dd MMM yy", Locale.US),
             SimpleDateFormat("dd MMM yyyy", Locale.US),
             SimpleDateFormat("dd/MM/yyyy", Locale.US),
@@ -204,13 +220,11 @@ class MGKomik :
             SimpleDateFormat("MMMM d, yyyy", Locale.US),
         )
 
-        for (sdf in dateFormats) {
+        for (sdf in formats) {
             try {
                 sdf.isLenient = false
-                val parsed = sdf.parse(trimmed)
-                if (parsed != null) return parsed.time
-            } catch (_: ParseException) {
-            }
+                sdf.parse(trimmed)?.let { return it.time }
+            } catch (_: ParseException) {}
         }
 
         return super.parseChapterDate(trimmed)
@@ -222,7 +236,6 @@ class MGKomik :
         launchIO { fetchGenres() }
 
         val filters = super.getFilterList().list.toMutableList()
-
         filters += if (genresList.isNotEmpty()) {
             listOf(
                 Filter.Separator(),
@@ -242,18 +255,11 @@ class MGKomik :
     }
 
     private class GenreContentFilter(title: String, options: List<Pair<String, String>>) :
-        UriPartFilter(
-            title,
-            options.toTypedArray(),
-        )
+        UriPartFilter(title, options.toTypedArray())
 
-    override fun parseGenres(document: Document): List<Genre> {
-        val genres = mutableListOf<Genre>()
-        genres += Genre("All", "")
-        genres += document.select(".row.genres li a").map { a ->
-            Genre(a.text(), a.absUrl("href"))
-        }
-        return genres
+    override fun parseGenres(document: Document): List<Genre> = buildList {
+        add(Genre("All", ""))
+        addAll(document.select(".row.genres li a").map { Genre(it.text(), it.absUrl("href")) })
     }
 
     companion object {
