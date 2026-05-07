@@ -2,9 +2,13 @@ ext {
     extName = 'MG Komik'
     extClass = '.MGKomik'
     themePkg = 'madara'
-    baseUrl = 'https://id.mgkomik.cc'
-    overrideVersionCode = 20
+    baseUrl = 'https://web.mgkomik.cc'
+    overrideVersionCode = 21
     isNsfw = false
 }
 
 apply from: "$rootDir/common.gradle"
+
+dependencies {
+    implementation project(':lib:randomua')
+}

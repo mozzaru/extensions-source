@@ -1,31 +1,42 @@
 package eu.kanade.tachiyomi.extension.id.mgkomik
 
+import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.multisrc.madara.Madara
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
+import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
+import keiyoushi.lib.randomua.addRandomUAPreference
+import keiyoushi.lib.randomua.setRandomUserAgent
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.Interceptor
 import okhttp3.Request
+import okhttp3.Response
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.text.ParseException
 import java.text.SimpleDateFormat
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
+import java.util.regex.Pattern
 
 class MGKomik :
     Madara(
         "MG Komik",
-        "https://id.mgkomik.cc",
+        "https://web.mgkomik.cc",
         "id",
         SimpleDateFormat("dd MMM yy", Locale.US),
-    ) {
+    ),
+    ConfigurableSource {
     override val useLoadMoreRequest = LoadMoreStrategy.Never
     override val useNewChapterEndpoint = true
     override val mangaSubString = "komik"
+
+    override fun getMangaUrl(manga: SManga): String = "$baseUrl${manga.url}"
 
     // =============================== Requests ===============================
 
@@ -117,24 +128,15 @@ class MGKomik :
         .header("Sec-Fetch-User", "?1")
         .build()
 
-    override fun headersBuilder() = super.headersBuilder().apply {
-        set("User-Agent", USER_AGENT)
-        set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
-        set("Accept-Language", "id-ID,id;q=0.9")
-        set("Sec-CH-UA", "\"Chromium\";v=\"$CH_VERSION\", \"Not.A/Brand\";v=\"8\"")
-        set("Sec-CH-UA-Arch", "\"\"")
-        set("Sec-CH-UA-Bitness", "\"\"")
-        set("Sec-CH-UA-Full-Version", "\"$CH_VERSION.0.7727.93\"")
-        set("Sec-CH-UA-Full-Version-List", "\"Chromium\";v=\"$CH_VERSION.0.7727.93\", \"Not.A/Brand\";v=\"8.0.0.0\"")
-        set("Sec-CH-UA-Mobile", "?1")
-        set("Sec-CH-UA-Model", "\"Redmi Note 9\"")
-        set("Sec-CH-UA-Platform", "\"Android\"")
-        set("Sec-CH-UA-Platform-Version", "\"11.0.0\"")
-        set("Upgrade-Insecure-Requests", "1")
-        set("Priority", "u=0, i")
-    }
+    override fun headersBuilder() = super.headersBuilder()
+        .setRandomUserAgent()
+        .set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
+        .set("Accept-Language", "id-ID,id;q=0.9")
+        .set("Upgrade-Insecure-Requests", "1")
+        .set("Priority", "u=0, i")
 
     override val client = network.cloudflareClient.newBuilder()
+        .addInterceptor(UserAgentClientHintsInterceptor())
         .addInterceptor { chain ->
             val request = chain.request()
             val url = request.url
@@ -151,7 +153,7 @@ class MGKomik :
                 path.endsWith(".gif") || path.contains("/thumbs/")
 
             // CDN image — domain berbeda dari baseUrl
-            val isCdnImage = isImage && host != "id.mgkomik.cc"
+            val isCdnImage = isImage && !host.contains("mgkomik.cc")
 
             when {
                 isAjax -> {
@@ -294,10 +296,168 @@ class MGKomik :
         addAll(document.select(".row.genres li a").map { Genre(it.text(), it.absUrl("href")) })
     }
 
-    companion object {
-        private const val CH_VERSION = "147"
+    // ================================ Preferences ===========================
 
-        private const val USER_AGENT =
-            "Mozilla/5.0 (Linux; Android 11; Redmi Note 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/$CH_VERSION.0.0.0 Mobile Safari/537.36"
+    override fun setupPreferenceScreen(screen: PreferenceScreen) {
+        screen.addRandomUAPreference()
+    }
+
+    /**
+     * OkHttp Interceptor that adds Client Hints headers based on User-Agent
+     */
+    private class UserAgentClientHintsInterceptor : Interceptor {
+
+        private val parser = UAParser()
+        private val cache = ConcurrentHashMap<String, SecCHHeaders>(16, 0.75f)
+
+        override fun intercept(chain: Interceptor.Chain): Response {
+            val originalRequest = chain.request()
+            val userAgent = originalRequest.header("User-Agent")
+
+            if (userAgent.isNullOrEmpty()) {
+                return chain.proceed(originalRequest)
+            }
+
+            val secCHHeaders = cache.getOrPut(userAgent) {
+                parser.parseUAtoSecCH(userAgent).also {
+                    if (cache.size > 50) {
+                        cache.keys.take(cache.size - 40).forEach { key -> cache.remove(key) }
+                    }
+                }
+            }
+
+            val newRequest = originalRequest.newBuilder()
+                .header("Sec-CH-UA", secCHHeaders.secCHUA)
+                .header("Sec-CH-UA-Mobile", secCHHeaders.secCHUAMobile)
+                .header("Sec-CH-UA-Platform", secCHHeaders.secCHUAPlatform)
+                .apply {
+                    secCHHeaders.secCHUAModel?.let {
+                        header("Sec-CH-UA-Model", "\"$it\"")
+                    }
+                    secCHHeaders.secCHUAPlatformVersion?.let {
+                        header("Sec-CH-UA-Platform-Version", "\"$it\"")
+                    }
+                    secCHHeaders.secCHUAFullVersionList?.let {
+                        header("Sec-CH-UA-Full-Version-List", it)
+                    }
+                }
+                .build()
+
+            return chain.proceed(newRequest)
+        }
+    }
+
+    private data class SecCHHeaders(
+        val secCHUA: String,
+        val secCHUAMobile: String,
+        val secCHUAPlatform: String,
+        val secCHUAModel: String? = null,
+        val secCHUAPlatformVersion: String? = null,
+        val secCHUAFullVersionList: String? = null,
+    )
+
+    private class UAParser {
+
+        fun parseUAtoSecCH(ua: String): SecCHHeaders {
+            val brands = mutableListOf<String>()
+            val (platform, isMobile, platformVersion, model) = detectPlatform(ua)
+            detectBrowserBrands(ua, brands)
+            brands.add("\"Not?A_Brand\";v=\"$NOT_A_BRAND_VERSION\"")
+
+            return SecCHHeaders(
+                secCHUA = brands.joinToString(", "),
+                secCHUAMobile = if (isMobile) "?1" else "?0",
+                secCHUAPlatform = platform,
+                secCHUAModel = model,
+                secCHUAPlatformVersion = platformVersion,
+                secCHUAFullVersionList = brands.joinToString(", "),
+            )
+        }
+
+        private fun detectPlatform(ua: String): PlatformInfo = when {
+            ua.contains("Windows NT 10.0") -> PlatformInfo("\"Windows\"", false, "10.0")
+            ua.contains("Macintosh") || ua.contains("Mac OS X") -> {
+                val version = extractVersion(ua, MAC_OS_VERSION_PATTERN)?.replace("_", ".")
+                PlatformInfo("\"macOS\"", false, version)
+            }
+            ua.contains("Android") -> {
+                val version = extractVersion(ua, ANDROID_VERSION_PATTERN)
+                val model = extractModel(ua)
+                PlatformInfo("\"Android\"", true, version, model)
+            }
+            ua.contains("iPhone") || ua.contains("iPad") -> {
+                val version = extractVersion(ua, IOS_VERSION_PATTERN)?.replace("_", ".")
+                PlatformInfo("\"iOS\"", ua.contains("iPhone") || ua.contains("Mobile"), version)
+            }
+            ua.contains("Linux") -> PlatformInfo("\"Linux\"", ua.contains("Mobile"), null)
+            else -> PlatformInfo("\"Windows\"", ua.contains("Mobile"), null)
+        }
+
+        private fun extractModel(ua: String): String? {
+            // Very basic model extraction from Android UA
+            return ANDROID_MODEL_PATTERN.matcher(ua)
+                .takeIf { it.find() }
+                ?.group(1)
+                ?.trim()
+        }
+
+        private fun detectBrowserBrands(ua: String, brands: MutableList<String>) {
+            when {
+                ua.contains("Edg/") -> {
+                    val version = extractVersion(ua, EDGE_VERSION_PATTERN) ?: UNKNOWN_VERSION
+                    val chromeVersion = extractVersion(ua, CHROME_VERSION_PATTERN) ?: UNKNOWN_VERSION
+                    brands.add("\"Chromium\";v=\"$chromeVersion\"")
+                    brands.add("\"Microsoft Edge\";v=\"$version\"")
+                }
+                ua.contains("OPR/") -> {
+                    val version = extractVersion(ua, OPERA_VERSION_PATTERN) ?: UNKNOWN_VERSION
+                    val chromeVersion = extractVersion(ua, CHROME_VERSION_PATTERN) ?: UNKNOWN_VERSION
+                    brands.add("\"Chromium\";v=\"$chromeVersion\"")
+                    brands.add("\"Opera\";v=\"$version\"")
+                }
+                ua.contains("Chrome") -> {
+                    val version = extractVersion(ua, CHROME_VERSION_PATTERN) ?: UNKNOWN_VERSION
+                    brands.add("\"Chromium\";v=\"$version\"")
+                    brands.add("\"Google Chrome\";v=\"$version\"")
+                }
+                ua.contains("Firefox") -> {
+                    val version = extractVersion(ua, FIREFOX_VERSION_PATTERN) ?: UNKNOWN_VERSION
+                    brands.add("\"Firefox\";v=\"$version\"")
+                }
+                ua.contains("Safari") -> {
+                    val version = extractVersion(ua, SAFARI_VERSION_PATTERN) ?: UNKNOWN_VERSION
+                    brands.add("\"Safari\";v=\"$version\"")
+                }
+                else -> {
+                    brands.add("\"Chromium\";v=\"$UNKNOWN_VERSION\"")
+                    brands.add("\"Not_A Brand\";v=\"$UNKNOWN_VERSION\"")
+                }
+            }
+        }
+
+        private fun extractVersion(ua: String, pattern: Pattern): String? = pattern.matcher(ua)
+            .takeIf { it.find() }
+            ?.group(1)
+
+        private data class PlatformInfo(
+            val platform: String,
+            val isMobile: Boolean,
+            val version: String?,
+            val model: String? = null,
+        )
+
+        companion object {
+            private const val UNKNOWN_VERSION = "133"
+            private const val NOT_A_BRAND_VERSION = "8"
+            private val MAC_OS_VERSION_PATTERN = Pattern.compile("Mac OS X (\\d+[._]\\d+)")
+            private val ANDROID_VERSION_PATTERN = Pattern.compile("Android (\\d+)")
+            private val ANDROID_MODEL_PATTERN = Pattern.compile("; ([^;]+) Build/")
+            private val IOS_VERSION_PATTERN = Pattern.compile("OS (\\d+[._]\\d+)")
+            private val EDGE_VERSION_PATTERN = Pattern.compile("Edg/(\\d+)")
+            private val OPERA_VERSION_PATTERN = Pattern.compile("OPR/(\\d+)")
+            private val CHROME_VERSION_PATTERN = Pattern.compile("Chrome/(\\d+)")
+            private val FIREFOX_VERSION_PATTERN = Pattern.compile("Firefox/(\\d+)")
+            private val SAFARI_VERSION_PATTERN = Pattern.compile("Version/(\\d+)")
+        }
     }
 }
