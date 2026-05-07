@@ -1,6 +1,5 @@
 package eu.kanade.tachiyomi.extension.id.mgkomik
 
-import android.util.Log
 import eu.kanade.tachiyomi.multisrc.madara.Madara
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
@@ -12,7 +11,6 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
-import okhttp3.Response
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.text.ParseException
@@ -31,34 +29,18 @@ class MGKomik :
     override val mangaSubString = "komik"
     override val chapterUrlSuffix = ""
 
-    private fun logRequest(tag: String, request: Request) {
-        Log.d("MGKomik", "[$tag] >> ${request.method} ${request.url}")
-        request.headers.forEach { (name, value) ->
-            Log.d("MGKomik", "[$tag] header: $name: $value")
-        }
-    }
-
-    private fun logResponse(tag: String, response: Response) {
-        Log.d("MGKomik", "[$tag] << ${response.code} ${response.request.url}")
-        response.headers.forEach { (name, value) ->
-            Log.d("MGKomik", "[$tag] res-header: $name: $value")
-        }
-    }
-
-    // =============================== Requests ===============================
-
     override fun popularMangaRequest(page: Int): Request {
         val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
             .addQueryParameter("m_orderby", "trending")
             .build()
-        return GET(url, listingHeaders()).also { logRequest("POPULAR", it) }
+        return GET(url, listingHeaders())
     }
 
     override fun latestUpdatesRequest(page: Int): Request {
         val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
             .addQueryParameter("m_orderby", "latest")
             .build()
-        return GET(url, listingHeaders()).also { logRequest("LATEST", it) }
+        return GET(url, listingHeaders())
     }
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request = if (query.isNotBlank()) {
@@ -76,11 +58,9 @@ class MGKomik :
 
     override fun mangaDetailsRequest(manga: SManga): Request =
         super.mangaDetailsRequest(manga).addSameOriginNavHeaders()
-            .also { logRequest("MANGA_DETAIL", it) }
 
     override fun chapterListRequest(manga: SManga): Request =
         super.chapterListRequest(manga).addSameOriginNavHeaders()
-            .also { logRequest("CHAPTER_LIST", it) }
 
     override fun genresRequest(): Request =
         super.genresRequest().addSameOriginNavHeaders()
@@ -98,19 +78,16 @@ class MGKomik :
                 .removeAll("Sec-Fetch-User")
                 .removeAll("Upgrade-Insecure-Requests")
                 .build(),
-        ).also { logRequest("XHR_CHAPTERS", it) }
+        )
 
     override fun pageListRequest(chapter: SChapter): Request {
         val chapterUrl = chapter.url.let {
             if (it.startsWith("http")) it else "$baseUrl$it"
         }
-
         val cleanChapterUrl = chapterUrl.substringBefore("?")
         val mangaUrl = cleanChapterUrl.trimEnd('/')
             .substringBeforeLast("/")
             .trimEnd('/') + "/"
-
-        Log.d("MGKomik", "[PAGE_LIST] chapterUrl=$cleanChapterUrl mangaUrl(referer)=$mangaUrl")
 
         return GET(
             cleanChapterUrl,
@@ -122,7 +99,7 @@ class MGKomik :
                 .set("Sec-Fetch-Site", "same-origin")
                 .set("Sec-Fetch-User", "?1")
                 .build(),
-        ).also { logRequest("PAGE_LIST", it) }
+        )
     }
 
     override fun imageRequest(page: Page): Request {
@@ -146,8 +123,6 @@ class MGKomik :
             .build()
         return GET(imageUrl, imageHeaders)
     }
-
-    // =============================== Headers ================================
 
     private fun listingHeaders() = headers.newBuilder()
         .set("Referer", "$baseUrl/")
@@ -204,27 +179,11 @@ class MGKomik :
                     .build()
                 chain.proceed(request.newBuilder().headers(newHeaders).build())
             } else {
-                chain.proceed(
-                    request.newBuilder()
-                        .removeHeader("X-Requested-With")
-                        .build(),
-                )
+                chain.proceed(request.newBuilder().removeHeader("X-Requested-With").build())
             }
-        }
-        // ← Tambah interceptor log response di sini
-        .addInterceptor { chain ->
-            val request = chain.request()
-            val response = chain.proceed(request)
-            Log.d("MGKomik", "[RESPONSE] ${response.code} | ${request.url}")
-            if (response.code == 403) {
-                Log.w("MGKomik", "[403] headers: ${response.headers}")
-            }
-            response
         }
         .rateLimit(3)
         .build()
-
-    // =============================== Selectors ==============================
 
     override fun popularMangaSelector() = "div.page-item-detail.manga"
 
@@ -245,8 +204,6 @@ class MGKomik :
     override val mangaDetailsSelectorGenre = "div.genres-content a"
 
     override fun chapterListSelector() = "li.wp-manga-chapter"
-
-    // ================================ Dates =================================
 
     override fun parseChapterDate(date: String?): Long {
         date ?: return 0L
@@ -273,8 +230,6 @@ class MGKomik :
 
         return super.parseChapterDate(trimmed)
     }
-
-    // ================================ Filters ===============================
 
     override fun getFilterList(): FilterList {
         launchIO { fetchGenres() }
@@ -308,7 +263,6 @@ class MGKomik :
 
     companion object {
         private const val CH_VERSION = "147"
-
         private const val USER_AGENT =
             "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/$CH_VERSION.0.0.0 Mobile Safari/537.36"
     }
