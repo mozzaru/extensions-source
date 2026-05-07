@@ -19,7 +19,7 @@ class MGKomik :
         "MG Komik",
         "https://id.mgkomik.cc",
         "id",
-        SimpleDateFormat("dd MMM yyyy", Locale("id")),
+        SimpleDateFormat("dd MMM yyyy", Locale.US),
     ) {
     override val useLoadMoreRequest = LoadMoreStrategy.Never
 
@@ -30,7 +30,7 @@ class MGKomik :
     // =============================== Requests ===============================
 
     override fun popularMangaRequest(page: Int): Request {
-        val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
+        val url = "$baseUrl/$mangaSubString/${if (page > 1) "page/$page/" else ""}".toHttpUrl().newBuilder()
             .addQueryParameter("m_orderby", "views")
             .addQueryParameter("t", System.currentTimeMillis().toString())
             .build()
@@ -39,7 +39,7 @@ class MGKomik :
     }
 
     override fun latestUpdatesRequest(page: Int): Request {
-        val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
+        val url = "$baseUrl/$mangaSubString/${if (page > 1) "page/$page/" else ""}".toHttpUrl().newBuilder()
             .addQueryParameter("m_orderby", "latest")
             .addQueryParameter("t", System.currentTimeMillis().toString())
             .build()
@@ -49,7 +49,7 @@ class MGKomik :
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request = if (query.isNotBlank()) {
         super.searchMangaRequest(page, query, filters).addTimestamp()
     } else {
-        val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
+        val url = "$baseUrl/$mangaSubString/${if (page > 1) "page/$page/" else ""}".toHttpUrl().newBuilder()
         url.addQueryParameter("t", System.currentTimeMillis().toString())
 
         filters.forEach { filter ->
@@ -170,10 +170,10 @@ class MGKomik :
         }
 
         val dateFormats = listOf(
-            "dd MMM yyyy" to Locale("id"),
             "dd MMM yyyy" to Locale.US,
-            "dd MMM yy" to Locale("id"),
+            "dd MMM yyyy" to Locale("id"),
             "dd MMM yy" to Locale.US,
+            "dd MMM yy" to Locale("id"),
             "dd/MM/yyyy" to Locale.US,
             "MMMM d, yyyy" to Locale.US,
             "MMMM d, yyyy" to Locale("id"),
@@ -183,7 +183,8 @@ class MGKomik :
 
         for ((pattern, locale) in dateFormats) {
             try {
-                return SimpleDateFormat(pattern, locale).parse(date)?.time ?: 0L
+                val simpleDateFormat = SimpleDateFormat(pattern, locale)
+                return simpleDateFormat.parse(date)?.time ?: 0L
             } catch (_: ParseException) {
             }
         }
