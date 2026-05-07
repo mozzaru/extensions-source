@@ -10,6 +10,7 @@ import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
+import keiyoushi.lib.randomua.UserAgentType
 import keiyoushi.lib.randomua.addRandomUAPreference
 import keiyoushi.lib.randomua.setRandomUserAgent
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -42,7 +43,7 @@ class MGKomik :
 
     override fun popularMangaRequest(page: Int): Request {
         val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
-            .addQueryParameter("m_orderby", "trending")
+            .addQueryParameter("m_orderby", "views")
             .build()
         return GET(url, firstNavHeaders())
     }
@@ -129,9 +130,10 @@ class MGKomik :
         .build()
 
     override fun headersBuilder() = super.headersBuilder()
-        .setRandomUserAgent()
+        .setRandomUserAgent(userAgentType = UserAgentType.MOBILE)
         .set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
         .set("Accept-Language", "id-ID,id;q=0.9")
+        .set("X-Requested-With", "com.android.chrome")
         .set("Upgrade-Insecure-Requests", "1")
         .set("Priority", "u=0, i")
 
@@ -195,7 +197,7 @@ class MGKomik :
                 }
 
                 else -> {
-                    newHeaders.removeAll("X-Requested-With")
+                    // Standard navigation - keep spoofed X-Requested-With if provided in headersBuilder
                 }
             }
 
@@ -206,13 +208,25 @@ class MGKomik :
 
     // =============================== Selectors ==============================
 
-    override fun popularMangaSelector() = "div.page-item-detail.manga"
+    override fun popularMangaSelector() = "div.page-item-detail:not(:has(a[href*='bilibilicomics.com'])), .manga__item, .post-item, .c-tabs-item__content"
 
-    override fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
-        val titleLink = element.selectFirst(".post-title a")
-        title = titleLink?.text()?.trim() ?: element.selectFirst("img")?.attr("alt")?.trim() ?: ""
-        setUrlWithoutDomain(titleLink?.attr("abs:href").orEmpty())
-        thumbnail_url = element.selectFirst("img")?.let { imageFromElement(it) }
+    override fun popularMangaFromElement(element: Element): SManga {
+        val manga = SManga.create()
+        val titleLink = element.selectFirst(".post-title a, .item-thumb a, a:has(h3), a.manga-title, .manga-name a")
+        if (titleLink != null) {
+            manga.setUrlWithoutDomain(titleLink.attr("abs:href"))
+            manga.title = titleLink.text().trim().takeIf { it.isNotBlank() }
+                ?: titleLink.attr("title").trim()
+        }
+        if (manga.title.isNullOrBlank()) {
+            manga.title = element.selectFirst("img")?.attr("alt")?.trim() ?: ""
+        }
+
+        val imageElement = element.selectFirst("img")
+        if (imageElement != null) {
+            manga.thumbnail_url = imageFromElement(imageElement)
+        }
+        return manga
     }
 
     override fun popularMangaNextPageSelector() = "div.wp-pagenavi a.page, div.wp-pagenavi a.last"
@@ -362,7 +376,7 @@ class MGKomik :
             val brands = mutableListOf<String>()
             val (platform, isMobile, platformVersion, model) = detectPlatform(ua)
             detectBrowserBrands(ua, brands)
-            brands.add("\"Not?A_Brand\";v=\"$NOT_A_BRAND_VERSION\"")
+            brands.add("\"Not.A/Brand\";v=\"$NOT_A_BRAND_VERSION\"")
 
             return SecCHHeaders(
                 secCHUA = brands.joinToString(", "),
@@ -375,13 +389,13 @@ class MGKomik :
         }
 
         private fun detectPlatform(ua: String): PlatformInfo = when {
-            ua.contains("Windows NT 10.0") -> PlatformInfo("\"Windows\"", false, "10.0")
+            ua.contains("Windows NT 10.0") || ua.contains("Windows NT 11.0") -> PlatformInfo("\"Windows\"", false, "15.0.0")
             ua.contains("Macintosh") || ua.contains("Mac OS X") -> {
                 val version = extractVersion(ua, MAC_OS_VERSION_PATTERN)?.replace("_", ".")
                 PlatformInfo("\"macOS\"", false, version)
             }
             ua.contains("Android") -> {
-                val version = extractVersion(ua, ANDROID_VERSION_PATTERN)
+                val version = extractVersion(ua, ANDROID_VERSION_PATTERN) ?: "11.0.0"
                 val model = extractModel(ua)
                 PlatformInfo("\"Android\"", true, version, model)
             }
@@ -394,11 +408,8 @@ class MGKomik :
         }
 
         private fun extractModel(ua: String): String? {
-            // Very basic model extraction from Android UA
-            return ANDROID_MODEL_PATTERN.matcher(ua)
-                .takeIf { it.find() }
-                ?.group(1)
-                ?.trim()
+            val matcher = ANDROID_MODEL_PATTERN.matcher(ua)
+            return if (matcher.find()) matcher.group(1)?.trim() else null
         }
 
         private fun detectBrowserBrands(ua: String, brands: MutableList<String>) {
@@ -430,7 +441,6 @@ class MGKomik :
                 }
                 else -> {
                     brands.add("\"Chromium\";v=\"$UNKNOWN_VERSION\"")
-                    brands.add("\"Not_A Brand\";v=\"$UNKNOWN_VERSION\"")
                 }
             }
         }
@@ -451,7 +461,7 @@ class MGKomik :
             private const val NOT_A_BRAND_VERSION = "8"
             private val MAC_OS_VERSION_PATTERN = Pattern.compile("Mac OS X (\\d+[._]\\d+)")
             private val ANDROID_VERSION_PATTERN = Pattern.compile("Android (\\d+)")
-            private val ANDROID_MODEL_PATTERN = Pattern.compile("; ([^;]+) Build/")
+            private val ANDROID_MODEL_PATTERN = Pattern.compile("; ([^;)]+?)(?: Build/|\\)|;)")
             private val IOS_VERSION_PATTERN = Pattern.compile("OS (\\d+[._]\\d+)")
             private val EDGE_VERSION_PATTERN = Pattern.compile("Edg/(\\d+)")
             private val OPERA_VERSION_PATTERN = Pattern.compile("OPR/(\\d+)")
