@@ -8,6 +8,7 @@ import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
+import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import keiyoushi.lib.randomua.addRandomUAPreference
@@ -37,6 +38,7 @@ class MGKomik :
     override fun popularMangaRequest(page: Int): Request {
         val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
             .addQueryParameter("m_orderby", "trending")
+            .addQueryParameter("t", System.currentTimeMillis().toString())
             .build()
         return GET(url, firstNavHeaders())
     }
@@ -44,6 +46,7 @@ class MGKomik :
     override fun latestUpdatesRequest(page: Int): Request {
         val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
             .addQueryParameter("m_orderby", "latest")
+            .addQueryParameter("t", System.currentTimeMillis().toString())
             .build()
         return GET(url, firstNavHeaders())
     }
@@ -68,7 +71,7 @@ class MGKomik :
     override fun genresRequest(): Request = super.genresRequest().addSameOriginNavHeaders()
 
     override fun xhrChaptersRequest(mangaUrl: String): Request = POST(
-        "$mangaUrl/ajax/chapters/",
+        "${mangaUrl.trimEnd('/')}/ajax/chapters/",
         headers.newBuilder()
             .set("Referer", mangaUrl)
             .set("X-Requested-With", "XMLHttpRequest")
@@ -82,7 +85,9 @@ class MGKomik :
     )
 
     override fun pageListRequest(chapter: SChapter): Request {
-        val chapterUrl = getChapterUrl(chapter)
+        val chapterUrl = chapter.url.let {
+            if (it.startsWith("http")) it else "$baseUrl$it"
+        }
         val mangaUrl = chapterUrl.trimEnd('/')
             .substringBeforeLast("/")
             .trimEnd('/') + "/"
@@ -100,11 +105,33 @@ class MGKomik :
         )
     }
 
+    override fun imageRequest(page: Page): Request {
+        val imageUrl = page.imageUrl ?: page.url
+        val imageHeaders = headersBuilder()
+            .set("Referer", "$baseUrl/")
+            .set("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
+            .removeAll("Sec-Fetch-Dest")
+            .removeAll("Sec-Fetch-Mode")
+            .removeAll("Sec-Fetch-Site")
+            .removeAll("Sec-Fetch-User")
+            .removeAll("Upgrade-Insecure-Requests")
+            .removeAll("Cache-Control")
+            .removeAll("Priority")
+            .removeAll("Sec-CH-UA-Arch")
+            .removeAll("Sec-CH-UA-Bitness")
+            .removeAll("Sec-CH-UA-Full-Version")
+            .removeAll("Sec-CH-UA-Full-Version-List")
+            .removeAll("Sec-CH-UA-Model")
+            .removeAll("Sec-CH-UA-Platform-Version")
+            .build()
+        return GET(imageUrl, imageHeaders)
+    }
+
     // =============================== Headers ================================
 
     private fun firstNavHeaders() = headers.newBuilder()
         .removeAll("Referer")
-        .set("Cache-Control", "max-age=0")
+        .set("Cache-Control", "no-cache")
         .set("Sec-Fetch-Dest", "document")
         .set("Sec-Fetch-Mode", "navigate")
         .set("Sec-Fetch-Site", "none")
@@ -113,7 +140,7 @@ class MGKomik :
 
     private fun Request.addSameOriginNavHeaders(): Request = newBuilder()
         .header("Referer", "$baseUrl/$mangaSubString/")
-        .header("Cache-Control", "max-age=0")
+        .header("Cache-Control", "no-cache")
         .header("Sec-Fetch-Dest", "document")
         .header("Sec-Fetch-Mode", "navigate")
         .header("Sec-Fetch-Site", "same-origin")
@@ -132,61 +159,29 @@ class MGKomik :
         .addInterceptor(UserAgentClientHintsInterceptor())
         .addInterceptor { chain ->
             val request = chain.request()
-            val url = request.url
-            val host = url.host
-            val path = url.encodedPath
-            val newHeaders = request.headers.newBuilder()
-
+            val path = request.url.encodedPath
             val isAjax = path.contains("admin-ajax.php") ||
                 path.contains("wp-json") ||
                 path.contains("/ajax/")
 
-            val isImage = path.endsWith(".jpg") || path.endsWith(".jpeg") ||
-                path.endsWith(".png") || path.endsWith(".webp") ||
-                path.endsWith(".gif") || path.contains("/thumbs/")
-
-            // CDN image — domain berbeda dari baseUrl
-            val isCdnImage = isImage && host != "id.mgkomik.cc"
-
-            when {
-                isAjax -> {
-                    newHeaders.set("X-Requested-With", "XMLHttpRequest")
-                    newHeaders.set("Sec-Fetch-Dest", "empty")
-                    newHeaders.set("Sec-Fetch-Mode", "cors")
-                    newHeaders.set("Sec-Fetch-Site", "same-origin")
-                    newHeaders.set("Origin", baseUrl)
-                    newHeaders.removeAll("Sec-Fetch-User")
-                    newHeaders.removeAll("Upgrade-Insecure-Requests")
-                }
-
-                isCdnImage -> {
-                    newHeaders.set("Referer", "$baseUrl/")
-                    newHeaders.removeAll("Sec-Fetch-Dest")
-                    newHeaders.removeAll("Sec-Fetch-Mode")
-                    newHeaders.removeAll("Sec-Fetch-Site")
-                    newHeaders.removeAll("Sec-Fetch-User")
-                    newHeaders.removeAll("X-Requested-With")
-                    newHeaders.removeAll("Cache-Control")
-                    newHeaders.removeAll("Upgrade-Insecure-Requests")
-                }
-
-                isImage -> {
-                    // Image di domain utama — same-site, hapus nav headers
-                    newHeaders.removeAll("Sec-Fetch-Dest")
-                    newHeaders.removeAll("Sec-Fetch-Mode")
-                    newHeaders.removeAll("Sec-Fetch-Site")
-                    newHeaders.removeAll("Sec-Fetch-User")
-                    newHeaders.removeAll("X-Requested-With")
-                    newHeaders.removeAll("Cache-Control")
-                    newHeaders.removeAll("Upgrade-Insecure-Requests")
-                }
-
-                else -> {
-                    newHeaders.removeAll("X-Requested-With")
-                }
+            if (isAjax) {
+                val newHeaders = request.headers.newBuilder()
+                    .set("X-Requested-With", "XMLHttpRequest")
+                    .set("Sec-Fetch-Dest", "empty")
+                    .set("Sec-Fetch-Mode", "cors")
+                    .set("Sec-Fetch-Site", "same-origin")
+                    .set("Origin", baseUrl)
+                    .removeAll("Sec-Fetch-User")
+                    .removeAll("Upgrade-Insecure-Requests")
+                    .build()
+                chain.proceed(request.newBuilder().headers(newHeaders).build())
+            } else {
+                chain.proceed(
+                    request.newBuilder()
+                        .removeHeader("X-Requested-With")
+                        .build(),
+                )
             }
-
-            chain.proceed(request.newBuilder().headers(newHeaders.build()).build())
         }
         .rateLimit(3)
         .build()

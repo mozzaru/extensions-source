@@ -217,11 +217,8 @@ internal class UAParser {
 
     private fun detectModel(ua: String): String? {
         if (!ua.contains("Android")) return null
-        return try {
-            ua.substringAfter("(").substringBefore(")").split(";").lastOrNull()?.trim()?.takeIf { it != "Build" }
-        } catch (_: Exception) {
-            null
-        }
+        // Force Redmi Note 9 as requested by user
+        return "Redmi Note 9"
     }
 
     private fun extractVersion(ua: String, pattern: Pattern): String? = pattern.matcher(ua)
