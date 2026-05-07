@@ -8,6 +8,7 @@ import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
+import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import keiyoushi.lib.randomua.UserAgentType
@@ -109,6 +110,28 @@ class MGKomik :
         )
     }
 
+    override fun imageRequest(page: Page): Request {
+        val imageUrl = page.imageUrl ?: page.url
+        val imageHeaders = headersBuilder()
+            .set("Referer", "$baseUrl/")
+            .set("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
+            .removeAll("Sec-Fetch-Dest")
+            .removeAll("Sec-Fetch-Mode")
+            .removeAll("Sec-Fetch-Site")
+            .removeAll("Sec-Fetch-User")
+            .removeAll("Upgrade-Insecure-Requests")
+            .removeAll("Cache-Control")
+            .removeAll("Priority")
+            .removeAll("Sec-CH-UA-Arch")
+            .removeAll("Sec-CH-UA-Bitness")
+            .removeAll("Sec-CH-UA-Full-Version")
+            .removeAll("Sec-CH-UA-Full-Version-List")
+            .removeAll("Sec-CH-UA-Model")
+            .removeAll("Sec-CH-UA-Platform-Version")
+            .build()
+        return GET(imageUrl, imageHeaders)
+    }
+
     // =============================== Headers ================================
 
     private fun firstNavHeaders() = headers.newBuilder()
@@ -144,6 +167,7 @@ class MGKomik :
             val url = request.url
             val host = url.host
             val path = url.encodedPath
+            val segments = url.pathSegments
             val newHeaders = request.headers.newBuilder()
 
             val isAjax = path.contains("admin-ajax.php") ||
@@ -152,10 +176,13 @@ class MGKomik :
 
             val isImage = path.endsWith(".jpg") || path.endsWith(".jpeg") ||
                 path.endsWith(".png") || path.endsWith(".webp") ||
-                path.endsWith(".gif") || path.contains("/thumbs/")
+                path.endsWith(".gif") || path.contains("/thumbs/") ||
+                request.header("Accept")?.startsWith("image/") == true
 
             // CDN image — domain berbeda dari baseUrl
             val isCdnImage = isImage && !host.contains("mgkomik.cc")
+
+            val isReading = segments.size >= 4 && segments[0] == mangaSubString && segments[1] != "page"
 
             when {
                 isAjax -> {
@@ -185,19 +212,21 @@ class MGKomik :
                     newHeaders.removeAll("Sec-CH-UA-Platform-Version")
                 }
 
-                isImage -> {
-                    // Image di domain utama — same-site, hapus nav headers
-                    newHeaders.removeAll("Sec-Fetch-Dest")
-                    newHeaders.removeAll("Sec-Fetch-Mode")
-                    newHeaders.removeAll("Sec-Fetch-Site")
-                    newHeaders.removeAll("Sec-Fetch-User")
-                    newHeaders.removeAll("X-Requested-With")
-                    newHeaders.removeAll("Cache-Control")
-                    newHeaders.removeAll("Upgrade-Insecure-Requests")
+                isReading -> {
+                    // Keep X-Requested-With: com.android.chrome from headersBuilder to fix 403
                 }
 
                 else -> {
-                    // Navigation
+                    newHeaders.removeAll("X-Requested-With")
+                    if (isImage) {
+                        newHeaders.removeAll("Sec-Fetch-Dest")
+                        newHeaders.removeAll("Sec-Fetch-Mode")
+                        newHeaders.removeAll("Sec-Fetch-Site")
+                        newHeaders.removeAll("Sec-Fetch-User")
+                        newHeaders.removeAll("Upgrade-Insecure-Requests")
+                        newHeaders.removeAll("Cache-Control")
+                        newHeaders.removeAll("Priority")
+                    }
                 }
             }
 
@@ -208,25 +237,13 @@ class MGKomik :
 
     // =============================== Selectors ==============================
 
-    override fun popularMangaSelector() = "div.page-item-detail:not(:has(a[href*='bilibilicomics.com'])), .manga__item, .post-item, .c-tabs-item__content"
+    override fun popularMangaSelector() = "div.page-item-detail.manga"
 
-    override fun popularMangaFromElement(element: Element): SManga {
-        val manga = SManga.create()
-        val titleLink = element.selectFirst(".post-title a, .item-thumb a, a:has(h3), a.manga-title, .manga-name a")
-        if (titleLink != null) {
-            manga.setUrlWithoutDomain(titleLink.attr("abs:href"))
-            manga.title = titleLink.text().trim().takeIf { it.isNotBlank() }
-                ?: titleLink.attr("title").trim()
-        }
-        if (manga.title.isNullOrBlank()) {
-            manga.title = element.selectFirst("img")?.attr("alt")?.trim() ?: ""
-        }
-
-        val imageElement = element.selectFirst("img")
-        if (imageElement != null) {
-            manga.thumbnail_url = imageFromElement(imageElement)
-        }
-        return manga
+    override fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
+        val titleLink = element.selectFirst(".post-title a")
+        title = titleLink?.text()?.trim() ?: element.selectFirst("img")?.attr("alt")?.trim() ?: ""
+        setUrlWithoutDomain(titleLink?.attr("abs:href").orEmpty())
+        thumbnail_url = element.selectFirst("img")?.let { imageFromElement(it) }
     }
 
     override fun popularMangaNextPageSelector() = "div.wp-pagenavi a.page, div.wp-pagenavi a.last"
@@ -242,9 +259,7 @@ class MGKomik :
 
     override fun chapterFromElement(element: Element): SChapter = SChapter.create().apply {
         val urlElement = element.selectFirst(chapterUrlSelector)!!
-        url = urlElement.attr("abs:href").let {
-            it.substringBefore("?style=paged") + if (!it.endsWith(chapterUrlSuffix)) chapterUrlSuffix else ""
-        }
+        setUrlWithoutDomain(urlElement.attr("abs:href").substringBefore("?style=paged"))
         name = urlElement.text()
         date_upload = element.selectFirst("img:not(.thumb)")?.attr("alt")?.let { parseRelativeDate(it) }
             ?: element.selectFirst("span a")?.attr("title")?.let { parseRelativeDate(it) }
@@ -327,8 +342,9 @@ class MGKomik :
         override fun intercept(chain: Interceptor.Chain): Response {
             val originalRequest = chain.request()
             val userAgent = originalRequest.header("User-Agent")
+            val accept = originalRequest.header("Accept")
 
-            if (userAgent.isNullOrEmpty()) {
+            if (userAgent.isNullOrEmpty() || accept?.startsWith("image/") == true) {
                 return chain.proceed(originalRequest)
             }
 
@@ -351,6 +367,9 @@ class MGKomik :
                     secCHHeaders.secCHUAPlatformVersion?.let {
                         header("Sec-CH-UA-Platform-Version", "\"$it\"")
                     }
+                    secCHHeaders.secCHUAFullVersion?.let {
+                        header("Sec-CH-UA-Full-Version", "\"$it\"")
+                    }
                     secCHHeaders.secCHUAFullVersionList?.let {
                         header("Sec-CH-UA-Full-Version-List", it)
                     }
@@ -367,6 +386,7 @@ class MGKomik :
         val secCHUAPlatform: String,
         val secCHUAModel: String? = null,
         val secCHUAPlatformVersion: String? = null,
+        val secCHUAFullVersion: String? = null,
         val secCHUAFullVersionList: String? = null,
     )
 
@@ -375,8 +395,14 @@ class MGKomik :
         fun parseUAtoSecCH(ua: String): SecCHHeaders {
             val brands = mutableListOf<String>()
             val (platform, isMobile, platformVersion, model) = detectPlatform(ua)
-            detectBrowserBrands(ua, brands)
+
+            val fullVersion = extractVersion(ua, CHROME_FULL_VERSION_PATTERN) ?: (UNKNOWN_VERSION + ".0.0.0")
+            val majorVersion = fullVersion.substringBefore(".")
+
+            detectBrowserBrands(ua, brands, majorVersion)
             brands.add("\"Not.A/Brand\";v=\"$NOT_A_BRAND_VERSION\"")
+
+            val fullBrands = brands.map { it.replace(majorVersion, fullVersion) }
 
             return SecCHHeaders(
                 secCHUA = brands.joinToString(", "),
@@ -384,7 +410,8 @@ class MGKomik :
                 secCHUAPlatform = platform,
                 secCHUAModel = model,
                 secCHUAPlatformVersion = platformVersion,
-                secCHUAFullVersionList = brands.joinToString(", "),
+                secCHUAFullVersion = fullVersion,
+                secCHUAFullVersionList = fullBrands.joinToString(", "),
             )
         }
 
@@ -419,35 +446,28 @@ class MGKomik :
             return model
         }
 
-        private fun detectBrowserBrands(ua: String, brands: MutableList<String>) {
+        private fun detectBrowserBrands(ua: String, brands: MutableList<String>, version: String) {
             when {
                 ua.contains("Edg/") -> {
-                    val version = extractVersion(ua, EDGE_VERSION_PATTERN) ?: UNKNOWN_VERSION
-                    val chromeVersion = extractVersion(ua, CHROME_VERSION_PATTERN) ?: UNKNOWN_VERSION
-                    brands.add("\"Chromium\";v=\"$chromeVersion\"")
+                    brands.add("\"Chromium\";v=\"$version\"")
                     brands.add("\"Microsoft Edge\";v=\"$version\"")
                 }
                 ua.contains("OPR/") -> {
-                    val version = extractVersion(ua, OPERA_VERSION_PATTERN) ?: UNKNOWN_VERSION
-                    val chromeVersion = extractVersion(ua, CHROME_VERSION_PATTERN) ?: UNKNOWN_VERSION
-                    brands.add("\"Chromium\";v=\"$chromeVersion\"")
+                    brands.add("\"Chromium\";v=\"$version\"")
                     brands.add("\"Opera\";v=\"$version\"")
                 }
                 ua.contains("Chrome") -> {
-                    val version = extractVersion(ua, CHROME_VERSION_PATTERN) ?: UNKNOWN_VERSION
                     brands.add("\"Chromium\";v=\"$version\"")
                     brands.add("\"Google Chrome\";v=\"$version\"")
                 }
                 ua.contains("Firefox") -> {
-                    val version = extractVersion(ua, FIREFOX_VERSION_PATTERN) ?: UNKNOWN_VERSION
                     brands.add("\"Firefox\";v=\"$version\"")
                 }
                 ua.contains("Safari") -> {
-                    val version = extractVersion(ua, SAFARI_VERSION_PATTERN) ?: UNKNOWN_VERSION
                     brands.add("\"Safari\";v=\"$version\"")
                 }
                 else -> {
-                    brands.add("\"Chromium\";v=\"$UNKNOWN_VERSION\"")
+                    brands.add("\"Chromium\";v=\"$version\"")
                 }
             }
         }
@@ -464,17 +484,13 @@ class MGKomik :
         )
 
         companion object {
-            private const val UNKNOWN_VERSION = "133"
+            private const val UNKNOWN_VERSION = "147"
             private const val NOT_A_BRAND_VERSION = "8"
             private val MAC_OS_VERSION_PATTERN = Pattern.compile("Mac OS X (\\d+[._]\\d+)")
             private val ANDROID_VERSION_PATTERN = Pattern.compile("Android (\\d+)")
             private val ANDROID_MODEL_PATTERN = Pattern.compile("; ([^;)]+?)(?: Build/|\\)|;)")
             private val IOS_VERSION_PATTERN = Pattern.compile("OS (\\d+[._]\\d+)")
-            private val EDGE_VERSION_PATTERN = Pattern.compile("Edg/(\\d+)")
-            private val OPERA_VERSION_PATTERN = Pattern.compile("OPR/(\\d+)")
-            private val CHROME_VERSION_PATTERN = Pattern.compile("Chrome/(\\d+)")
-            private val FIREFOX_VERSION_PATTERN = Pattern.compile("Firefox/(\\d+)")
-            private val SAFARI_VERSION_PATTERN = Pattern.compile("Version/(\\d+)")
+            private val CHROME_FULL_VERSION_PATTERN = Pattern.compile("Chrome/([\\d.]+)")
         }
     }
 }
