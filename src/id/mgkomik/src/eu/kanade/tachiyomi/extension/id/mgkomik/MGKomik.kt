@@ -32,6 +32,7 @@ class MGKomik :
     override val useLoadMoreRequest = LoadMoreStrategy.Never
     override val useNewChapterEndpoint = true
     override val mangaSubString = "komik"
+    override val chapterUrlSuffix = ""
 
     // =============================== Requests ===============================
 
@@ -39,14 +40,14 @@ class MGKomik :
         val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
             .addQueryParameter("m_orderby", "trending")
             .build()
-        return GET(url, firstNavHeaders())
+        return GET(url, listingHeaders())
     }
 
     override fun latestUpdatesRequest(page: Int): Request {
         val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
             .addQueryParameter("m_orderby", "latest")
             .build()
-        return GET(url, firstNavHeaders())
+        return GET(url, listingHeaders())
     }
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request = if (query.isNotBlank()) {
@@ -59,7 +60,7 @@ class MGKomik :
                 else -> {}
             }
         }
-        GET(url.build(), firstNavHeaders())
+        GET(url.build(), listingHeaders())
     }
 
     override fun mangaDetailsRequest(manga: SManga): Request = super.mangaDetailsRequest(manga).addSameOriginNavHeaders()
@@ -69,7 +70,7 @@ class MGKomik :
     override fun genresRequest(): Request = super.genresRequest().addSameOriginNavHeaders()
 
     override fun xhrChaptersRequest(mangaUrl: String): Request = POST(
-        "$mangaUrl/ajax/chapters/",
+        "${mangaUrl.trimEnd('/')}/ajax/chapters/",
         headers.newBuilder()
             .set("Referer", mangaUrl)
             .set("X-Requested-With", "XMLHttpRequest")
@@ -86,12 +87,13 @@ class MGKomik :
         val chapterUrl = chapter.url.let {
             if (it.startsWith("http")) it else "$baseUrl$it"
         }
-        val mangaUrl = chapterUrl.trimEnd('/')
+        val cleanChapterUrl = chapterUrl.substringBefore("?")
+        val mangaUrl = cleanChapterUrl.trimEnd('/')
             .substringBeforeLast("/")
             .trimEnd('/') + "/"
 
         return GET(
-            chapterUrl,
+            cleanChapterUrl,
             headers.newBuilder()
                 .set("Referer", mangaUrl)
                 .set("Cache-Control", "max-age=0")
@@ -127,12 +129,12 @@ class MGKomik :
 
     // =============================== Headers ================================
 
-    private fun firstNavHeaders() = headers.newBuilder()
-        .removeAll("Referer")
+    private fun listingHeaders() = headers.newBuilder()
+        .set("Referer", "$baseUrl/")
         .set("Cache-Control", "max-age=0")
         .set("Sec-Fetch-Dest", "document")
         .set("Sec-Fetch-Mode", "navigate")
-        .set("Sec-Fetch-Site", "none")
+        .set("Sec-Fetch-Site", "same-origin")
         .set("Sec-Fetch-User", "?1")
         .build()
 
@@ -174,11 +176,7 @@ class MGKomik :
                     .build()
                 chain.proceed(request.newBuilder().headers(newHeaders).build())
             } else {
-                chain.proceed(
-                    request.newBuilder()
-                        .removeHeader("X-Requested-With")
-                        .build(),
-                )
+                chain.proceed(request.newBuilder().removeHeader("X-Requested-With").build())
             }
         }
         .rateLimit(3)
@@ -216,14 +214,6 @@ class MGKomik :
             return parseRelativeDate(trimmed)
         }
 
-        if (trimmed.equals("hari ini", ignoreCase = true)) {
-            return parseRelativeDate("0 hours ago")
-        }
-
-        if (trimmed.equals("kemarin", ignoreCase = true)) {
-            return parseRelativeDate("1 day ago")
-        }
-
         val formats = listOf(
             SimpleDateFormat("dd MMM yy", Locale.US),
             SimpleDateFormat("dd MMM yyyy", Locale.US),
@@ -240,20 +230,6 @@ class MGKomik :
         }
 
         return super.parseChapterDate(trimmed)
-    }
-
-    // ================================ Utils =================================
-
-    override fun getMangaUrl(manga: SManga): String = when {
-        manga.url.startsWith("http") -> manga.url
-        manga.url.startsWith("//") -> "https:${manga.url}"
-        else -> "$baseUrl${manga.url}"
-    }
-
-    override fun getChapterUrl(chapter: SChapter): String = when {
-        chapter.url.startsWith("http") -> chapter.url
-        chapter.url.startsWith("//") -> "https:${chapter.url}"
-        else -> "$baseUrl${chapter.url}"
     }
 
     // ================================ Filters ===============================
@@ -286,6 +262,8 @@ class MGKomik :
         add(Genre("All", ""))
         addAll(document.select(".row.genres li a").map { Genre(it.text(), it.absUrl("href")) })
     }
+
+    override fun getMangaUrl(manga: SManga): String = "$baseUrl${manga.url}"
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         screen.addRandomUAPreference()

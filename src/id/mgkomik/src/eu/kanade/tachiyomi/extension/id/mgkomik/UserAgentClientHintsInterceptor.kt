@@ -55,6 +55,9 @@ class UserAgentClientHintsInterceptor : Interceptor {
                 secCHHeaders.secCHUAFullVersionList?.let {
                     header("Sec-CH-UA-Full-Version-List", it)
                 }
+                secCHHeaders.secCHUAFullVersion?.let {
+                    header("Sec-CH-UA-Full-Version", "\"$it\"")
+                }
             }
             .build()
 
@@ -74,6 +77,7 @@ internal data class SecCHHeaders(
     val secCHUAModel: String? = null,
     val secCHUAPlatformVersion: String? = null,
     val secCHUAFullVersionList: String? = null,
+    val secCHUAFullVersion: String? = null,
 )
 
 /**
@@ -83,7 +87,7 @@ internal class UAParser {
 
     companion object {
         private val ANDROID_VERSION_PATTERN = Pattern.compile("Android (\\d+)")
-        private val CHROME_VERSION_PATTERN = Pattern.compile("Chrome/(\\d+)")
+        private val CHROME_VERSION_PATTERN = Pattern.compile("Chrome/(\\d+)\\.(\\d+)\\.(\\d+)\\.(\\d+)")
     }
 
     fun parseUAtoSecCH(ua: String): SecCHHeaders {
@@ -98,9 +102,25 @@ internal class UAParser {
             else -> "\"Android\""
         }
 
-        val chromeVersion = extractVersion(ua, CHROME_VERSION_PATTERN) ?: "147"
-        brands.add("\"Chromium\";v=\"$chromeVersion\"")
+        val chromeMatcher = CHROME_VERSION_PATTERN.matcher(ua)
+        val (major, full) = if (chromeMatcher.find()) {
+            chromeMatcher.group(1)!! to chromeMatcher.group(0)!!.substringAfter("/")
+        } else {
+            "147" to "147.0.7727.93"
+        }
+
+        brands.add("\"Chromium\";v=\"$major\"")
         brands.add("\"Not.A/Brand\";v=\"8\"")
+
+        val fullVersionList = brands.map { brand ->
+            if (brand.contains("Chromium")) {
+                "\"Chromium\";v=\"$full\""
+            } else if (brand.contains("Not.A/Brand")) {
+                "\"Not.A/Brand\";v=\"8.0.0.0\""
+            } else {
+                brand
+            }
+        }.joinToString(", ")
 
         val model = if (ua.contains("Android")) {
             ua.substringAfter("(").substringBefore(")").split(";").lastOrNull()?.trim()?.takeIf { it != "Build" && it != "K" }
@@ -109,7 +129,10 @@ internal class UAParser {
         }
 
         val platformVersion = when {
-            ua.contains("Android") -> extractVersion(ua, ANDROID_VERSION_PATTERN)
+            ua.contains("Android") -> {
+                val m = ANDROID_VERSION_PATTERN.matcher(ua)
+                if (m.find()) "${m.group(1)}.0.0" else "11.0.0"
+            }
             ua.contains("Windows NT 10.0") -> "10.0.0"
             else -> null
         }
@@ -120,11 +143,8 @@ internal class UAParser {
             secCHUAPlatform = platform,
             secCHUAModel = model,
             secCHUAPlatformVersion = platformVersion,
-            secCHUAFullVersionList = brands.joinToString(", "),
+            secCHUAFullVersionList = fullVersionList,
+            secCHUAFullVersion = full,
         )
     }
-
-    private fun extractVersion(ua: String, pattern: Pattern): String? = pattern.matcher(ua)
-        .takeIf { it.find() }
-        ?.group(1)
 }
