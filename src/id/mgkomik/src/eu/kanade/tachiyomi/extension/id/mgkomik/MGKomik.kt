@@ -27,7 +27,7 @@ import java.util.regex.Pattern
 class MGKomik :
     Madara(
         "MG Komik",
-        "https://web.mgkomik.cc",
+        "https://id.mgkomik.cc",
         "id",
         SimpleDateFormat("dd MMM yy", Locale.US),
     ),
