@@ -206,12 +206,12 @@ class MGKomik :
         .rateLimit(3)
         .build()
 
-    override fun popularMangaSelector() = "div.page-item-detail.manga"
+    override fun popularMangaSelector() = "div.page-item-detail, .manga__item, .post-item, .c-tabs-item__content"
 
     override fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
-        val titleLink = element.selectFirst(".post-title a")
+        val titleLink = element.selectFirst(".post-title a, .manga__title a, .post_title a, h3 a")
         title = titleLink?.text()?.trim() ?: element.selectFirst("img")?.attr("alt")?.trim() ?: ""
-        setUrlWithoutDomain(titleLink?.attr("abs:href").orEmpty())
+        setUrlWithoutDomain(titleLink?.attr("abs:href") ?: element.selectFirst("a")?.attr("abs:href") ?: "")
         thumbnail_url = element.selectFirst("img")?.let { imageFromElement(it) }
     }
 
