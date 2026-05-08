@@ -50,17 +50,34 @@ class MGKomik :
         return GET(url, listingHeaders())
     }
 
-    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request = if (query.isNotBlank()) {
-        super.searchMangaRequest(page, query, filters).addSameOriginNavHeaders()
-    } else {
+    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
+        if (query.isNotBlank()) {
+            val request = super.searchMangaRequest(page, query, filters)
+            val urlBuilder = request.url.newBuilder()
+            filters.filterIsInstance<GenreContentFilter>().firstOrNull()?.let {
+                if (it.state != 0) {
+                    urlBuilder.addQueryParameter("genre[]", it.toUriPart())
+                }
+            }
+            return request.newBuilder().url(urlBuilder.build()).build().addSameOriginNavHeaders()
+        }
+
         val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
         filters.forEach { filter ->
             when (filter) {
                 is OrderByFilter -> if (filter.state != 0) url.addQueryParameter("m_orderby", filter.toUriPart())
+                is GenreContentFilter -> if (filter.state != 0) url.addQueryParameter("genre[]", filter.toUriPart())
+                is StatusFilter -> filter.state.filter { it.state }.forEach { url.addQueryParameter("status[]", it.id) }
+                is GenreList -> filter.state.filter { it.state }.forEach { url.addQueryParameter("genre[]", it.id) }
+                is AuthorFilter -> if (filter.state.isNotBlank()) url.addQueryParameter("author", filter.state)
+                is ArtistFilter -> if (filter.state.isNotBlank()) url.addQueryParameter("artist", filter.state)
+                is YearFilter -> if (filter.state.isNotBlank()) url.addQueryParameter("release", filter.state)
+                is AdultContentFilter -> if (filter.state != 0) url.addQueryParameter("adult", filter.toUriPart())
+                is GenreConditionFilter -> url.addQueryParameter("op", filter.toUriPart())
                 else -> {}
             }
         }
-        GET(url.build(), listingHeaders())
+        return GET(url.build(), listingHeaders())
     }
 
     override fun mangaDetailsRequest(manga: SManga): Request = super.mangaDetailsRequest(manga).addSameOriginNavHeaders()
@@ -239,18 +256,18 @@ class MGKomik :
         launchIO { fetchGenres() }
 
         val filters = super.getFilterList().list.toMutableList()
-        filters += if (genresList.isNotEmpty()) {
-            listOf(
+        if (genresList.isNotEmpty()) {
+            filters += listOf(
                 Filter.Separator(),
                 GenreContentFilter(
-                    title = "Genre",
+                    title = intl["genre_filter_title"],
                     options = genresList.map { it.name to it.id },
                 ),
             )
-        } else {
-            listOf(
+        } else if (fetchGenres) {
+            filters += listOf(
                 Filter.Separator(),
-                Filter.Header("Press 'Filter' to show genres"),
+                Filter.Header(intl["genre_missing_warning"]),
             )
         }
 
@@ -261,7 +278,12 @@ class MGKomik :
 
     override fun parseGenres(document: Document): List<Genre> = buildList {
         add(Genre("All", ""))
-        addAll(document.select(".row.genres li a").map { Genre(it.text(), it.absUrl("href")) })
+        addAll(
+            document.select(".row.genres li a").map {
+                val id = it.absUrl("href").removeSuffix("/").substringAfterLast("/")
+                Genre(it.text(), id)
+            },
+        )
     }
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
