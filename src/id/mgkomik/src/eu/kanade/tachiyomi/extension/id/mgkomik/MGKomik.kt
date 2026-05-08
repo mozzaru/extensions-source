@@ -255,10 +255,38 @@ class MGKomik :
     override fun getFilterList(): FilterList {
         launchIO { fetchGenres() }
 
-        val filters = super.getFilterList().list.toMutableList()
+        val filters = super.getFilterList().list.filterNot {
+            it is AuthorFilter || it is ArtistFilter || it is YearFilter ||
+                it is StatusFilter || it is OrderByFilter || it is AdultContentFilter ||
+                it is GenreConditionFilter || it is GenreList
+        }.toMutableList()
+
+        filters += listOf(
+            AuthorFilter(intl["author_filter_title"]),
+            ArtistFilter(intl["artist_filter_title"]),
+            YearFilter(intl["year_filter_title"]),
+            StatusFilter(
+                title = intl["status_filter_title"],
+                status = statusFilterOptions.map { Tag(it.key, it.value) },
+            ),
+            OrderByFilter(
+                title = intl["order_by_filter_title"],
+                options = orderByFilterOptions.toList(),
+            ),
+            AdultContentFilter(
+                title = intl["adult_content_filter_title"],
+                options = adultContentFilterOptions.toList(),
+            ),
+        )
+
         if (genresList.isNotEmpty()) {
             filters += listOf(
                 Filter.Separator(),
+                Filter.Header(intl["genre_filter_header"]),
+                GenreConditionFilter(
+                    title = intl["genre_condition_filter_title"],
+                    options = genreConditionFilterOptions.toList(),
+                ),
                 GenreContentFilter(
                     title = intl["genre_filter_title"],
                     options = genresList.map { it.name to it.id },
