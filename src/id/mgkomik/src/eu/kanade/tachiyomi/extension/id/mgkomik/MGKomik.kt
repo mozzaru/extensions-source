@@ -11,8 +11,10 @@ import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
+import keiyoushi.lib.randomua.UserAgentType
 import keiyoushi.lib.randomua.addRandomUAPreference
 import keiyoushi.lib.randomua.setRandomUserAgent
+import keiyoushi.utils.getPreferences
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import org.jsoup.nodes.Document
@@ -148,7 +150,16 @@ class MGKomik :
         set("Accept-Language", "id-ID,id;q=0.9")
         set("Upgrade-Insecure-Requests", "1")
         set("Priority", "u=0, i")
-        setRandomUserAgent()
+
+        val preferences = getPreferences()
+        val randomUaPref = preferences.getString("pref_key_random_ua_", "off")
+        val customUa = preferences.getString("pref_key_custom_ua_", null)
+
+        if (randomUaPref == "off" && customUa.isNullOrBlank()) {
+            setRandomUserAgent(UserAgentType.MOBILE)
+        } else {
+            setRandomUserAgent()
+        }
     }
 
     override val client = network.cloudflareClient.newBuilder()
