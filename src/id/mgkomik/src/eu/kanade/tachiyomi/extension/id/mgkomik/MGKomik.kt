@@ -11,6 +11,7 @@ import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
+import keiyoushi.lib.clienthints.ClientHintsInterceptor
 import keiyoushi.lib.randomua.UserAgentType
 import keiyoushi.lib.randomua.addRandomUAPreference
 import keiyoushi.lib.randomua.setRandomUserAgent
@@ -180,7 +181,7 @@ class MGKomik :
     }
 
     override val client = network.cloudflareClient.newBuilder()
-        .addInterceptor(UserAgentClientHintsInterceptor())
+        .addInterceptor(ClientHintsInterceptor())
         .addInterceptor { chain ->
             val request = chain.request()
             val path = request.url.encodedPath
