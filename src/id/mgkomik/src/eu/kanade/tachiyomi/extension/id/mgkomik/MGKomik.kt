@@ -4,16 +4,18 @@ import eu.kanade.tachiyomi.multisrc.madara.Madara
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
-import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
+import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
+import eu.kanade.tachiyomi.util.asJsoup
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.FormBody
 import okhttp3.Request
+import okhttp3.Response
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
-import java.text.ParseException
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -33,52 +35,45 @@ class MGKomik :
         val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
             .addQueryParameter("m_orderby", "trending")
             .build()
-        return GET(url, listingHeaders())
+        return GET(url, navHeaders())
     }
 
     override fun latestUpdatesRequest(page: Int): Request {
-        val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
-            .addQueryParameter("m_orderby", "latest")
+        val formBody = FormBody.Builder()
+            .add("action", "madara_load_more")
+            .add("template", "madara-core/content/content-archive")
+            .add("page", (page - 1).toString())
+            .add("vars[paged]", "1")
+            .add("vars[orderby]", "meta_value_num")
+            .add("vars[meta_key]", "_latest_update")
+            .add("vars[post_type]", "wp-manga")
+            .add("vars[posts_per_page]", "20")
             .build()
-        return GET(url, listingHeaders())
-    }
-
-    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request = if (query.isNotBlank()) {
-        super.searchMangaRequest(page, query, filters).addSameOriginNavHeaders()
-    } else {
-        val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
-        filters.forEach { filter ->
-            when (filter) {
-                is OrderByFilter -> if (filter.state != 0) url.addQueryParameter("m_orderby", filter.toUriPart())
-                else -> {}
-            }
-        }
-        GET(url.build(), listingHeaders())
-    }
-
-    override fun mangaDetailsRequest(manga: SManga): Request =
-        super.mangaDetailsRequest(manga).addSameOriginNavHeaders()
-
-    override fun chapterListRequest(manga: SManga): Request =
-        super.chapterListRequest(manga).addSameOriginNavHeaders()
-
-    override fun genresRequest(): Request =
-        super.genresRequest().addSameOriginNavHeaders()
-
-    override fun xhrChaptersRequest(mangaUrl: String): Request =
-        POST(
-            "$mangaUrl/ajax/chapters/",
-            headers.newBuilder()
-                .set("Referer", mangaUrl)
-                .set("X-Requested-With", "XMLHttpRequest")
-                .set("Sec-Fetch-Dest", "empty")
-                .set("Sec-Fetch-Mode", "cors")
-                .set("Sec-Fetch-Site", "same-origin")
-                .set("Origin", baseUrl)
-                .removeAll("Sec-Fetch-User")
-                .removeAll("Upgrade-Insecure-Requests")
-                .build(),
+        return POST(
+            "$baseUrl/wp-admin/admin-ajax.php",
+            xhrHeaders,
+            formBody,
         )
+    }
+
+    override fun latestUpdatesParse(response: Response): MangasPage {
+        val document = response.asJsoup(response.body.string().trim())
+        val mangas = document.select("div.page-item-detail.manga").map { element: Element ->
+            popularMangaFromElement(element)
+        }
+        val hasNextPage = mangas.size == 20
+        return MangasPage(mangas, hasNextPage)
+    }
+
+    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request = super.searchMangaRequest(page, query, filters).addSameOriginNavHeaders()
+
+    override fun mangaDetailsRequest(manga: SManga): Request = super.mangaDetailsRequest(manga).addSameOriginNavHeaders()
+
+    override fun chapterListRequest(manga: SManga): Request = super.chapterListRequest(manga).addSameOriginNavHeaders()
+
+    override fun genresRequest(): Request = super.genresRequest().addSameOriginNavHeaders()
+
+    override fun xhrChaptersRequest(mangaUrl: String): Request = POST("$mangaUrl/ajax/chapters/", xhrHeaders)
 
     override fun pageListRequest(chapter: SChapter): Request {
         val chapterUrl = chapter.url.let {
@@ -89,43 +84,30 @@ class MGKomik :
             .substringBeforeLast("/")
             .trimEnd('/') + "/"
 
-        return GET(
-            cleanChapterUrl,
-            headers.newBuilder()
-                .set("Referer", mangaUrl)
-                .set("Cache-Control", "max-age=0")
-                .set("Sec-Fetch-Dest", "document")
-                .set("Sec-Fetch-Mode", "navigate")
-                .set("Sec-Fetch-Site", "same-origin")
-                .set("Sec-Fetch-User", "?1")
-                .build(),
-        )
+        return GET(cleanChapterUrl, navHeaders(referer = mangaUrl))
     }
 
     override fun imageRequest(page: Page): Request {
         val imageUrl = page.imageUrl ?: page.url
-        val imageHeaders = headersBuilder()
-            .set("Referer", "$baseUrl/")
-            .set("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
-            .removeAll("Sec-Fetch-Dest")
-            .removeAll("Sec-Fetch-Mode")
-            .removeAll("Sec-Fetch-Site")
-            .removeAll("Sec-Fetch-User")
-            .removeAll("Upgrade-Insecure-Requests")
-            .removeAll("Cache-Control")
-            .removeAll("Priority")
-            .removeAll("Sec-CH-UA-Arch")
-            .removeAll("Sec-CH-UA-Bitness")
-            .removeAll("Sec-CH-UA-Full-Version")
-            .removeAll("Sec-CH-UA-Full-Version-List")
-            .removeAll("Sec-CH-UA-Model")
-            .removeAll("Sec-CH-UA-Platform-Version")
-            .build()
-        return GET(imageUrl, imageHeaders)
+        return GET(
+            imageUrl,
+            headersBuilder()
+                .set("Referer", "$baseUrl/")
+                .set("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
+                .removeAll("Sec-CH-UA-Arch")
+                .removeAll("Sec-CH-UA-Bitness")
+                .removeAll("Sec-CH-UA-Full-Version")
+                .removeAll("Sec-CH-UA-Full-Version-List")
+                .removeAll("Sec-CH-UA-Model")
+                .removeAll("Sec-CH-UA-Platform-Version")
+                .removeAll("Upgrade-Insecure-Requests")
+                .removeAll("Priority")
+                .build(),
+        )
     }
 
-    private fun listingHeaders() = headers.newBuilder()
-        .set("Referer", "$baseUrl/")
+    private fun navHeaders(referer: String = "$baseUrl/") = headers.newBuilder()
+        .set("Referer", referer)
         .set("Cache-Control", "max-age=0")
         .set("Sec-Fetch-Dest", "document")
         .set("Sec-Fetch-Mode", "navigate")
@@ -134,12 +116,7 @@ class MGKomik :
         .build()
 
     private fun Request.addSameOriginNavHeaders(): Request = newBuilder()
-        .header("Referer", "$baseUrl/$mangaSubString/")
-        .header("Cache-Control", "max-age=0")
-        .header("Sec-Fetch-Dest", "document")
-        .header("Sec-Fetch-Mode", "navigate")
-        .header("Sec-Fetch-Site", "same-origin")
-        .header("Sec-Fetch-User", "?1")
+        .headers(navHeaders(referer = "$baseUrl/$mangaSubString/"))
         .build()
 
     override fun headersBuilder() = super.headersBuilder().apply {
@@ -152,7 +129,7 @@ class MGKomik :
         set("Sec-CH-UA-Full-Version", "\"$CH_VERSION.0.7727.93\"")
         set("Sec-CH-UA-Full-Version-List", "\"Chromium\";v=\"$CH_VERSION.0.7727.93\", \"Not.A/Brand\";v=\"8.0.0.0\"")
         set("Sec-CH-UA-Mobile", "?1")
-        set("Sec-CH-UA-Model", "\"RMX2103\"")
+        set("Sec-CH-UA-Model", "\"\"")
         set("Sec-CH-UA-Platform", "\"Android\"")
         set("Sec-CH-UA-Platform-Version", "\"11.0.0\"")
         set("Upgrade-Insecure-Requests", "1")
@@ -168,16 +145,17 @@ class MGKomik :
                 path.contains("/ajax/")
 
             if (isAjax) {
-                val newHeaders = request.headers.newBuilder()
-                    .set("X-Requested-With", "XMLHttpRequest")
-                    .set("Sec-Fetch-Dest", "empty")
-                    .set("Sec-Fetch-Mode", "cors")
-                    .set("Sec-Fetch-Site", "same-origin")
-                    .set("Origin", baseUrl)
-                    .removeAll("Sec-Fetch-User")
-                    .removeAll("Upgrade-Insecure-Requests")
-                    .build()
-                chain.proceed(request.newBuilder().headers(newHeaders).build())
+                chain.proceed(
+                    request.newBuilder()
+                        .header("X-Requested-With", "XMLHttpRequest")
+                        .header("Sec-Fetch-Dest", "empty")
+                        .header("Sec-Fetch-Mode", "cors")
+                        .header("Sec-Fetch-Site", "same-origin")
+                        .header("Origin", baseUrl)
+                        .removeHeader("Sec-Fetch-User")
+                        .removeHeader("Upgrade-Insecure-Requests")
+                        .build(),
+                )
             } else {
                 chain.proceed(request.newBuilder().removeHeader("X-Requested-With").build())
             }
@@ -209,57 +187,91 @@ class MGKomik :
         date ?: return 0L
         val trimmed = date.trim()
 
-        if (trimmed.contains("ago", ignoreCase = true) || trimmed.contains("yang lalu", ignoreCase = true)) {
+        if (trimmed.contains("yang lalu", ignoreCase = true)) {
             return parseRelativeDate(trimmed)
-        }
-
-        val formats = listOf(
-            SimpleDateFormat("dd MMM yy", Locale.US),
-            SimpleDateFormat("dd MMM yyyy", Locale.US),
-            SimpleDateFormat("dd/MM/yyyy", Locale.US),
-            SimpleDateFormat("yyyy-MM-dd", Locale.US),
-            SimpleDateFormat("MMMM d, yyyy", Locale.US),
-        )
-
-        for (sdf in formats) {
-            try {
-                sdf.isLenient = false
-                sdf.parse(trimmed)?.let { return it.time }
-            } catch (_: ParseException) {}
         }
 
         return super.parseChapterDate(trimmed)
     }
 
     override fun getFilterList(): FilterList {
-        launchIO { fetchGenres() }
-
         val filters = super.getFilterList().list.toMutableList()
-        filters += if (genresList.isNotEmpty()) {
-            listOf(
-                Filter.Separator(),
-                GenreContentFilter(
-                    title = intl["genre_filter_title"],
-                    options = genresList.map { it.name to it.id },
-                ),
-            )
-        } else {
-            listOf(
-                Filter.Separator(),
-                Filter.Header(intl["genre_missing_warning"]),
-            )
-        }
-
         return FilterList(filters)
     }
 
-    private class GenreContentFilter(title: String, options: List<Pair<String, String>>) :
-        UriPartFilter(title, options.toTypedArray())
-
-    override fun parseGenres(document: Document): List<Genre> = buildList {
-        add(Genre("All", ""))
-        addAll(document.select(".row.genres li a").map { Genre(it.text(), it.absUrl("href")) })
-    }
+    override fun parseGenres(document: Document): List<Genre> = listOf(
+        Genre("Action", "action"),
+        Genre("Adaptation", "adaptation"),
+        Genre("Adult", "adult"),
+        Genre("Adventure", "adventure"),
+        Genre("Animals", "animals"),
+        Genre("Apocalypse", "apocalypse"),
+        Genre("Comedy", "comedy"),
+        Genre("Cooking", "cooking"),
+        Genre("Crime", "crime"),
+        Genre("Demons", "demons"),
+        Genre("Drama", "drama"),
+        Genre("Dungeons", "dungeons"),
+        Genre("Ecchi", "ecchi"),
+        Genre("Fantasy", "fantasy"),
+        Genre("Fighting", "fighting"),
+        Genre("Full Color", "full-color"),
+        Genre("Game", "game"),
+        Genre("Gender Bender", "gender-bender"),
+        Genre("Gore", "gore"),
+        Genre("Harem", "harem"),
+        Genre("Historical", "historical"),
+        Genre("Horror", "horror"),
+        Genre("Isekai", "isekai"),
+        Genre("Josei", "josei"),
+        Genre("Kids", "kids"),
+        Genre("Magic", "magic"),
+        Genre("Manga", "manga"),
+        Genre("Manhua", "manhua"),
+        Genre("Manhwa", "manhwa"),
+        Genre("Martial Arts", "martial-arts"),
+        Genre("Mature", "mature"),
+        Genre("Mecha", "mecha"),
+        Genre("Medical", "medical"),
+        Genre("Military", "military"),
+        Genre("Monsters", "monsters"),
+        Genre("Murim", "murim"),
+        Genre("Music", "music"),
+        Genre("Mystery", "mystery"),
+        Genre("Office Workers", "office-workers"),
+        Genre("One-Shot", "one-shot"),
+        Genre("Overpowered", "overpowered"),
+        Genre("Psychological", "psychological"),
+        Genre("Regression", "regression"),
+        Genre("Reincarnation", "reincarnation"),
+        Genre("Revenge", "revenge"),
+        Genre("Reverse Harem", "reverse-harem"),
+        Genre("Romance", "romance"),
+        Genre("School Life", "school-life"),
+        Genre("Sci-fi", "sci-fi"),
+        Genre("Seinen", "seinen"),
+        Genre("Shoujo", "shoujo"),
+        Genre("Shoujo AI", "shouai"),
+        Genre("Shounen", "shounen"),
+        Genre("Slice of Life", "slice-of-life"),
+        Genre("Smut", "smut"),
+        Genre("Sports", "sports"),
+        Genre("Super Power", "super-power"),
+        Genre("Superhero", "superhero"),
+        Genre("Supernatural", "supernatural"),
+        Genre("Survival", "survival"),
+        Genre("System", "system"),
+        Genre("Thriller", "thriller"),
+        Genre("Time Travel", "time-travel"),
+        Genre("Tragedy", "tragedy"),
+        Genre("Transmigration", "transmigration"),
+        Genre("Vampire", "vampire"),
+        Genre("Violence", "violence"),
+        Genre("War", "war"),
+        Genre("Webtoon", "webtoon"),
+        Genre("Wuxia", "wuxia"),
+        Genre("Yuri", "yuri"),
+    )
 
     companion object {
         private const val CH_VERSION = "147"
