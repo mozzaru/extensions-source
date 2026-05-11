@@ -18,6 +18,7 @@ import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.text.SimpleDateFormat
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 class MGKomik :
     Madara(
@@ -65,13 +66,49 @@ class MGKomik :
         return MangasPage(mangas, hasNextPage)
     }
 
-    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request = super.searchMangaRequest(page, query, filters).addSameOriginNavHeaders()
+    override fun headersBuilder() = super.headersBuilder().apply {
+        set("User-Agent", USER_AGENT)
+        set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
+        set("Accept-Language", "id-ID,id;q=0.9")
+        set("Sec-CH-UA", "\"Chromium\";v=\"$CH_VERSION\", \"Not.A/Brand\";v=\"8\"")
+        set("Sec-CH-UA-Arch", "\"\"")
+        set("Sec-CH-UA-Bitness", "\"\"")
+        set("Sec-CH-UA-Full-Version", "\"$CH_VERSION.0.7727.93\"")
+        set("Sec-CH-UA-Full-Version-List", "\"Chromium\";v=\"$CH_VERSION.0.7727.93\", \"Not.A/Brand\";v=\"8.0.0.0\"")
+        set("Sec-CH-UA-Mobile", "?1")
+        set("Sec-CH-UA-Model", "\"\"")
+        set("Sec-CH-UA-Platform", "\"Android\"")
+        set("Sec-CH-UA-Platform-Version", "\"11.0.0\"")
+        set("Upgrade-Insecure-Requests", "1")
+        set("Priority", "u=0, i")
+    }
 
-    override fun mangaDetailsRequest(manga: SManga): Request = super.mangaDetailsRequest(manga).addSameOriginNavHeaders()
+    override val client = network.cloudflareClient.newBuilder()
+        .addInterceptor { chain ->
+            val request = chain.request()
+            val path = request.url.encodedPath
+            val isAjax = path.contains("admin-ajax.php") ||
+                path.contains("wp-json") ||
+                path.contains("/ajax/")
 
-    override fun chapterListRequest(manga: SManga): Request = super.chapterListRequest(manga).addSameOriginNavHeaders()
-
-    override fun genresRequest(): Request = super.genresRequest().addSameOriginNavHeaders()
+            if (isAjax) {
+                chain.proceed(
+                    request.newBuilder()
+                        .header("X-Requested-With", "XMLHttpRequest")
+                        .header("Sec-Fetch-Dest", "empty")
+                        .header("Sec-Fetch-Mode", "cors")
+                        .header("Sec-Fetch-Site", "same-origin")
+                        .header("Origin", baseUrl)
+                        .removeHeader("Sec-Fetch-User")
+                        .removeHeader("Upgrade-Insecure-Requests")
+                        .build(),
+                )
+            } else {
+                chain.proceed(request.newBuilder().removeHeader("X-Requested-With").build())
+            }
+        }
+        .rateLimit(3, 1, TimeUnit.SECONDS)
+        .build()
 
     override fun xhrChaptersRequest(mangaUrl: String): Request = POST("$mangaUrl/ajax/chapters/", xhrHeaders)
 
@@ -119,50 +156,6 @@ class MGKomik :
         .headers(navHeaders(referer = "$baseUrl/$mangaSubString/"))
         .build()
 
-    override fun headersBuilder() = super.headersBuilder().apply {
-        set("User-Agent", USER_AGENT)
-        set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
-        set("Accept-Language", "id-ID,id;q=0.9")
-        set("Sec-CH-UA", "\"Chromium\";v=\"$CH_VERSION\", \"Not.A/Brand\";v=\"8\"")
-        set("Sec-CH-UA-Arch", "\"\"")
-        set("Sec-CH-UA-Bitness", "\"\"")
-        set("Sec-CH-UA-Full-Version", "\"$CH_VERSION.0.7727.93\"")
-        set("Sec-CH-UA-Full-Version-List", "\"Chromium\";v=\"$CH_VERSION.0.7727.93\", \"Not.A/Brand\";v=\"8.0.0.0\"")
-        set("Sec-CH-UA-Mobile", "?1")
-        set("Sec-CH-UA-Model", "\"\"")
-        set("Sec-CH-UA-Platform", "\"Android\"")
-        set("Sec-CH-UA-Platform-Version", "\"11.0.0\"")
-        set("Upgrade-Insecure-Requests", "1")
-        set("Priority", "u=0, i")
-    }
-
-    override val client = network.cloudflareClient.newBuilder()
-        .addInterceptor { chain ->
-            val request = chain.request()
-            val path = request.url.encodedPath
-            val isAjax = path.contains("admin-ajax.php") ||
-                path.contains("wp-json") ||
-                path.contains("/ajax/")
-
-            if (isAjax) {
-                chain.proceed(
-                    request.newBuilder()
-                        .header("X-Requested-With", "XMLHttpRequest")
-                        .header("Sec-Fetch-Dest", "empty")
-                        .header("Sec-Fetch-Mode", "cors")
-                        .header("Sec-Fetch-Site", "same-origin")
-                        .header("Origin", baseUrl)
-                        .removeHeader("Sec-Fetch-User")
-                        .removeHeader("Upgrade-Insecure-Requests")
-                        .build(),
-                )
-            } else {
-                chain.proceed(request.newBuilder().removeHeader("X-Requested-With").build())
-            }
-        }
-        .rateLimit(3)
-        .build()
-
     override fun popularMangaSelector() = "div.page-item-detail.manga"
 
     override fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
@@ -182,6 +175,14 @@ class MGKomik :
     override val mangaDetailsSelectorGenre = "div.genres-content a"
 
     override fun chapterListSelector() = "li.wp-manga-chapter"
+
+    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request = super.searchMangaRequest(page, query, filters).addSameOriginNavHeaders()
+
+    override fun mangaDetailsRequest(manga: SManga): Request = super.mangaDetailsRequest(manga).addSameOriginNavHeaders()
+
+    override fun chapterListRequest(manga: SManga): Request = super.chapterListRequest(manga).addSameOriginNavHeaders()
+
+    override fun genresRequest(): Request = super.genresRequest().addSameOriginNavHeaders()
 
     override fun parseChapterDate(date: String?): Long {
         date ?: return 0L
