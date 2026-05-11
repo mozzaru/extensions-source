@@ -194,11 +194,6 @@ class MGKomik :
         return super.parseChapterDate(trimmed)
     }
 
-    override fun getFilterList(): FilterList {
-        val filters = super.getFilterList().list.toMutableList()
-        return FilterList(filters)
-    }
-
     override fun parseGenres(document: Document): List<Genre> = listOf(
         Genre("Action", "action"),
         Genre("Adaptation", "adaptation"),
