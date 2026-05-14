@@ -10,8 +10,8 @@ import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.util.asJsoup
-import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.FormBody
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.nodes.Document
@@ -98,6 +98,7 @@ class MGKomik :
                         .header("Sec-Fetch-Mode", "cors")
                         .header("Sec-Fetch-Site", "same-origin")
                         .header("Origin", baseUrl)
+                        .header("Priority", "u=1, i")
                         .removeHeader("Sec-Fetch-User")
                         .removeHeader("Upgrade-Insecure-Requests")
                         .build(),
@@ -131,14 +132,6 @@ class MGKomik :
             headersBuilder()
                 .set("Referer", "$baseUrl/")
                 .set("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
-                .removeAll("Sec-CH-UA-Arch")
-                .removeAll("Sec-CH-UA-Bitness")
-                .removeAll("Sec-CH-UA-Full-Version")
-                .removeAll("Sec-CH-UA-Full-Version-List")
-                .removeAll("Sec-CH-UA-Model")
-                .removeAll("Sec-CH-UA-Platform-Version")
-                .removeAll("Upgrade-Insecure-Requests")
-                .removeAll("Priority")
                 .build(),
         )
     }
