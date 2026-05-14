@@ -18,7 +18,6 @@ import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.text.SimpleDateFormat
 import java.util.Locale
-import java.util.concurrent.TimeUnit
 
 class MGKomik :
     Madara(
@@ -107,21 +106,22 @@ class MGKomik :
                 chain.proceed(request.newBuilder().removeHeader("X-Requested-With").build())
             }
         }
-        .rateLimit(3, 1, TimeUnit.SECONDS)
+        .rateLimit(3)
         .build()
 
     override fun xhrChaptersRequest(mangaUrl: String): Request = POST("$mangaUrl/ajax/chapters/", xhrHeaders)
 
     override fun pageListRequest(chapter: SChapter): Request {
-        val chapterUrl = chapter.url.let {
-            if (it.startsWith("http")) it else "$baseUrl$it"
-        }
-        val cleanChapterUrl = chapterUrl.substringBefore("?")
-        val mangaUrl = cleanChapterUrl.trimEnd('/')
+        val path = chapter.url
+            .removePrefix(baseUrl)
+            .let { if (it.startsWith("/")) it else "/$it" }
+
+        val cleanUrl = "$baseUrl$path".substringBefore("?")
+        val mangaUrl = cleanUrl.trimEnd('/')
             .substringBeforeLast("/")
             .trimEnd('/') + "/"
 
-        return GET(cleanChapterUrl, navHeaders(referer = mangaUrl))
+        return GET(cleanUrl, navHeaders(referer = mangaUrl))
     }
 
     override fun imageRequest(page: Page): Request {
