@@ -156,9 +156,40 @@ class MangaMoins : HttpSource() {
         return GET(url, headers)
     }
 
+    private var cachedSalt: String? = null
+    private var lastSaltFetch: Long = 0
+
+    private fun getSalt(pagesBaseUrl: String): String {
+        val now = System.currentTimeMillis()
+        val lastSegment = pagesBaseUrl.trimEnd('/').substringAfterLast('/')
+
+        if (cachedSalt != null && now - lastSaltFetch < SALT_EXPIRY && lastSegment.startsWith(cachedSalt!!)) {
+            return cachedSalt!!
+        }
+
+        val salt = try {
+            val scriptUrl = "$baseUrl/includes/components/js/reader.js"
+            val response = client.newCall(GET(scriptUrl, headers)).execute()
+            val script = response.body.string()
+            val saltRegex = """['"]([a-zA-Z0-9_]+)['"]""".toRegex()
+            saltRegex.findAll(script)
+                .map { it.groupValues[1] }
+                .filter { it.length > 5 && lastSegment.startsWith(it) && lastSegment != it }
+                .maxByOrNull { it.length } ?: SALT
+        } catch (e: Exception) {
+            SALT // Fallback to hardcoded salt on error
+        }
+
+        cachedSalt = salt
+        lastSaltFetch = now
+        return salt
+    }
+
     override fun pageListParse(response: Response): List<Page> {
         val data = response.parseAs<ScanResponse>()
-        val baseUrl = data.pagesBaseUrl.removeSuffix("/")
+        val salt = getSalt(data.pagesBaseUrl)
+        // Remove the dynamic salt prefix from the last path segment
+        val baseUrl = data.pagesBaseUrl.removeSuffix("/").replace("/$salt", "/")
         return (1..data.pageNumbers).map { i ->
             val pageNum = i.toString().padStart(2, '0')
             Page(i - 1, imageUrl = "$baseUrl/$pageNum.webp")
@@ -169,5 +200,7 @@ class MangaMoins : HttpSource() {
 
     companion object {
         private const val MANGA_PAGE_LIMIT = 20
+        private const val SALT = "4445xcsltlesnoobsarretezdevolernoscansmerci123891b"
+        private const val SALT_EXPIRY = 3 * 60 * 60 * 1000L // 3 hours
     }
 }

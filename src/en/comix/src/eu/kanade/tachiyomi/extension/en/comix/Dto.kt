@@ -14,6 +14,14 @@ class Term(
 )
 
 @Serializable
+class TagSearchResponse(
+    val result: List<TagSearchHit> = emptyList(),
+)
+
+@Serializable
+class TagSearchHit(val id: Int)
+
+@Serializable
 class Manga(
     val hid: String,
     private val title: String,
@@ -36,6 +44,11 @@ class Manga(
     @SerialName("demographic") private val demographicOld: List<Term>? = null,
     private val formats: List<Term>? = null,
     private val ratedAvg: Double = 0.0,
+    private val ratedCount: Long = 0L,
+    private val followsTotal: Long = 0L,
+    private val rank: Int = 0,
+    private val year: Int? = null,
+    private val originalLanguage: String? = null,
     private val url: String? = null,
 ) {
     @Serializable
@@ -76,6 +89,8 @@ class Manga(
         posterQuality: String?,
         altTitlesInDesc: Boolean = false,
         scorePosition: String,
+        showExtraInfo: Boolean = true,
+        showTags: Boolean = false,
     ) = SManga.create().apply {
         url = this@Manga.url?.substringAfter("/title") ?: "/$hid"
         title = this@Manga.title
@@ -102,6 +117,14 @@ class Manga(
                 append(actualAltTitles.joinToString("\n"))
             }
 
+            if (showExtraInfo) {
+                val extras = buildExtraInfo()
+                if (extras.isNotEmpty()) {
+                    if (isNotEmpty()) append("\n\n")
+                    append(extras.joinToString("\n"))
+                }
+            }
+
             if (scorePosition == "bottom") {
                 fancyScore.takeIf { it.isNotEmpty() }?.let {
                     if (isNotEmpty()) append("\n\n")
@@ -118,7 +141,7 @@ class Manga(
             else -> SManga.UNKNOWN
         }
         thumbnail_url = this@Manga.poster?.from(posterQuality)
-        genre = getGenres()
+        genre = getGenres(showTags)
     }
 
     fun toBasicSManga(posterQuality: String?) = SManga.create().apply {
@@ -127,7 +150,24 @@ class Manga(
         thumbnail_url = this@Manga.poster?.from(posterQuality)
     }
 
-    private fun getGenres() = buildList {
+    private fun buildExtraInfo(): List<String> = buildList {
+        year?.takeIf { it > 0 }?.let { add("Year: $it") }
+        originalLanguage?.takeIf { it.isNotBlank() }?.let { add("Language: ${it.uppercase()}") }
+        contentRating.takeIf { it.isNotBlank() }?.let {
+            add("Content rating: ${it.replaceFirstChar(Char::uppercase)}")
+        }
+        rank.takeIf { it > 0 }?.let { add("Rank: #$it") }
+        ratedCount.takeIf { it > 0 }?.let { add("Rated by: $it") }
+        followsTotal.takeIf { it > 0 }?.let { add("Followed by: $it") }
+    }
+
+    // The site has separate `genres`, `tags`, `formats`, and `demographics`
+    // groupings but only the curated `genres` (plus the type and demographics)
+    // belong in Mihon's "genre" chips by default — the `tags` list is dozens
+    // of narrative descriptors and the site doesn't surface them in its own
+    // detail layout. Users who want them back can flip the
+    // "Show tags in genre chips" preference.
+    private fun getGenres(showTags: Boolean) = buildList {
         when (type) {
             "manhwa" -> add("Manhwa")
             "manhua" -> add("Manhua")
@@ -135,9 +175,8 @@ class Manga(
             else -> add("Other")
         }
         (genres ?: genreOld)?.map { it.title }?.let { addAll(it) }
-        formats?.map { it.title }?.let { addAll(it) }
-        (tags ?: themeOld)?.map { it.title }?.let { addAll(it) }
         (demographics ?: demographicOld)?.map { it.title }?.let { addAll(it) }
+        if (showTags) tags?.map { it.title }?.let { addAll(it) }
         if (contentRating == "erotica" || contentRating == "pornographic") add("NSFW")
     }.distinct().joinToString()
 }
@@ -205,6 +244,7 @@ class ChapterDetailsResponse(
 @Serializable
 class Chapter(
     val id: Int,
+    val url: String = "",
     val number: Double,
     private val name: String = "",
     val votes: Int = 0,
@@ -223,7 +263,13 @@ class Chapter(
     }
 
     fun toSChapter(mangaSlug: String) = SChapter.create().apply {
-        url = "title/$mangaSlug/$id-chapter-${number.toString().removeSuffix(".0")}"
+        url = this@Chapter.url.indexOf("/title/").let { index ->
+            if (index != -1) {
+                this@Chapter.url.substring(index + 1)
+            } else {
+                "title/$mangaSlug/$id-chapter-${number.toString().removeSuffix(".0")}"
+            }
+        }
         name = buildString {
             append("Chapter ")
             append(this@Chapter.number.toString().removeSuffix(".0"))
@@ -264,12 +310,17 @@ class Chapter(
 
 @Serializable
 class ChapterResponse(
-    val result: ChapterResult? = null,
+    val result: ChapterResult,
 ) {
     @Serializable
     class ChapterResult(
-        val id: Int,
-        val pages: List<PageDto> = emptyList(),
+        val pages: Pages,
+    )
+
+    @Serializable
+    class Pages(
+        val baseUrl: String,
+        val items: List<PageDto>,
     )
 
     @Serializable

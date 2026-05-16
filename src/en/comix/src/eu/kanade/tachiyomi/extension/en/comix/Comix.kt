@@ -1,11 +1,20 @@
 package eu.kanade.tachiyomi.extension.en.comix
 
+import android.annotation.SuppressLint
+import android.app.Application
 import android.content.SharedPreferences
+import android.os.Handler
+import android.os.Looper
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.preference.ListPreference
+import androidx.preference.MultiSelectListPreference
 import androidx.preference.PreferenceScreen
 import androidx.preference.SwitchPreferenceCompat
-import eu.kanade.tachiyomi.extension.en.comix.Hash.generateHash
 import eu.kanade.tachiyomi.network.GET
+import eu.kanade.tachiyomi.network.awaitSuccess
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.FilterList
@@ -14,12 +23,22 @@ import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
+import keiyoushi.utils.firstInstanceOrNull
 import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.parseAs
+import kotlinx.coroutines.runBlocking
+import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Request
 import okhttp3.Response
+import okio.Buffer
+import rx.Observable
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 class Comix :
     HttpSource(),
@@ -48,12 +67,7 @@ class Comix :
             addQueryParameter("order[score]", "desc")
             addQueryParameter("limit", "28")
             addQueryParameter("page", page.toString())
-
-            if (preferences.hideNsfw()) {
-                NSFW_GENRE_IDS.forEach {
-                    addQueryParameter("genres_ex[]", it)
-                }
-            }
+            applyContentPreferences()
         }.build()
 
         return GET(url, headers)
@@ -68,12 +82,7 @@ class Comix :
             addQueryParameter("order[chapter_updated_at]", "desc")
             addQueryParameter("limit", "28")
             addQueryParameter("page", page.toString())
-
-            if (preferences.hideNsfw()) {
-                NSFW_GENRE_IDS.forEach {
-                    addQueryParameter("genres_ex[]", it)
-                }
-            }
+            applyContentPreferences()
         }.build()
 
         return GET(url, headers)
@@ -94,11 +103,53 @@ class Comix :
             }
         }
 
-        val url = apiUrl.toHttpUrl().newBuilder().apply {
-            addPathSegment("manga")
+        val withFilters = apiUrl.toHttpUrl().newBuilder()
+            .addPathSegment("manga")
+            .apply {
+                filters.filterIsInstance<Filters.UriFilter>()
+                    .forEach { it.addToUri(this) }
 
-            filters.filterIsInstance<Filters.UriFilter>()
-                .forEach { it.addToUri(this) }
+                // Author/Artist/Tags filters all expose a free-text input that
+                // supports multiple comma-separated names. The API filters by
+                // numeric IDs, so each name is looked up against /tags/search.
+                filters.firstInstanceOrNull<Filters.AuthorFilter>()?.state
+                    ?.let { resolveTagIdsForNames("author", it) }
+                    ?.forEach { addQueryParameter("authors[]", it) }
+                filters.firstInstanceOrNull<Filters.ArtistFilter>()?.state
+                    ?.let { resolveTagIdsForNames("artist", it) }
+                    ?.forEach { addQueryParameter("artists[]", it) }
+                filters.firstInstanceOrNull<Filters.TagsFilter>()?.state
+                    ?.let { resolveTagIdsForNames("tag", it) }
+                    ?.forEach { addQueryParameter("genres_in[]", it) }
+            }
+            .build()
+
+        val url = withFilters.newBuilder().apply {
+            // Manual filters in the search sheet override the corresponding
+            // source-level preference; otherwise fall back to the preference.
+            if (withFilters.queryParameter("content_rating") == null) {
+                applyContentRatingPreference()
+            }
+            if (withFilters.queryParameterValues("types[]").isEmpty()) {
+                applyTypesPreference()
+            }
+            if (withFilters.queryParameterValues("demographics[]").isEmpty()) {
+                applyDemographicsPreference()
+            }
+            // Blocked genres are ALWAYS applied (even alongside manual genre
+            // include/exclude) — the helper itself skips any genre the user
+            // explicitly INCLUDED in the search filter, so a one-off lookup
+            // for a normally-blocked genre still works.
+            applyBlockedGenresPreference()
+
+            // The Match filter contributes `genres_mode`. If neither the
+            // search filter nor the blocked-genres preference put any term
+            // on the URL, drop the param so the site picks its own default.
+            val hasTermSelection = build().queryParameterValues("genres_in[]").isNotEmpty() ||
+                build().queryParameterValues("genres_ex[]").isNotEmpty()
+            if (!hasTermSelection) {
+                removeAllQueryParameters("genres_mode")
+            }
 
             if (query.isNotBlank()) {
                 addQueryParameter("keyword", query)
@@ -107,17 +158,97 @@ class Comix :
                 addQueryParameter("order[relevance]", "desc")
             }
 
-            if (preferences.hideNsfw()) {
-                NSFW_GENRE_IDS.forEach {
-                    addQueryParameter("genres_ex[]", it)
-                }
-            }
-
             addQueryParameter("limit", "28")
             addQueryParameter("page", page.toString())
         }.build()
 
         return GET(url, headers)
+    }
+
+    /**
+     * Apply every content-related source-level preference (rating, types,
+     * demographics, blocked genres) in one go. Used by popular/latest
+     * where there's no search filter sheet to override anything.
+     * `searchMangaRequest` calls each helper individually so the search
+     * filter can short-circuit per-field.
+     */
+    private fun HttpUrl.Builder.applyContentPreferences() {
+        applyContentRatingPreference()
+        applyTypesPreference()
+        applyDemographicsPreference()
+        applyBlockedGenresPreference()
+    }
+
+    private fun HttpUrl.Builder.applyContentRatingPreference() {
+        preferences.contentRating().takeIf { it.isNotEmpty() }?.let {
+            addQueryParameter("content_rating", it)
+        }
+    }
+
+    /**
+     * Apply the source-level Default Types preference. The site treats no
+     * `types[]` param as "show all", so we omit the filter when the user
+     * has every type selected (the only state that would be a no-op
+     * otherwise). An empty selection — meaning the user explicitly
+     * unchecked everything — would hide every result; treat that as
+     * "no preference" and skip too, since the alternative is a confusing
+     * empty browse.
+     */
+    private fun HttpUrl.Builder.applyTypesPreference() {
+        val selected = preferences.defaultTypes()
+        val all = Filters.getTypes().map { it.second }.toSet()
+        if (selected.isEmpty() || selected == all) return
+        selected.forEach { addQueryParameter("types[]", it) }
+    }
+
+    /** Same shape as [applyTypesPreference] for Demographics. */
+    private fun HttpUrl.Builder.applyDemographicsPreference() {
+        val selected = preferences.defaultDemographics()
+        val all = Filters.getDemographics().map { it.second }.toSet()
+        if (selected.isEmpty() || selected == all) return
+        selected.forEach { addQueryParameter("demographics[]", it) }
+    }
+
+    /**
+     * Add a `genres_ex[]` for every genre the user listed in their Blocked
+     * Genres preference, except those the search filter explicitly
+     * INCLUDED (so a manual search for a normally-blocked genre still
+     * works as a one-off escape hatch).
+     */
+    private fun HttpUrl.Builder.applyBlockedGenresPreference() {
+        val blocked = preferences.blockedGenres()
+        if (blocked.isEmpty()) return
+        val explicitlyIncluded = build().queryParameterValues("genres_in[]").toSet()
+        blocked.asSequence()
+            .filter { it !in explicitlyIncluded }
+            .forEach { addQueryParameter("genres_ex[]", it) }
+    }
+
+    /**
+     * Resolves a free-text input — possibly several comma-separated names —
+     * to the numeric IDs the site uses in `authors[]` / `artists[]` query
+     * parameters. Each name is looked up via `/tags/search`; names that match
+     * nothing simply contribute no IDs.
+     */
+    private fun resolveTagIdsForNames(type: String, raw: String): List<String> = raw
+        .split(',')
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .flatMap { resolveTagIds(type, it) }
+
+    private fun resolveTagIds(type: String, name: String): List<String> {
+        val url = apiUrl.toHttpUrl().newBuilder()
+            .addPathSegment("tags")
+            .addPathSegment("search")
+            .addQueryParameter("type", type)
+            .addQueryParameter("q", name)
+            .build()
+
+        return runCatching {
+            client.newCall(GET(url, headers)).execute().use { response ->
+                response.parseAs<TagSearchResponse>().result.map { it.id.toString() }
+            }
+        }.getOrDefault(emptyList())
     }
 
     override fun searchMangaParse(response: Response): MangasPage {
@@ -158,6 +289,8 @@ class Comix :
             preferences.posterQuality(),
             preferences.alternativeNamesInDescription(),
             preferences.scorePosition(),
+            preferences.showExtraInfo(),
+            preferences.showTagsInGenres(),
         )
     }
 
@@ -166,73 +299,52 @@ class Comix :
     // ============================= Chapters ==============================
     override fun getChapterUrl(chapter: SChapter) = "$baseUrl/${chapter.url}"
 
-    override fun chapterListRequest(manga: SManga): Request {
-        val hid = manga.url.removePrefix("/").substringBefore("-")
-        val fullSlug = manga.url.removePrefix("/")
-        return chapterListRequest(hid, fullSlug, 1)
-    }
-
-    private fun chapterListRequest(mangaHash: String, mangaSlug: String, page: Int): Request {
-        val path = "/manga/$mangaHash/chapters"
-        val hashToken = generateHash(path)
-        val url = apiUrl.toHttpUrl().newBuilder()
-            .addPathSegment("manga")
-            .addPathSegment(mangaHash)
-            .addPathSegment("chapters")
-            .addQueryParameter("order[number]", "desc")
-            .addQueryParameter("limit", "100")
-            .addQueryParameter("page", page.toString())
-            .addQueryParameter("_", hashToken)
-            .addQueryParameter("mangaSlug", mangaSlug) // Add slug as query parameter
-            .build()
-
-        return GET(url, headers)
-    }
-
-    override fun chapterListParse(response: Response): List<SChapter> {
+    override fun fetchChapterList(manga: SManga): Observable<List<SChapter>> = runBlocking {
         val deduplicate = preferences.deduplicateChapters()
-        val mangaHash = response.request.url.pathSegments[3]
-        val mangaSlug = response.request.url.queryParameter("mangaSlug") ?: mangaHash // Extract slug
-        var resp: ChapterDetailsResponse = response.parseAs()
+        val mangaSlug = manga.url.removePrefix("/")
+        val hid = mangaSlug.substringBefore("-")
 
-        var chapterMap: LinkedHashMap<Number, Chapter>? = null
-        var chapterList: ArrayList<Chapter>? = null
+        val token = captureToken(
+            pageUrl = getMangaUrl(manga),
+        ) { url ->
+            url.encodedPath.endsWith("api/v1/manga/$hid/chapters")
+        }
 
-        if (deduplicate) {
-            chapterMap = LinkedHashMap()
-            deduplicateChapters(chapterMap, resp.result.items)
+        val allChapters = mutableListOf<Chapter>()
+        var page = 1
+        while (true) {
+            val url = apiUrl.toHttpUrl().newBuilder()
+                .addPathSegment("manga")
+                .addPathSegment(hid)
+                .addPathSegment("chapters")
+                .addQueryParameter("page", page.toString())
+                .addQueryParameter("limit", "100")
+                .addQueryParameter("order[number]", "desc")
+                .addQueryParameter("_", token)
+                .build()
+            val res = client.newCall(GET(url, headers)).awaitSuccess()
+                .parseAs<ChapterDetailsResponse>()
+            allChapters.addAll(res.result.items)
+            if (!res.result.hasNextPage()) break
+            page++
+        }
+
+        val finalChapters: List<Chapter> = if (deduplicate) {
+            val chapterMap = LinkedHashMap<Number, Chapter>()
+            deduplicateChapters(chapterMap, allChapters)
+            chapterMap.values.toList()
         } else {
-            chapterList = ArrayList(resp.result.items)
+            allChapters
         }
 
-        var page = 2
-        var hasNext = resp.result.hasNextPage()
-
-        while (hasNext) {
-            resp = client
-                .newCall(chapterListRequest(mangaHash, mangaSlug, page++))
-                .execute()
-                .parseAs()
-
-            val items = resp.result.items
-
-            if (deduplicate) {
-                deduplicateChapters(chapterMap!!, items)
-            } else {
-                chapterList!!.addAll(items)
-            }
-            hasNext = resp.result.hasNextPage()
-        }
-
-        val finalChapters: List<Chapter> =
-            if (deduplicate) {
-                chapterMap!!.values.toList()
-            } else {
-                chapterList!!
-            }
-
-        return finalChapters.map { it.toSChapter(mangaSlug) }
+        Observable.just(
+            finalChapters.map { it.toSChapter(mangaSlug) },
+        )
     }
+
+    override fun chapterListRequest(manga: SManga): Request = throw UnsupportedOperationException()
+
+    override fun chapterListParse(response: Response): List<SChapter> = throw UnsupportedOperationException()
 
     private fun deduplicateChapters(
         chapterMap: LinkedHashMap<Number, Chapter>,
@@ -266,29 +378,96 @@ class Comix :
     }
 
     // =============================== Pages ===============================
-    override fun pageListRequest(chapter: SChapter): Request {
+    override fun fetchPageList(chapter: SChapter): Observable<List<Page>> = runBlocking {
+        // Legacy URL example: title/qnj9/5241183-chapter-0
+        if (chapter.url.substringAfter("/").substringBeforeLast("/").indexOf("-") == -1) throw Exception("Outdated chapter URL. Please refresh the chapter list")
+
         val chapterId = chapter.url.substringAfterLast("/").substringBefore("-")
-        val path = "/chapters/$chapterId"
-        val hashToken = generateHash(path)
+
+        val token = captureToken(
+            pageUrl = getChapterUrl(chapter),
+        ) { url ->
+            url.encodedPath.endsWith("api/v1/chapters/$chapterId")
+        }
+
         val url = apiUrl.toHttpUrl().newBuilder()
             .addPathSegment("chapters")
             .addPathSegment(chapterId)
-            .addQueryParameter("_", hashToken)
+            .addQueryParameter("_", token)
             .build()
-        return GET(url, headers)
+
+        val result = client.newCall(GET(url, headers)).awaitSuccess()
+            .parseAs<ChapterResponse>().result.pages
+        val base = result.baseUrl.trimEnd('/')
+        val pages = result.items.mapIndexed { index, img ->
+            val full = if (img.url.startsWith("http")) img.url else "$base/${img.url.trimStart('/')}"
+            Page(index, imageUrl = full)
+        }
+
+        Observable.just(pages)
     }
 
-    override fun pageListParse(response: Response): List<Page> {
-        val res: ChapterResponse = response.parseAs()
-        val result = res.result ?: throw Exception("Chapter not found")
+    override fun pageListRequest(chapter: SChapter): Request = throw UnsupportedOperationException()
 
-        if (result.pages.isEmpty()) {
-            throw Exception("No images found for chapter ${result.id}")
+    override fun pageListParse(response: Response): List<Page> = throw UnsupportedOperationException()
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun captureToken(pageUrl: String, urlMatches: (HttpUrl) -> Boolean): String {
+        val handler = Handler(Looper.getMainLooper())
+        val latch = CountDownLatch(1)
+        val tokenRef = AtomicReference<String>()
+        var webView: WebView? = null
+        val emptyResponse = WebResourceResponse("text/plain", "utf-8", Buffer().inputStream())
+
+        val createAndLoad = {
+            val view = WebView(Injekt.get<Application>())
+            webView = view
+
+            with(view.settings) {
+                javaScriptEnabled = true
+                domStorageEnabled = true
+                blockNetworkImage = true
+                userAgentString = headers["User-Agent"]
+            }
+
+            view.webViewClient = object : WebViewClient() {
+                override fun shouldInterceptRequest(
+                    view: WebView,
+                    request: WebResourceRequest,
+                ): WebResourceResponse? {
+                    val httpUrl = request.url?.toString()?.toHttpUrlOrNull()
+                        ?: return emptyResponse
+
+                    if (urlMatches(httpUrl)) {
+                        httpUrl.queryParameter("_")?.let { token ->
+                            if (tokenRef.compareAndSet(null, token)) {
+                                latch.countDown()
+                            }
+                        }
+                    }
+
+                    return if (httpUrl.host.contains("comix.to") && (httpUrl.encodedPath.contains(".js") || httpUrl.encodedPath.startsWith("/api/") || httpUrl.encodedPath.startsWith("/title/"))) {
+                        super.shouldInterceptRequest(view, request)
+                    } else {
+                        emptyResponse
+                    }
+                }
+            }
+
+            view.loadUrl(pageUrl)
         }
 
-        return result.pages.mapIndexed { index, img ->
-            Page(index, imageUrl = img.url)
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            createAndLoad()
+        } else {
+            handler.post(createAndLoad)
         }
+
+        val completed = latch.await(30, TimeUnit.SECONDS)
+        handler.post { webView?.destroy() }
+
+        if (!completed) throw Exception("Timed out waiting for token")
+        return tokenRef.get() ?: throw Exception("Failed to capture token")
     }
 
     // ============================= Settings =============================
@@ -302,11 +481,56 @@ class Comix :
             setDefaultValue("large")
         }.let(screen::addPreference)
 
-        SwitchPreferenceCompat(screen.context).apply {
-            key = NSFW_PREF
-            title = "Hide NSFW content"
-            summary = "Hides NSFW content from popular, latest, and search lists."
-            setDefaultValue(true)
+        ListPreference(screen.context).apply {
+            key = PREF_CONTENT_RATING
+            title = "Content rating"
+            summary = "Maximum content rating shown in popular, latest, and search " +
+                "results. The Content rating filter in search overrides this. " +
+                "Current: %s."
+            entries = arrayOf("Show all", "Safe only", "Up to Suggestive", "Up to Erotica", "Up to Pornographic")
+            entryValues = arrayOf("", "safe", "suggestive", "erotica", "pornographic")
+            setDefaultValue(DEFAULT_CONTENT_RATING)
+        }.let(screen::addPreference)
+
+        // Content preferences (mirrors comix.to's "Content preferences" modal):
+        //   - Default Types       — checkbox per type, all checked by default
+        //   - Default Demographics — same, all checked by default
+        //   - Blocked Genres      — opt-in list of genres to always exclude
+        //
+        // The first two omit the corresponding query param when ALL are checked
+        // (= "no filter"). Any narrower selection sends `types[]` /
+        // `demographics[]`. The Blocked Genres set adds `genres_ex[]` for each
+        // entry. All three are overridable per-search via the existing filter
+        // sheet, except blocked genres which always apply unless the search
+        // filter explicitly INCLUDED the same genre.
+        MultiSelectListPreference(screen.context).apply {
+            key = PREF_DEFAULT_TYPES
+            title = "Default types"
+            summary = "Types to include in popular, latest, and search results. " +
+                "The Type filter in search overrides this."
+            entries = Filters.getTypes().map { it.first }.toTypedArray()
+            entryValues = Filters.getTypes().map { it.second }.toTypedArray()
+            setDefaultValue(Filters.getTypes().map { it.second }.toSet())
+        }.let(screen::addPreference)
+
+        MultiSelectListPreference(screen.context).apply {
+            key = PREF_DEFAULT_DEMOGRAPHICS
+            title = "Default demographics"
+            summary = "Demographics to include in popular, latest, and search " +
+                "results. The Demographic filter in search overrides this."
+            entries = Filters.getDemographics().map { it.first }.toTypedArray()
+            entryValues = Filters.getDemographics().map { it.second }.toTypedArray()
+            setDefaultValue(Filters.getDemographics().map { it.second }.toSet())
+        }.let(screen::addPreference)
+
+        MultiSelectListPreference(screen.context).apply {
+            key = PREF_BLOCKED_GENRES
+            title = "Blocked genres"
+            summary = "Genres always excluded from results. The search filter " +
+                "can still include a blocked genre as a one-off override."
+            entries = Filters.getGenres().map { it.first }.toTypedArray()
+            entryValues = Filters.getGenres().map { it.second }.toTypedArray()
+            setDefaultValue(emptySet<String>())
         }.let(screen::addPreference)
 
         SwitchPreferenceCompat(screen.context).apply {
@@ -321,6 +545,24 @@ class Comix :
         SwitchPreferenceCompat(screen.context).apply {
             key = ALTERNATIVE_NAMES_IN_DESCRIPTION
             title = "Show Alternative Names in Description"
+            setDefaultValue(false)
+        }.let(screen::addPreference)
+
+        SwitchPreferenceCompat(screen.context).apply {
+            key = PREF_SHOW_EXTRA_INFO
+            title = "Show extra info in description"
+            summary = "Append publication year, language, content rating, rank, " +
+                "ratings count, and follower count to the manga description."
+            setDefaultValue(true)
+        }.let(screen::addPreference)
+
+        SwitchPreferenceCompat(screen.context).apply {
+            key = PREF_SHOW_TAGS_IN_GENRES
+            title = "Show tags in genre chips"
+            summary = "Include the site's narrative tag list (e.g. Demons, " +
+                "Vampires, Time Travel) alongside the curated genres in the " +
+                "manga details. Off by default — the curated set matches what " +
+                "comix.to itself shows on the page."
             setDefaultValue(false)
         }.let(screen::addPreference)
 
@@ -342,15 +584,47 @@ class Comix :
 
     private fun SharedPreferences.scorePosition() = getString(PREF_SCORE_POSITION, "top") ?: "top"
 
-    private fun SharedPreferences.hideNsfw() = getBoolean(NSFW_PREF, true)
+    private fun SharedPreferences.showExtraInfo() = getBoolean(PREF_SHOW_EXTRA_INFO, true)
+
+    private fun SharedPreferences.showTagsInGenres() = getBoolean(PREF_SHOW_TAGS_IN_GENRES, false)
+
+    private fun SharedPreferences.defaultTypes(): Set<String> {
+        val all = Filters.getTypes().map { it.second }.toSet()
+        return getStringSet(PREF_DEFAULT_TYPES, all) ?: all
+    }
+
+    private fun SharedPreferences.defaultDemographics(): Set<String> {
+        val all = Filters.getDemographics().map { it.second }.toSet()
+        return getStringSet(PREF_DEFAULT_DEMOGRAPHICS, all) ?: all
+    }
+
+    private fun SharedPreferences.blockedGenres(): Set<String> = getStringSet(PREF_BLOCKED_GENRES, emptySet()) ?: emptySet()
+
+    // The legacy "Hide NSFW" boolean still exists in some users' preferences;
+    // map it to a sensible default until they pick a value explicitly.
+    private fun SharedPreferences.contentRating(): String {
+        if (contains(PREF_CONTENT_RATING)) {
+            return getString(PREF_CONTENT_RATING, DEFAULT_CONTENT_RATING) ?: DEFAULT_CONTENT_RATING
+        }
+        if (contains(LEGACY_HIDE_NSFW_PREF) && !getBoolean(LEGACY_HIDE_NSFW_PREF, true)) {
+            return ""
+        }
+        return DEFAULT_CONTENT_RATING
+    }
 
     companion object {
         private const val PREF_POSTER_QUALITY = "pref_poster_quality"
-        private const val NSFW_PREF = "nsfw_pref"
+        private const val PREF_CONTENT_RATING = "pref_content_rating"
+        private const val PREF_DEFAULT_TYPES = "pref_default_types"
+        private const val PREF_DEFAULT_DEMOGRAPHICS = "pref_default_demographics"
+        private const val PREF_BLOCKED_GENRES = "pref_blocked_genres"
+        private const val LEGACY_HIDE_NSFW_PREF = "nsfw_pref"
         private const val DEDUPLICATE_CHAPTERS = "pref_deduplicate_chapters"
         private const val ALTERNATIVE_NAMES_IN_DESCRIPTION = "pref_alt_names_in_description"
+        private const val PREF_SHOW_EXTRA_INFO = "pref_show_extra_info"
+        private const val PREF_SHOW_TAGS_IN_GENRES = "pref_show_tags_in_genres"
         private const val PREF_SCORE_POSITION = "pref_score_position"
 
-        private val NSFW_GENRE_IDS = listOf("87264", "8", "87265", "13", "87266", "87268")
+        private const val DEFAULT_CONTENT_RATING = "suggestive"
     }
 }
