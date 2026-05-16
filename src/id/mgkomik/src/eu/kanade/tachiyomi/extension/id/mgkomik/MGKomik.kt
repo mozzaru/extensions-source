@@ -1,19 +1,15 @@
 package eu.kanade.tachiyomi.extension.id.mgkomik
 
-import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.multisrc.madara.Madara
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
-import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.util.asJsoup
-import keiyoushi.lib.randomua.addRandomUAPreference
-import keiyoushi.lib.randomua.setRandomUserAgent
 import okhttp3.FormBody
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
@@ -29,8 +25,7 @@ class MGKomik :
         "https://id.mgkomik.cc",
         "id",
         SimpleDateFormat("dd MMM yy", Locale.US),
-    ),
-    ConfigurableSource {
+    ) {
     override val useLoadMoreRequest = LoadMoreStrategy.Never
     override val useNewChapterEndpoint = true
     override val mangaSubString = "komik"
@@ -71,15 +66,22 @@ class MGKomik :
     }
 
     override fun headersBuilder() = super.headersBuilder().apply {
-        setRandomUserAgent()
+        set("User-Agent", USER_AGENT)
         set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
         set("Accept-Language", "id-ID,id;q=0.9")
+        set("Sec-CH-UA", "\"Chromium\";v=\"$CH_VERSION\", \"Not.A/Brand\";v=\"24\", \"Google Chrome\";v=\"$CH_VERSION\"")
+        set("Sec-CH-UA-Arch", "\"\"")
+        set("Sec-CH-UA-Bitness", "\"\"")
+        set("Sec-CH-UA-Full-Version-List", "\"Chromium\";v=\"$CH_VERSION.0.6367.171\", \"Not.A/Brand\";v=\"24.0.0.0\", \"Google Chrome\";v=\"$CH_VERSION.0.6367.171\"")
+        set("Sec-CH-UA-Mobile", "?1")
+        set("Sec-CH-UA-Model", "\"\"")
+        set("Sec-CH-UA-Platform", "\"Android\"")
+        set("Sec-CH-UA-Platform-Version", "\"10.0.0\"")
         set("Upgrade-Insecure-Requests", "1")
         set("Priority", "u=0, i")
     }
 
     override val client = network.cloudflareClient.newBuilder()
-        .addInterceptor(UserAgentClientHintsInterceptor())
         .addInterceptor { chain ->
             val request = chain.request()
             val path = request.url.encodedPath
@@ -197,10 +199,6 @@ class MGKomik :
         return super.parseChapterDate(trimmed)
     }
 
-    override fun setupPreferenceScreen(screen: PreferenceScreen) {
-        screen.addRandomUAPreference()
-    }
-
     override fun parseGenres(document: Document): List<Genre> = listOf(
         Genre("Action", "action"),
         Genre("Adaptation", "adaptation"),
@@ -274,4 +272,10 @@ class MGKomik :
         Genre("Wuxia", "wuxia"),
         Genre("Yuri", "yuri"),
     )
+
+    companion object {
+        private const val CH_VERSION = "124"
+        private const val USER_AGENT =
+            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/$CH_VERSION.0.0.0 Mobile Safari/537.36"
+    }
 }
