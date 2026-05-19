@@ -1,11 +1,15 @@
 package eu.kanade.tachiyomi.extension.id.mgkomik
 
+import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.multisrc.madara.Madara
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
+import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.SManga
+import keiyoushi.lib.randomua.addRandomUAPreference
+import keiyoushi.lib.randomua.setRandomUserAgent
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.text.SimpleDateFormat
@@ -17,7 +21,8 @@ class MGKomik :
         "https://id.mgkomik.cc",
         "id",
         SimpleDateFormat("dd MMM yy", Locale.US),
-    ) {
+    ),
+    ConfigurableSource {
     override val useLoadMoreRequest = LoadMoreStrategy.Always
 
     override val useNewChapterEndpoint = false
@@ -25,22 +30,23 @@ class MGKomik :
     override val mangaSubString = "komik"
 
     override fun headersBuilder() = super.headersBuilder().apply {
-        set("Sec-Fetch-Site", "same-origin")
+        setRandomUserAgent()
+        set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
+        set("Accept-Language", "id-ID,id;q=0.9")
         set("Upgrade-Insecure-Requests", "1")
-        set("Referer", "$baseUrl/")
-        set("Sec-Fetch-Site", "none")
+        set("Priority", "u=0, i")
     }
 
-    override val client = network.cloudflareClient.newBuilder()
+    override val client = network.client.newBuilder()
+        .addInterceptor(UserAgentClientHintsInterceptor())
         .addInterceptor { chain ->
             val request = chain.request()
             val headers = request.headers.newBuilder().apply {
                 removeAll("X-Requested-With")
             }.build()
-
             chain.proceed(request.newBuilder().headers(headers).build())
         }
-        .rateLimit(9, 2)
+        .rateLimit(3)
         .build()
 
     // ================================== Popular ======================================
@@ -56,6 +62,8 @@ class MGKomik :
     // ================================ Chapters ================================
 
     override val chapterUrlSuffix = ""
+
+    override fun getMangaUrl(manga: SManga) = "$baseUrl${manga.url}"
 
     // ================================ Filters ================================
 
@@ -97,5 +105,9 @@ class MGKomik :
             Genre(a.text(), a.absUrl("href"))
         }
         return genres
+    }
+
+    override fun setupPreferenceScreen(screen: PreferenceScreen) {
+        screen.addRandomUAPreference()
     }
 }
