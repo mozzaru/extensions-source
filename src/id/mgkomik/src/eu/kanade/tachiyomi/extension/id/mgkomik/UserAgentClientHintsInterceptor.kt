@@ -5,43 +5,40 @@ import okhttp3.Response
 import java.util.concurrent.ConcurrentHashMap
 import java.util.regex.Pattern
 
-/**
- * OkHttp Interceptor that adds Client Hints headers based on User-Agent
- */
 class UserAgentClientHintsInterceptor : Interceptor {
 
     private val parser = UAParser()
-
-    // Thread-safe UA parsing result cache (max 50 UAs)
     private val cache = ConcurrentHashMap<String, SecCHHeaders>(16, 0.75f)
 
     override fun intercept(chain: Interceptor.Chain): Response {
         val originalRequest = chain.request()
         val userAgent = originalRequest.header("User-Agent")
 
-        // Skip if no User-Agent header
         if (userAgent.isNullOrEmpty()) {
             return chain.proceed(originalRequest)
         }
 
-        // Get from cache or parse UA and generate Client Hints headers
         val secCHHeaders = cache.getOrPut(userAgent) {
             parser.parseUAtoSecCH(userAgent).also {
-                // Simple LRU: if cache exceeds limit, clear oldest entries
                 if (cache.size > 50) {
                     cache.keys.take(cache.size - 40).forEach { key -> cache.remove(key) }
                 }
             }
         }
 
-        // Build new request with Sec-CH-UA related headers
         val newRequest = originalRequest.newBuilder()
             .header("Sec-CH-UA", secCHHeaders.secCHUA)
             .header("Sec-CH-UA-Mobile", secCHHeaders.secCHUAMobile)
             .header("Sec-CH-UA-Platform", secCHHeaders.secCHUAPlatform)
+            .header("Sec-CH-UA-Arch", "\"\"")
+            .header("Sec-CH-UA-Bitness", "\"\"")
+            .header("Sec-CH-UA-Model", "\"\"")
             .apply {
                 secCHHeaders.secCHUAPlatformVersion?.let {
                     header("Sec-CH-UA-Platform-Version", "\"$it\"")
+                }
+                secCHHeaders.secCHUAFullVersion?.let {
+                    header("Sec-CH-UA-Full-Version", "\"$it\"")
                 }
                 secCHHeaders.secCHUAFullVersionList?.let {
                     header("Sec-CH-UA-Full-Version-List", it)
@@ -53,34 +50,28 @@ class UserAgentClientHintsInterceptor : Interceptor {
     }
 }
 
-/**
- * Data class for Sec-CH-UA Client Hints headers
- */
 internal data class SecCHHeaders(
     val secCHUA: String,
     val secCHUAMobile: String,
     val secCHUAPlatform: String,
     val secCHUAPlatformVersion: String? = null,
+    val secCHUAFullVersion: String? = null,
     val secCHUAFullVersionList: String? = null,
 )
 
-/**
- * User-Agent parser
- * Parses User-Agent string into corresponding Client Hints headers
- */
 internal class UAParser {
 
     companion object {
         private const val UNKNOWN_VERSION = "119"
         private const val NOT_A_BRAND_VERSION = "24"
 
-        // Precompiled regular expressions
         private val MAC_OS_VERSION_PATTERN = Pattern.compile("Mac OS X (\\d+[._]\\d+)")
         private val ANDROID_VERSION_PATTERN = Pattern.compile("Android (\\d+)")
         private val IOS_VERSION_PATTERN = Pattern.compile("OS (\\d+[._]\\d+)")
         private val EDGE_VERSION_PATTERN = Pattern.compile("Edg/(\\d+)")
         private val OPERA_VERSION_PATTERN = Pattern.compile("OPR/(\\d+)")
         private val CHROME_VERSION_PATTERN = Pattern.compile("Chrome/(\\d+)")
+        private val CHROME_FULL_VERSION_PATTERN = Pattern.compile("Chrome/([\\d.]+)")
         private val FIREFOX_VERSION_PATTERN = Pattern.compile("Firefox/(\\d+)")
         private val SAFARI_VERSION_PATTERN = Pattern.compile("Version/(\\d+)")
     }
@@ -88,13 +79,10 @@ internal class UAParser {
     fun parseUAtoSecCH(ua: String): SecCHHeaders {
         val brands = mutableListOf<String>()
 
-        // Detect platform and mobile device
         val (platform, isMobile, platformVersion) = detectPlatform(ua)
+        val fullVersion = extractVersion(ua, CHROME_FULL_VERSION_PATTERN)
 
-        // Detect browser brands and versions
         detectBrowserBrands(ua, brands)
-
-        // Add obfuscation brand
         brands.add("\"Not?A_Brand\";v=\"$NOT_A_BRAND_VERSION\"")
 
         return SecCHHeaders(
@@ -102,6 +90,7 @@ internal class UAParser {
             secCHUAMobile = if (isMobile) "?1" else "?0",
             secCHUAPlatform = platform,
             secCHUAPlatformVersion = platformVersion,
+            secCHUAFullVersion = fullVersion,
             secCHUAFullVersionList = brands.joinToString(", "),
         )
     }

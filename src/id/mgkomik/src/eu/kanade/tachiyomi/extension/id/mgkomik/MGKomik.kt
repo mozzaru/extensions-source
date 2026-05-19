@@ -8,6 +8,7 @@ import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.SManga
+import keiyoushi.lib.randomua.UserAgentType
 import keiyoushi.lib.randomua.addRandomUAPreference
 import keiyoushi.lib.randomua.setRandomUserAgent
 import org.jsoup.nodes.Document
@@ -23,33 +24,43 @@ class MGKomik :
         SimpleDateFormat("dd MMM yy", Locale.US),
     ),
     ConfigurableSource {
+
     override val useLoadMoreRequest = LoadMoreStrategy.Always
-
     override val useNewChapterEndpoint = false
-
     override val mangaSubString = "komik"
 
     override fun headersBuilder() = super.headersBuilder().apply {
-        setRandomUserAgent()
+        setRandomUserAgent(userAgentType = UserAgentType.MOBILE)
+        if (get("User-Agent").isNullOrEmpty()) {
+            set("User-Agent", DEFAULT_USER_AGENT)
+        }
         set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
         set("Accept-Language", "id-ID,id;q=0.9")
         set("Upgrade-Insecure-Requests", "1")
+        set("Sec-Fetch-Site", "none")
+        set("Sec-Fetch-Mode", "navigate")
+        set("Sec-Fetch-User", "?1")
+        set("Sec-Fetch-Dest", "document")
         set("Priority", "u=0, i")
     }
 
-    override val client = network.client.newBuilder()
-        .addInterceptor(UserAgentClientHintsInterceptor())
+    override val client = network.cloudflareClient.newBuilder()
         .addInterceptor { chain ->
             val request = chain.request()
-            val headers = request.headers.newBuilder().apply {
-                removeAll("X-Requested-With")
-            }.build()
-            chain.proceed(request.newBuilder().headers(headers).build())
+            if (request.method == "GET") {
+                val headers = request.headers.newBuilder().apply {
+                    removeAll("X-Requested-With")
+                }.build()
+                chain.proceed(request.newBuilder().headers(headers).build())
+            } else {
+                chain.proceed(request)
+            }
         }
+        .addInterceptor(UserAgentClientHintsInterceptor())
         .rateLimit(3)
         .build()
 
-    // ================================== Popular ======================================
+    // ================================== Popular ==================================
 
     override fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
         element.select("div.item-thumb a").let {
@@ -109,5 +120,9 @@ class MGKomik :
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         screen.addRandomUAPreference()
+    }
+
+    companion object {
+        private const val DEFAULT_USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Mobile Safari/537.36"
     }
 }
