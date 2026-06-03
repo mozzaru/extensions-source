@@ -1,11 +1,15 @@
 package eu.kanade.tachiyomi.extension.id.mgkomik
 
+import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.multisrc.madara.Madara
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
+import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.SManga
+import keiyoushi.lib.randomua.addRandomUAPreference
+import keiyoushi.lib.randomua.setRandomUserAgent
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.text.SimpleDateFormat
@@ -17,7 +21,8 @@ class MGKomik :
         "https://id.mgkomik.cc",
         "id",
         SimpleDateFormat("dd MMM yy", Locale.US),
-    ) {
+    ),
+    ConfigurableSource {
     override val useLoadMoreRequest = LoadMoreStrategy.Always
 
     override val useNewChapterEndpoint = false
@@ -25,22 +30,54 @@ class MGKomik :
     override val mangaSubString = "komik"
 
     override fun headersBuilder() = super.headersBuilder().apply {
-        set("Sec-Fetch-Site", "same-origin")
-        set("Upgrade-Insecure-Requests", "1")
+        setRandomUserAgent()
+        set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
+        set("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
         set("Referer", "$baseUrl/")
+        set("Sec-Fetch-Dest", "document")
+        set("Sec-Fetch-Mode", "navigate")
         set("Sec-Fetch-Site", "none")
+        set("Sec-Fetch-User", "?1")
+        set("Upgrade-Insecure-Requests", "1")
     }
 
     override val client = network.client.newBuilder()
+        .addInterceptor(UserAgentClientHintsInterceptor())
         .addInterceptor { chain ->
             val request = chain.request()
+            val url = request.url.toString()
             val headers = request.headers.newBuilder().apply {
-                removeAll("X-Requested-With")
+                if (url.contains("admin-ajax.php") || url.contains("wp-json") || url.contains("ajax/chapters")) {
+                    set("X-Requested-With", "XMLHttpRequest")
+                    set("Sec-Fetch-Dest", "empty")
+                    set("Sec-Fetch-Mode", "cors")
+                    set("Sec-Fetch-Site", "same-origin")
+                    set("Origin", baseUrl)
+                    if (request.method == "POST") {
+                        set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+                    }
+                } else {
+                    removeAll("X-Requested-With")
+                    if (url.contains(baseUrl)) {
+                        set("Sec-Fetch-Site", "same-origin")
+                    }
+                }
+
+                // Identify image requests
+                val accept = request.header("Accept").orEmpty()
+                if (accept.startsWith("image/")) {
+                    set("Sec-Fetch-Dest", "image")
+                    set("Sec-Fetch-Mode", "no-cors")
+                    if (!url.contains(baseUrl)) {
+                        set("Sec-Fetch-Site", "cross-site")
+                        removeAll("Referer")
+                    }
+                }
             }.build()
 
             chain.proceed(request.newBuilder().headers(headers).build())
         }
-        .rateLimit(9, 2)
+        .rateLimit(3)
         .build()
 
     // ================================== Popular ======================================
@@ -87,6 +124,12 @@ class MGKomik :
             title,
             options.toTypedArray(),
         )
+
+    override fun getMangaUrl(manga: SManga) = "$baseUrl${manga.url}"
+
+    override fun setupPreferenceScreen(screen: PreferenceScreen) {
+        screen.addRandomUAPreference()
+    }
 
     override fun genresRequest() = GET("$baseUrl/$mangaSubString", headers)
 
