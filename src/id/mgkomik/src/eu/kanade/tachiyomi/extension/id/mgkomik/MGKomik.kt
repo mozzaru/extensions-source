@@ -39,6 +39,8 @@ class MGKomik :
         set("Sec-Fetch-Site", "none")
         set("Sec-Fetch-User", "?1")
         set("Upgrade-Insecure-Requests", "1")
+        set("X-Requested-With", "com.android.chrome")
+        set("Priority", "u=0, i")
     }
 
     override val client = network.client.newBuilder()
@@ -53,11 +55,12 @@ class MGKomik :
                     set("Sec-Fetch-Mode", "cors")
                     set("Sec-Fetch-Site", "same-origin")
                     set("Origin", baseUrl)
+                    removeAll("Sec-Fetch-User")
+                    removeAll("Upgrade-Insecure-Requests")
                     if (request.method == "POST") {
                         set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
                     }
                 } else {
-                    removeAll("X-Requested-With")
                     if (url.contains(baseUrl)) {
                         set("Sec-Fetch-Site", "same-origin")
                     }
@@ -68,6 +71,7 @@ class MGKomik :
                 if (accept.startsWith("image/")) {
                     set("Sec-Fetch-Dest", "image")
                     set("Sec-Fetch-Mode", "no-cors")
+                    removeAll("X-Requested-With")
                     if (!url.contains(baseUrl)) {
                         set("Sec-Fetch-Site", "cross-site")
                         removeAll("Referer")

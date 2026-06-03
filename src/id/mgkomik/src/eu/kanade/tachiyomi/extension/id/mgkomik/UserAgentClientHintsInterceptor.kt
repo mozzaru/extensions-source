@@ -72,6 +72,15 @@ class UserAgentClientHintsInterceptor : Interceptor {
                 secCHHeaders.secCHUAFullVersionList?.let {
                     header("Sec-CH-UA-Full-Version-List", it)
                 }
+                secCHHeaders.secCHUAArch?.let {
+                    header("Sec-CH-UA-Arch", "\"$it\"")
+                }
+                secCHHeaders.secCHUABitness?.let {
+                    header("Sec-CH-UA-Bitness", "\"$it\"")
+                }
+                secCHHeaders.secCHUAModel?.let {
+                    header("Sec-CH-UA-Model", "\"$it\"")
+                }
             }
             .build()
 
@@ -88,6 +97,9 @@ internal data class SecCHHeaders(
     val secCHUAPlatform: String,
     val secCHUAPlatformVersion: String? = null,
     val secCHUAFullVersionList: String? = null,
+    val secCHUAArch: String? = null,
+    val secCHUABitness: String? = null,
+    val secCHUAModel: String? = null,
 )
 
 /**
@@ -99,8 +111,8 @@ internal data class SecCHHeaders(
 internal class UAParser {
 
     companion object {
-        private const val UNKNOWN_VERSION = "119"
-        private const val NOT_A_BRAND_VERSION = "24"
+        private const val UNKNOWN_VERSION = "125"
+        private const val NOT_A_BRAND_VERSION = "8"
 
         // Precompiled regular expressions
         private val MAC_OS_VERSION_PATTERN = Pattern.compile("Mac OS X (\\d+[._]\\d+)")
@@ -111,6 +123,9 @@ internal class UAParser {
         private val CHROME_VERSION_PATTERN = Pattern.compile("Chrome/(\\d+)")
         private val FIREFOX_VERSION_PATTERN = Pattern.compile("Firefox/(\\d+)")
         private val SAFARI_VERSION_PATTERN = Pattern.compile("Version/(\\d+)")
+
+        private val ARCH_PATTERN = Pattern.compile("(x86_64|x86|arm64|arm|aarch64|v8l)")
+        private val MODEL_PATTERN = Pattern.compile("; ([^;]+) Build/")
     }
 
     fun parseUAtoSecCH(ua: String): SecCHHeaders {
@@ -123,7 +138,10 @@ internal class UAParser {
         detectBrowserBrands(ua, brands)
 
         // Add obfuscation brand (prevent browser fingerprinting)
-        brands.add("\"Not?A_Brand\";v=\"$NOT_A_BRAND_VERSION\"")
+        brands.add("\"Not.A/Brand\";v=\"$NOT_A_BRAND_VERSION\"")
+
+        val arch = extractArch(ua)
+        val model = extractModel(ua)
 
         return SecCHHeaders(
             secCHUA = brands.joinToString(", "),
@@ -131,6 +149,9 @@ internal class UAParser {
             secCHUAPlatform = platform,
             secCHUAPlatformVersion = platformVersion,
             secCHUAFullVersionList = brands.joinToString(", "),
+            secCHUAArch = arch,
+            secCHUABitness = if (arch?.contains("64") == true) "64" else "32",
+            secCHUAModel = model,
         )
     }
 
@@ -213,6 +234,24 @@ internal class UAParser {
                 brands.add("\"Not_A Brand\";v=\"$UNKNOWN_VERSION\"")
             }
         }
+    }
+
+    private fun extractArch(ua: String): String? {
+        val matcher = ARCH_PATTERN.matcher(ua)
+        return if (matcher.find()) {
+            val arch = matcher.group(1).lowercase()
+            when {
+                arch.contains("64") -> "arm" // Simplified for common mobile UAs
+                else -> ""
+            }
+        } else {
+            ""
+        }
+    }
+
+    private fun extractModel(ua: String): String? {
+        val matcher = MODEL_PATTERN.matcher(ua)
+        return if (matcher.find()) matcher.group(1) else ""
     }
 
     private fun extractVersion(ua: String, pattern: Pattern): String? = pattern.matcher(ua)
