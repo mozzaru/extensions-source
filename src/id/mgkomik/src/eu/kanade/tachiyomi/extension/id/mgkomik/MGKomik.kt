@@ -25,10 +25,30 @@ class MGKomik :
     override val mangaSubString = "komik"
 
     override fun headersBuilder() = super.headersBuilder().apply {
-        set("Sec-Fetch-Site", "same-origin")
+        val ua = "Mozilla/5.0 (Linux; Android 11; RMX2103) " +
+                 "AppleWebKit/537.36 (KHTML, like Gecko) " +
+                 "Chrome/147.0.7727.93 Mobile Safari/537.36"
+
+        set("User-Agent", ua)
+        set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+        set("Accept-Language", "id-ID,id;q=0.9")
         set("Upgrade-Insecure-Requests", "1")
+        set("sec-fetch-dest", "document")
+        set("sec-fetch-mode", "navigate")
+        set("sec-fetch-site", "none")
+        set("sec-fetch-user", "?1")
+
+        // WAJIB — ini yang hilang!
+        set("sec-ch-ua", "\"Chromium\";v=\"147\", \"Not.A/Brand\";v=\"8\"")
+        set("sec-ch-ua-mobile", "?1")
+        set("sec-ch-ua-platform", "\"Android\"")
+        set("sec-ch-ua-arch", "\"\"")
+        set("sec-ch-ua-bitness", "\"\"")
+        set("sec-ch-ua-full-version", "\"147.0.7727.93\"")
+        set("sec-ch-ua-full-version-list", "\"Chromium\";v=\"147.0.7727.93\", \"Not.A/Brand\";v=\"8.0.0.0\"")
+        set("sec-ch-ua-model", "\"RMX2103\"")
+        set("sec-ch-ua-platform-version", "\"11.0.0\"")
         set("Referer", "$baseUrl/")
-        set("Sec-Fetch-Site", "none")
     }
 
     override val client = network.client.newBuilder()
@@ -37,13 +57,12 @@ class MGKomik :
             val headers = request.headers.newBuilder().apply {
                 removeAll("X-Requested-With")
             }.build()
-
             chain.proceed(request.newBuilder().headers(headers).build())
         }
-        .rateLimit(9, 2)
+        .rateLimit(3)
         .build()
 
-    // ================================== Popular ======================================
+    // ================================== Popular ==================================
 
     override fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
         element.select("div.item-thumb a").let {
