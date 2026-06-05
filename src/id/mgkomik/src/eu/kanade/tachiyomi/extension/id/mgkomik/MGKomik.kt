@@ -1,11 +1,15 @@
 package eu.kanade.tachiyomi.extension.id.mgkomik
 
+import android.util.Log
 import eu.kanade.tachiyomi.multisrc.madara.Madara
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
+import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.SManga
+import eu.kanade.tachiyomi.util.asJsoup
+import okhttp3.Response
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.text.SimpleDateFormat
@@ -18,40 +22,37 @@ class MGKomik :
         "id",
         SimpleDateFormat("dd MMM yy", Locale.US),
     ) {
-    override val useLoadMoreRequest = LoadMoreStrategy.Always
+    override val useLoadMoreRequest = LoadMoreStrategy.Never
 
     override val useNewChapterEndpoint = false
-
     override val mangaSubString = "komik"
 
     override fun headersBuilder() = super.headersBuilder().apply {
-        set("Sec-Fetch-Site", "same-origin")
         set("Upgrade-Insecure-Requests", "1")
         set("Referer", "$baseUrl/")
-        set("Sec-Fetch-Site", "none")
     }
 
     override val client = network.client.newBuilder()
-        .addInterceptor { chain ->
-            val request = chain.request()
-            val headers = request.headers.newBuilder().apply {
-                removeAll("X-Requested-With")
-            }.build()
-
-            chain.proceed(request.newBuilder().headers(headers).build())
-        }
         .rateLimit(9, 2)
         .build()
 
-    // ================================== Popular ======================================
+    // ================================== Popular/Latest ======================================
 
     override fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
-        element.select("div.item-thumb a").let {
-            setUrlWithoutDomain(it.attr("abs:href"))
-            title = it.attr("title")
-            thumbnail_url = it.select("img").attr("abs:src")
+        element.selectFirst("div.item-thumb a")?.let { a ->
+            setUrlWithoutDomain(a.attr("abs:href"))
         }
+        title = element.selectFirst("div.post-title a")?.text()
+            ?: element.selectFirst("div.item-thumb a")?.attr("title")
+            ?: ""
+        thumbnail_url = element.selectFirst("div.item-thumb img")?.let {
+            imageFromElement(it)
+        }
+        Log.d("MGKomik", "item: url=$url title=$title")
     }
+
+    override fun popularMangaNextPageSelector(): String =
+        "a.page.larger, .wp-pagenavi a.last"
 
     // ================================ Chapters ================================
 
@@ -83,10 +84,7 @@ class MGKomik :
     }
 
     private class GenreContentFilter(title: String, options: List<Pair<String, String>>) :
-        UriPartFilter(
-            title,
-            options.toTypedArray(),
-        )
+        UriPartFilter(title, options.toTypedArray())
 
     override fun genresRequest() = GET("$baseUrl/$mangaSubString", headers)
 
