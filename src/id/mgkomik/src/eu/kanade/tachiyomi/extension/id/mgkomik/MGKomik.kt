@@ -25,11 +25,14 @@ class MGKomik :
     override val mangaSubString = "komik"
 
     override fun headersBuilder() = super.headersBuilder().apply {
-        val ua = "Mozilla/5.0 (Linux; Android 11; RMX2103) " +
-                 "AppleWebKit/537.36 (KHTML, like Gecko) " +
-                 "Chrome/147.0.7727.93 Mobile Safari/537.36"
+        val ua = get("User-Agent")!!
 
-        set("User-Agent", ua)
+        val chromeVersion = Regex("Chrome/(\\d+\\.\\d+\\.\\d+\\.\\d+)")
+            .find(ua)?.groupValues?.get(1) ?: "124.0.0.0"
+        val chromeMajor = chromeVersion.split(".").firstOrNull() ?: "124"
+        val androidVersion = Regex("Android (\\d+)")
+            .find(ua)?.groupValues?.get(1) ?: "10"
+
         set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
         set("Accept-Language", "id-ID,id;q=0.9")
         set("Upgrade-Insecure-Requests", "1")
@@ -37,18 +40,15 @@ class MGKomik :
         set("sec-fetch-mode", "navigate")
         set("sec-fetch-site", "none")
         set("sec-fetch-user", "?1")
-
-        // WAJIB — ini yang hilang!
-        set("sec-ch-ua", "\"Chromium\";v=\"147\", \"Not.A/Brand\";v=\"8\"")
+        set("sec-ch-ua", "\"Chromium\";v=\"$chromeMajor\", \"Not.A/Brand\";v=\"8\"")
         set("sec-ch-ua-mobile", "?1")
         set("sec-ch-ua-platform", "\"Android\"")
         set("sec-ch-ua-arch", "\"\"")
         set("sec-ch-ua-bitness", "\"\"")
-        set("sec-ch-ua-full-version", "\"147.0.7727.93\"")
-        set("sec-ch-ua-full-version-list", "\"Chromium\";v=\"147.0.7727.93\", \"Not.A/Brand\";v=\"8.0.0.0\"")
-        set("sec-ch-ua-model", "\"RMX2103\"")
-        set("sec-ch-ua-platform-version", "\"11.0.0\"")
-        set("Referer", "$baseUrl/")
+        set("sec-ch-ua-full-version", "\"$chromeVersion\"")
+        set("sec-ch-ua-full-version-list", "\"Chromium\";v=\"$chromeVersion\", \"Not.A/Brand\";v=\"8.0.0.0\"")
+        set("sec-ch-ua-platform-version", "\"$androidVersion.0.0\"")
+        set("sec-ch-ua-model", "\"\"")
     }
 
     override val client = network.client.newBuilder()
