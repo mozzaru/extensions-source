@@ -1,13 +1,16 @@
 package eu.kanade.tachiyomi.extension.id.mgkomik
 
-import android.util.Log
 import eu.kanade.tachiyomi.multisrc.madara.Madara
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
-import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
+import eu.kanade.tachiyomi.source.model.MangasPage
+import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
-import okhttp3.Headers
+import eu.kanade.tachiyomi.util.asJsoup
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.Request
+import okhttp3.Response
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.text.SimpleDateFormat
@@ -20,150 +23,239 @@ class MGKomik :
         "id",
         SimpleDateFormat("dd MMM yy", Locale.US),
     ) {
-    override val useLoadMoreRequest = LoadMoreStrategy.Always
 
-    override val useNewChapterEndpoint = false
-
+    override val useLoadMoreRequest = LoadMoreStrategy.Never
+    override val useNewChapterEndpoint = true
     override val mangaSubString = "komik"
+    override val chapterUrlSuffix = ""
 
+    // ─── HEADERS ─────────────────────────────────────────────────
     override fun headersBuilder() = super.headersBuilder().apply {
-        val ua = get("User-Agent")!!
-
-        val chromeVersion = Regex("Chrome/(\\d+\\.\\d+\\.\\d+\\.\\d+)")
-            .find(ua)?.groupValues?.get(1) ?: "124.0.0.0"
-        val chromeMajor = chromeVersion.split(".").firstOrNull() ?: "124"
-        val androidVersion = Regex("Android (\\d+)")
-            .find(ua)?.groupValues?.get(1) ?: "10"
-
-        set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+        set("User-Agent", USER_AGENT)
+        set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
         set("Accept-Language", "id-ID,id;q=0.9")
+        set("Sec-CH-UA", "\"Chromium\";v=\"$CH_VERSION\", \"Not.A/Brand\";v=\"8\"")
+        set("Sec-CH-UA-Arch", "\"\"")
+        set("Sec-CH-UA-Bitness", "\"\"")
+        set("Sec-CH-UA-Full-Version", "\"$CH_VERSION.0.7727.93\"")
+        set("Sec-CH-UA-Full-Version-List", "\"Chromium\";v=\"$CH_VERSION.0.7727.93\", \"Not.A/Brand\";v=\"8.0.0.0\"")
+        set("Sec-CH-UA-Mobile", "?1")
+        set("Sec-CH-UA-Model", "\"\"")
+        set("Sec-CH-UA-Platform", "\"Android\"")
+        set("Sec-CH-UA-Platform-Version", "\"11.0.0\"")
         set("Upgrade-Insecure-Requests", "1")
-        set("sec-fetch-dest", "document")
-        set("sec-fetch-mode", "navigate")
-        set("sec-fetch-site", "none")
-        set("sec-fetch-user", "?1")
-        set("sec-ch-ua", "\"Chromium\";v=\"$chromeMajor\", \"Not.A/Brand\";v=\"8\"")
-        set("sec-ch-ua-mobile", "?1")
-        set("sec-ch-ua-platform", "\"Android\"")
-        set("sec-ch-ua-arch", "\"\"")
-        set("sec-ch-ua-bitness", "\"\"")
-        set("sec-ch-ua-full-version", "\"$chromeVersion\"")
-        set("sec-ch-ua-full-version-list", "\"Chromium\";v=\"$chromeVersion\", \"Not.A/Brand\";v=\"8.0.0.0\"")
-        set("sec-ch-ua-platform-version", "\"$androidVersion.0.0\"")
-        set("sec-ch-ua-model", "\"\"")
+        set("Priority", "u=0, i")
     }
 
-    // Override xhrHeaders — hapus X-Requested-With, ganti sec-fetch untuk AJAX
-    override val xhrHeaders: Headers by lazy {
-        headersBuilder()
-            .removeAll("X-Requested-With")
-            .set("sec-fetch-dest", "empty")
-            .set("sec-fetch-mode", "cors")
-            .set("sec-fetch-site", "same-origin")
-            .removeAll("Upgrade-Insecure-Requests")
-            .removeAll("sec-fetch-user")
-            .build()
-    }
-
+    // ─── HTTP CLIENT ─────────────────────────────────────────────
     override val client = network.client.newBuilder()
         .addInterceptor { chain ->
             val request = chain.request()
-
-            Log.d("MGKomik", "headersBuilder() headers:")
-            request.headers.forEach { (name, value) ->
-                Log.d("MGKomik", "  $name: $value")
+            val path = request.url.encodedPath
+            val isAjax = path.contains("admin-ajax.php") || path.contains("wp-json")
+            if (isAjax) {
+                chain.proceed(
+                    request.newBuilder()
+                        .header("X-Requested-With", "XMLHttpRequest")
+                        .header("Sec-Fetch-Dest", "empty")
+                        .header("Sec-Fetch-Mode", "cors")
+                        .header("Sec-Fetch-Site", "same-origin")
+                        .header("Origin", baseUrl)
+                        .header("Priority", "u=1, i")
+                        .removeHeader("Sec-Fetch-User")
+                        .removeHeader("Upgrade-Insecure-Requests")
+                        .build(),
+                )
+            } else {
+                chain.proceed(
+                    request.newBuilder()
+                        .removeHeader("X-Requested-With")
+                        .build(),
+                )
             }
-
-            Log.d("MGKomik", "→ REQUEST: ${request.url}")
-            Log.d("MGKomik", "  User-Agent: ${request.header("User-Agent")}")
-            Log.d("MGKomik", "  sec-ch-ua: ${request.header("sec-ch-ua") ?: "TIDAK ADA!"}")
-            Log.d("MGKomik", "  X-Requested-With: ${request.header("X-Requested-With") ?: "tidak ada ✓"}")
-
-            val headers = request.headers.newBuilder().apply {
-                removeAll("X-Requested-With")
-            }.build()
-
-            val newRequest = request.newBuilder().headers(headers).build()
-            val response = chain.proceed(newRequest)
-
-            Log.d("MGKomik", "← RESPONSE: ${response.code} | URL: ${response.request.url}")
-
-            response
         }
         .rateLimit(3)
         .build()
 
-    // ================================== Popular ==================================
+    // ─── POPULAR MANGA ───────────────────────────────────────────
+    override fun popularMangaRequest(page: Int): Request {
+        val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
+            .addQueryParameter("m_orderby", "trending")
+            .build()
+        return GET(url, headers)
+    }
+
+    // ─── LATEST UPDATES ──────────────────────────────────────────
+
+    override fun latestUpdatesRequest(page: Int): Request {
+        val ts = System.currentTimeMillis() / 1000
+        val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl()
+            .newBuilder()
+            .addQueryParameter("m_orderby", "latest")
+            .addQueryParameter("_", ts.toString())
+            .build()
+        return GET(url, headers)
+    }
+
+    override fun latestUpdatesParse(response: Response): MangasPage {
+        val document = response.asJsoup()
+        val mangas = document.select(popularMangaSelector()).map { element: Element ->
+            popularMangaFromElement(element)
+        }
+        val hasNextPage = document.selectFirst(popularMangaNextPageSelector()) != null
+        return MangasPage(mangas, hasNextPage)
+    }
+
+    // ─── CHAPTER LIST ────────────────────────────────────────────
+    override fun xhrChaptersRequest(mangaUrl: String): Request =
+        GET(mangaUrl, headers)
+
+    // ─── NAVIGATION HEADERS ──────────────────────────────────────
+    private fun navHeaders(referer: String = "$baseUrl/") = headers.newBuilder()
+        .set("Referer", referer)
+        .set("Cache-Control", "max-age=0")
+        .build()
+
+    // ─── PAGE LIST REQUEST ───────────────────────────────────────
+    override fun pageListRequest(chapter: SChapter): Request {
+        val path = chapter.url
+            .removePrefix(baseUrl)
+            .let { if (it.startsWith("/")) it else "/$it" }
+        val cleanUrl = "$baseUrl$path".substringBefore("?")
+        val mangaUrl = cleanUrl.trimEnd('/')
+            .substringBeforeLast("/")
+            .trimEnd('/') + "/"
+        return GET(cleanUrl, navHeaders(referer = mangaUrl))
+    }
+
+    // ─── SELECTORS ───────────────────────────────────────────────
+    override fun popularMangaSelector() = "div.page-item-detail.manga"
 
     override fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
-        element.select("div.item-thumb a").let {
-            setUrlWithoutDomain(it.attr("abs:href"))
-            title = it.attr("title")
-            thumbnail_url = it.select("img").attr("abs:src")
-        }
+        val titleLink = element.selectFirst(".post-title a")
+        title = titleLink?.text()?.trim() ?: element.selectFirst("img")?.attr("alt")?.trim() ?: ""
+        setUrlWithoutDomain(titleLink?.attr("abs:href").orEmpty())
+        thumbnail_url = element.selectFirst("img")?.let { imageFromElement(it) }
     }
 
-    override fun popularMangaParse(response: okhttp3.Response): eu.kanade.tachiyomi.source.model.MangasPage {
-        val result = super.popularMangaParse(response)
-        Log.d("MGKomik", "popularMangaParse: parsed=${result.mangas.size} hasNextPage=${result.hasNextPage}")
-        result.mangas.take(3).forEach {
-            Log.v("MGKomik", "  manga: title='${it.title}' url=${it.url}")
+    // ─── PAGINATION ──────────────────────────────────────────────
+    override fun popularMangaNextPageSelector() = "div.wp-pagenavi a.page, div.wp-pagenavi a.last"
+
+    // ─── MANGA DETAIL ────────────────────────────────────────────
+    override val mangaDetailsSelectorTitle = "div.post-title h1, div.post-title h3"
+    override val mangaDetailsSelectorAuthor = "div.author-content > a"
+    override val mangaDetailsSelectorStatus = "div.summary-heading:contains(Status) + div.summary-content"
+    override val mangaDetailsSelectorDescription = "div.description-summary div.summary__content p"
+    override val mangaDetailsSelectorThumbnail = "div.summary_image img"
+    override val mangaDetailsSelectorGenre = "div.genres-content a"
+
+    override fun chapterListSelector() = "li.wp-manga-chapter"
+
+    // ─── REQUEST HELPERS ─────────────────────────────────────────
+    private fun Request.addNavHeaders(): Request = newBuilder()
+        .headers(navHeaders(referer = "$baseUrl/$mangaSubString/"))
+        .build()
+
+    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request =
+        super.searchMangaRequest(page, query, filters).addNavHeaders()
+
+    override fun mangaDetailsRequest(manga: SManga): Request =
+        super.mangaDetailsRequest(manga).addNavHeaders()
+
+    override fun chapterListRequest(manga: SManga): Request =
+        super.chapterListRequest(manga).addNavHeaders()
+
+    override fun genresRequest(): Request =
+        super.genresRequest().addNavHeaders()
+
+    // ─── DATE PARSING ────────────────────────────────────────────
+    override fun parseChapterDate(date: String?): Long {
+        date ?: return 0L
+        val trimmed = date.trim()
+        if (trimmed.contains("yang lalu", ignoreCase = true)) {
+            return parseRelativeDate(trimmed)
         }
-        return result
+        return super.parseChapterDate(trimmed)
     }
 
-    override fun latestUpdatesParse(response: okhttp3.Response): eu.kanade.tachiyomi.source.model.MangasPage {
-        val result = super.latestUpdatesParse(response)
-        Log.d("MGKomik", "latestUpdatesParse: parsed=${result.mangas.size} hasNextPage=${result.hasNextPage}")
-        result.mangas.take(3).forEach {
-            Log.v("MGKomik", "  manga: title='${it.title}' url=${it.url}")
-        }
-        return result
-    }
+    // ─── GENRES ──────────────────────────────────────────────────
+    override fun parseGenres(document: Document): List<Genre> = listOf(
+        Genre("Action", "action"),
+        Genre("Adaptation", "adaptation"),
+        Genre("Adult", "adult"),
+        Genre("Adventure", "adventure"),
+        Genre("Animals", "animals"),
+        Genre("Apocalypse", "apocalypse"),
+        Genre("Comedy", "comedy"),
+        Genre("Cooking", "cooking"),
+        Genre("Crime", "crime"),
+        Genre("Demons", "demons"),
+        Genre("Drama", "drama"),
+        Genre("Dungeons", "dungeons"),
+        Genre("Ecchi", "ecchi"),
+        Genre("Fantasy", "fantasy"),
+        Genre("Fighting", "fighting"),
+        Genre("Full Color", "full-color"),
+        Genre("Game", "game"),
+        Genre("Gender Bender", "gender-bender"),
+        Genre("Gore", "gore"),
+        Genre("Harem", "harem"),
+        Genre("Historical", "historical"),
+        Genre("Horror", "horror"),
+        Genre("Isekai", "isekai"),
+        Genre("Josei", "josei"),
+        Genre("Kids", "kids"),
+        Genre("Magic", "magic"),
+        Genre("Manga", "manga"),
+        Genre("Manhua", "manhua"),
+        Genre("Manhwa", "manhwa"),
+        Genre("Martial Arts", "martial-arts"),
+        Genre("Mature", "mature"),
+        Genre("Mecha", "mecha"),
+        Genre("Medical", "medical"),
+        Genre("Military", "military"),
+        Genre("Monsters", "monsters"),
+        Genre("Murim", "murim"),
+        Genre("Music", "music"),
+        Genre("Mystery", "mystery"),
+        Genre("Office Workers", "office-workers"),
+        Genre("One-Shot", "one-shot"),
+        Genre("Overpowered", "overpowered"),
+        Genre("Psychological", "psychological"),
+        Genre("Regression", "regression"),
+        Genre("Reincarnation", "reincarnation"),
+        Genre("Revenge", "revenge"),
+        Genre("Reverse Harem", "reverse-harem"),
+        Genre("Romance", "romance"),
+        Genre("School Life", "school-life"),
+        Genre("Sci-fi", "sci-fi"),
+        Genre("Seinen", "seinen"),
+        Genre("Shoujo", "shoujo"),
+        Genre("Shoujo AI", "shouai"),
+        Genre("Shounen", "shounen"),
+        Genre("Slice of Life", "slice-of-life"),
+        Genre("Smut", "smut"),
+        Genre("Sports", "sports"),
+        Genre("Super Power", "super-power"),
+        Genre("Superhero", "superhero"),
+        Genre("Supernatural", "supernatural"),
+        Genre("Survival", "survival"),
+        Genre("System", "system"),
+        Genre("Thriller", "thriller"),
+        Genre("Time Travel", "time-travel"),
+        Genre("Tragedy", "tragedy"),
+        Genre("Transmigration", "transmigration"),
+        Genre("Vampire", "vampire"),
+        Genre("Violence", "violence"),
+        Genre("War", "war"),
+        Genre("Webtoon", "webtoon"),
+        Genre("Wuxia", "wuxia"),
+        Genre("Yuri", "yuri"),
+    )
 
-    // ================================ Chapters ================================
-
-    override val chapterUrlSuffix = ""
-
-    // ================================ Filters ================================
-
-    override fun getFilterList(): FilterList {
-        launchIO { fetchGenres() }
-
-        val filters = super.getFilterList().list.toMutableList()
-
-        filters += if (genresList.isNotEmpty()) {
-            listOf(
-                Filter.Separator(),
-                GenreContentFilter(
-                    title = intl["genre_filter_title"],
-                    options = genresList.map { it.name to it.id },
-                ),
-            )
-        } else {
-            listOf(
-                Filter.Separator(),
-                Filter.Header(intl["genre_missing_warning"]),
-            )
-        }
-
-        return FilterList(filters)
-    }
-
-    private class GenreContentFilter(title: String, options: List<Pair<String, String>>) :
-        UriPartFilter(
-            title,
-            options.toTypedArray(),
-        )
-
-    override fun genresRequest() = GET("$baseUrl/$mangaSubString", headers)
-
-    override fun parseGenres(document: Document): List<Genre> {
-        val genres = mutableListOf<Genre>()
-        genres += Genre("All", "")
-        genres += document.select(".row.genres li a").map { a ->
-            Genre(a.text(), a.absUrl("href"))
-        }
-        return genres
+    companion object {
+        private const val CH_VERSION = "147"
+        private const val USER_AGENT =
+            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/$CH_VERSION.0.0.0 Mobile Safari/537.36"
     }
 }
