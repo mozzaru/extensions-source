@@ -7,6 +7,7 @@ import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.SManga
+import okhttp3.Headers
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.text.SimpleDateFormat
@@ -25,11 +26,49 @@ class MGKomik :
 
     override val mangaSubString = "komik"
 
+    override fun headersBuilder() = super.headersBuilder().apply {
+        val ua = get("User-Agent")!!
+
+        val chromeVersion = Regex("Chrome/(\\d+\\.\\d+\\.\\d+\\.\\d+)")
+            .find(ua)?.groupValues?.get(1) ?: "124.0.0.0"
+        val chromeMajor = chromeVersion.split(".").firstOrNull() ?: "124"
+        val androidVersion = Regex("Android (\\d+)")
+            .find(ua)?.groupValues?.get(1) ?: "10"
+
+        set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+        set("Accept-Language", "id-ID,id;q=0.9")
+        set("Upgrade-Insecure-Requests", "1")
+        set("sec-fetch-dest", "document")
+        set("sec-fetch-mode", "navigate")
+        set("sec-fetch-site", "none")
+        set("sec-fetch-user", "?1")
+        set("sec-ch-ua", "\"Chromium\";v=\"$chromeMajor\", \"Not.A/Brand\";v=\"8\"")
+        set("sec-ch-ua-mobile", "?1")
+        set("sec-ch-ua-platform", "\"Android\"")
+        set("sec-ch-ua-arch", "\"\"")
+        set("sec-ch-ua-bitness", "\"\"")
+        set("sec-ch-ua-full-version", "\"$chromeVersion\"")
+        set("sec-ch-ua-full-version-list", "\"Chromium\";v=\"$chromeVersion\", \"Not.A/Brand\";v=\"8.0.0.0\"")
+        set("sec-ch-ua-platform-version", "\"$androidVersion.0.0\"")
+        set("sec-ch-ua-model", "\"\"")
+    }
+
+    // Override xhrHeaders — hapus X-Requested-With, ganti sec-fetch untuk AJAX
+    override val xhrHeaders: Headers by lazy {
+        headersBuilder()
+            .removeAll("X-Requested-With")
+            .set("sec-fetch-dest", "empty")
+            .set("sec-fetch-mode", "cors")
+            .set("sec-fetch-site", "same-origin")
+            .removeAll("Upgrade-Insecure-Requests")
+            .removeAll("sec-fetch-user")
+            .build()
+    }
+
     override val client = network.client.newBuilder()
         .addInterceptor { chain ->
             val request = chain.request()
 
-            // Log request headers
             Log.d("MGKomik", "headersBuilder() headers:")
             request.headers.forEach { (name, value) ->
                 Log.d("MGKomik", "  $name: $value")
@@ -38,8 +77,7 @@ class MGKomik :
             Log.d("MGKomik", "→ REQUEST: ${request.url}")
             Log.d("MGKomik", "  User-Agent: ${request.header("User-Agent")}")
             Log.d("MGKomik", "  sec-ch-ua: ${request.header("sec-ch-ua") ?: "TIDAK ADA!"}")
-            Log.d("MGKomik", "  sec-ch-ua-platform: ${request.header("sec-ch-ua-platform") ?: "TIDAK ADA!"}")
-            Log.d("MGKomik", "  sec-ch-ua-full-version: ${request.header("sec-ch-ua-full-version") ?: "TIDAK ADA!"}")
+            Log.d("MGKomik", "  X-Requested-With: ${request.header("X-Requested-With") ?: "tidak ada ✓"}")
 
             val headers = request.headers.newBuilder().apply {
                 removeAll("X-Requested-With")
@@ -49,9 +87,6 @@ class MGKomik :
             val response = chain.proceed(newRequest)
 
             Log.d("MGKomik", "← RESPONSE: ${response.code} | URL: ${response.request.url}")
-            response.headers.forEach { (name, value) ->
-                Log.d("MGKomik", "  $name: $value")
-            }
 
             response
         }
