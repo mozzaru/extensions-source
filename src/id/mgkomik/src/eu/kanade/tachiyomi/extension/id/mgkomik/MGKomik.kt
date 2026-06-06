@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.extension.id.mgkomik
 
+import android.util.Log
 import eu.kanade.tachiyomi.multisrc.madara.Madara
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
@@ -24,40 +25,35 @@ class MGKomik :
 
     override val mangaSubString = "komik"
 
-    override fun headersBuilder() = super.headersBuilder().apply {
-        val ua = get("User-Agent")!!
-
-        val chromeVersion = Regex("Chrome/(\\d+\\.\\d+\\.\\d+\\.\\d+)")
-            .find(ua)?.groupValues?.get(1) ?: "124.0.0.0"
-        val chromeMajor = chromeVersion.split(".").firstOrNull() ?: "124"
-        val androidVersion = Regex("Android (\\d+)")
-            .find(ua)?.groupValues?.get(1) ?: "10"
-
-        set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
-        set("Accept-Language", "id-ID,id;q=0.9")
-        set("Upgrade-Insecure-Requests", "1")
-        set("sec-fetch-dest", "document")
-        set("sec-fetch-mode", "navigate")
-        set("sec-fetch-site", "none")
-        set("sec-fetch-user", "?1")
-        set("sec-ch-ua", "\"Chromium\";v=\"$chromeMajor\", \"Not.A/Brand\";v=\"8\"")
-        set("sec-ch-ua-mobile", "?1")
-        set("sec-ch-ua-platform", "\"Android\"")
-        set("sec-ch-ua-arch", "\"\"")
-        set("sec-ch-ua-bitness", "\"\"")
-        set("sec-ch-ua-full-version", "\"$chromeVersion\"")
-        set("sec-ch-ua-full-version-list", "\"Chromium\";v=\"$chromeVersion\", \"Not.A/Brand\";v=\"8.0.0.0\"")
-        set("sec-ch-ua-platform-version", "\"$androidVersion.0.0\"")
-        set("sec-ch-ua-model", "\"\"")
-    }
-
     override val client = network.client.newBuilder()
         .addInterceptor { chain ->
             val request = chain.request()
+
+            // Log request headers
+            Log.d("MGKomik", "headersBuilder() headers:")
+            request.headers.forEach { (name, value) ->
+                Log.d("MGKomik", "  $name: $value")
+            }
+
+            Log.d("MGKomik", "→ REQUEST: ${request.url}")
+            Log.d("MGKomik", "  User-Agent: ${request.header("User-Agent")}")
+            Log.d("MGKomik", "  sec-ch-ua: ${request.header("sec-ch-ua") ?: "TIDAK ADA!"}")
+            Log.d("MGKomik", "  sec-ch-ua-platform: ${request.header("sec-ch-ua-platform") ?: "TIDAK ADA!"}")
+            Log.d("MGKomik", "  sec-ch-ua-full-version: ${request.header("sec-ch-ua-full-version") ?: "TIDAK ADA!"}")
+
             val headers = request.headers.newBuilder().apply {
                 removeAll("X-Requested-With")
             }.build()
-            chain.proceed(request.newBuilder().headers(headers).build())
+
+            val newRequest = request.newBuilder().headers(headers).build()
+            val response = chain.proceed(newRequest)
+
+            Log.d("MGKomik", "← RESPONSE: ${response.code} | URL: ${response.request.url}")
+            response.headers.forEach { (name, value) ->
+                Log.d("MGKomik", "  $name: $value")
+            }
+
+            response
         }
         .rateLimit(3)
         .build()
@@ -70,6 +66,24 @@ class MGKomik :
             title = it.attr("title")
             thumbnail_url = it.select("img").attr("abs:src")
         }
+    }
+
+    override fun popularMangaParse(response: okhttp3.Response): eu.kanade.tachiyomi.source.model.MangasPage {
+        val result = super.popularMangaParse(response)
+        Log.d("MGKomik", "popularMangaParse: parsed=${result.mangas.size} hasNextPage=${result.hasNextPage}")
+        result.mangas.take(3).forEach {
+            Log.v("MGKomik", "  manga: title='${it.title}' url=${it.url}")
+        }
+        return result
+    }
+
+    override fun latestUpdatesParse(response: okhttp3.Response): eu.kanade.tachiyomi.source.model.MangasPage {
+        val result = super.latestUpdatesParse(response)
+        Log.d("MGKomik", "latestUpdatesParse: parsed=${result.mangas.size} hasNextPage=${result.hasNextPage}")
+        result.mangas.take(3).forEach {
+            Log.v("MGKomik", "  manga: title='${it.title}' url=${it.url}")
+        }
+        return result
     }
 
     // ================================ Chapters ================================
