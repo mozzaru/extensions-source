@@ -4,10 +4,7 @@ import eu.kanade.tachiyomi.multisrc.madara.Madara
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.model.SChapter
-import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
-import org.jsoup.nodes.Document
-import org.jsoup.nodes.Element
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -83,30 +80,17 @@ class MGKomik :
     override fun xhrChaptersRequest(mangaUrl: String): Request =
         GET(mangaUrl, headers)
 
-    // PAGE LIST REQUEST
+    // PAGE LIST
     override fun pageListRequest(chapter: SChapter): Request =
         GET("$baseUrl${chapter.url}".substringBefore("?"), headers)
 
-    // SELECTORS
-    override fun popularMangaSelector() = "div.page-item-detail.manga"
+    // NEXT PAGE
+    override fun popularMangaNextPageSelector() =
+        "div.wp-pagenavi a.page, div.wp-pagenavi a.last"
 
-    override fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
-        val titleLink = element.selectFirst(".post-title a")
-        title = titleLink?.text()?.trim() ?: element.selectFirst("img")?.attr("alt")?.trim() ?: ""
-        setUrlWithoutDomain(titleLink?.attr("abs:href").orEmpty())
-        thumbnail_url = element.selectFirst("img")?.let { imageFromElement(it) }
-    }
-
-    // PAGINATION
-    override fun popularMangaNextPageSelector() = "div.wp-pagenavi a.page, div.wp-pagenavi a.last"
-
-    // MANGA DETAIL
-    override val mangaDetailsSelectorTitle       = "div.post-title h1, div.post-title h3"
-    override val mangaDetailsSelectorAuthor      = "div.author-content > a"
-    override val mangaDetailsSelectorStatus      = "div.summary-heading:contains(Status) + div.summary-content"
-    override val mangaDetailsSelectorDescription = "div.description-summary div.summary__content p"
-    override val mangaDetailsSelectorThumbnail   = "div.summary_image img"
-    override val mangaDetailsSelectorGenre       = "div.genres-content a"
+    // DESCRIPTION
+    override val mangaDetailsSelectorDescription =
+        "div.description-summary div.summary__content p"
 
     // GENRES
     override fun parseGenres(document: Document): List<Genre> =
@@ -114,7 +98,6 @@ class MGKomik :
             .mapNotNull { cb ->
                 val label = cb.selectFirst("label")?.text() ?: return@mapNotNull null
                 val value = cb.selectFirst("input[type=checkbox]")?.`val`() ?: return@mapNotNull null
-
                 if (value.matches(Regex("""^\d+[kKmM]?$"""))) return@mapNotNull null
                 Genre(label, value)
             }
@@ -122,6 +105,7 @@ class MGKomik :
     companion object {
         private const val CH_VERSION = "147"
         private const val USER_AGENT =
-            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/$CH_VERSION.0.0.0 Mobile Safari/537.36"
+            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/$CH_VERSION.0.0.0 Mobile Safari/537.36"
     }
 }
