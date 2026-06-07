@@ -3,14 +3,9 @@ package eu.kanade.tachiyomi.extension.id.mgkomik
 import eu.kanade.tachiyomi.multisrc.madara.Madara
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
-import eu.kanade.tachiyomi.source.model.FilterList
-import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.SChapter
-import eu.kanade.tachiyomi.source.model.SManga
-import eu.kanade.tachiyomi.util.asJsoup
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
-import okhttp3.Response
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.text.SimpleDateFormat
@@ -25,29 +20,16 @@ class MGKomik :
     ) {
 
     override val useLoadMoreRequest = LoadMoreStrategy.Never
-    override val useNewChapterEndpoint = true
     override val mangaSubString = "komik"
     override val chapterUrlSuffix = ""
 
-    // ─── HEADERS ─────────────────────────────────────────────────
+    // HEADERS
     override fun headersBuilder() = super.headersBuilder().apply {
         set("User-Agent", USER_AGENT)
-        set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
-        set("Accept-Language", "id-ID,id;q=0.9")
-        set("Sec-CH-UA", "\"Chromium\";v=\"$CH_VERSION\", \"Not.A/Brand\";v=\"8\"")
-        set("Sec-CH-UA-Arch", "\"\"")
-        set("Sec-CH-UA-Bitness", "\"\"")
-        set("Sec-CH-UA-Full-Version", "\"$CH_VERSION.0.7727.93\"")
-        set("Sec-CH-UA-Full-Version-List", "\"Chromium\";v=\"$CH_VERSION.0.7727.93\", \"Not.A/Brand\";v=\"8.0.0.0\"")
-        set("Sec-CH-UA-Mobile", "?1")
         set("Sec-CH-UA-Model", "\"\"")
-        set("Sec-CH-UA-Platform", "\"Android\"")
-        set("Sec-CH-UA-Platform-Version", "\"11.0.0\"")
-        set("Upgrade-Insecure-Requests", "1")
-        set("Priority", "u=0, i")
     }
 
-    // ─── HTTP CLIENT ─────────────────────────────────────────────
+    // HTTP CLIENT
     override val client = network.client.newBuilder()
         .addInterceptor { chain ->
             val request = chain.request()
@@ -77,16 +59,16 @@ class MGKomik :
         .rateLimit(3)
         .build()
 
-    // ─── POPULAR MANGA ───────────────────────────────────────────
+    // POPULAR MANGA
     override fun popularMangaRequest(page: Int): Request {
-        val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl().newBuilder()
+        val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl()
+            .newBuilder()
             .addQueryParameter("m_orderby", "trending")
             .build()
         return GET(url, headers)
     }
 
-    // ─── LATEST UPDATES ──────────────────────────────────────────
-
+    // LATEST UPDATES
     override fun latestUpdatesRequest(page: Int): Request {
         val ts = System.currentTimeMillis() / 1000
         val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl()
@@ -97,38 +79,15 @@ class MGKomik :
         return GET(url, headers)
     }
 
-    override fun latestUpdatesParse(response: Response): MangasPage {
-        val document = response.asJsoup()
-        val mangas = document.select(popularMangaSelector()).map { element: Element ->
-            popularMangaFromElement(element)
-        }
-        val hasNextPage = document.selectFirst(popularMangaNextPageSelector()) != null
-        return MangasPage(mangas, hasNextPage)
-    }
-
-    // ─── CHAPTER LIST ────────────────────────────────────────────
+    // CHAPTER LIST
     override fun xhrChaptersRequest(mangaUrl: String): Request =
         GET(mangaUrl, headers)
 
-    // ─── NAVIGATION HEADERS ──────────────────────────────────────
-    private fun navHeaders(referer: String = "$baseUrl/") = headers.newBuilder()
-        .set("Referer", referer)
-        .set("Cache-Control", "max-age=0")
-        .build()
+    // PAGE LIST REQUEST
+    override fun pageListRequest(chapter: SChapter): Request =
+        GET("$baseUrl${chapter.url}".substringBefore("?"), headers)
 
-    // ─── PAGE LIST REQUEST ───────────────────────────────────────
-    override fun pageListRequest(chapter: SChapter): Request {
-        val path = chapter.url
-            .removePrefix(baseUrl)
-            .let { if (it.startsWith("/")) it else "/$it" }
-        val cleanUrl = "$baseUrl$path".substringBefore("?")
-        val mangaUrl = cleanUrl.trimEnd('/')
-            .substringBeforeLast("/")
-            .trimEnd('/') + "/"
-        return GET(cleanUrl, navHeaders(referer = mangaUrl))
-    }
-
-    // ─── SELECTORS ───────────────────────────────────────────────
+    // SELECTORS
     override fun popularMangaSelector() = "div.page-item-detail.manga"
 
     override fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
@@ -138,120 +97,27 @@ class MGKomik :
         thumbnail_url = element.selectFirst("img")?.let { imageFromElement(it) }
     }
 
-    // ─── PAGINATION ──────────────────────────────────────────────
+    // PAGINATION
     override fun popularMangaNextPageSelector() = "div.wp-pagenavi a.page, div.wp-pagenavi a.last"
 
-    // ─── MANGA DETAIL ────────────────────────────────────────────
-    override val mangaDetailsSelectorTitle = "div.post-title h1, div.post-title h3"
-    override val mangaDetailsSelectorAuthor = "div.author-content > a"
-    override val mangaDetailsSelectorStatus = "div.summary-heading:contains(Status) + div.summary-content"
+    // MANGA DETAIL
+    override val mangaDetailsSelectorTitle       = "div.post-title h1, div.post-title h3"
+    override val mangaDetailsSelectorAuthor      = "div.author-content > a"
+    override val mangaDetailsSelectorStatus      = "div.summary-heading:contains(Status) + div.summary-content"
     override val mangaDetailsSelectorDescription = "div.description-summary div.summary__content p"
-    override val mangaDetailsSelectorThumbnail = "div.summary_image img"
-    override val mangaDetailsSelectorGenre = "div.genres-content a"
+    override val mangaDetailsSelectorThumbnail   = "div.summary_image img"
+    override val mangaDetailsSelectorGenre       = "div.genres-content a"
 
-    override fun chapterListSelector() = "li.wp-manga-chapter"
+    // GENRES
+    override fun parseGenres(document: Document): List<Genre> =
+        document.select("div.checkbox-group div.checkbox")
+            .mapNotNull { cb ->
+                val label = cb.selectFirst("label")?.text() ?: return@mapNotNull null
+                val value = cb.selectFirst("input[type=checkbox]")?.`val`() ?: return@mapNotNull null
 
-    // ─── REQUEST HELPERS ─────────────────────────────────────────
-    private fun Request.addNavHeaders(): Request = newBuilder()
-        .headers(navHeaders(referer = "$baseUrl/$mangaSubString/"))
-        .build()
-
-    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request =
-        super.searchMangaRequest(page, query, filters).addNavHeaders()
-
-    override fun mangaDetailsRequest(manga: SManga): Request =
-        super.mangaDetailsRequest(manga).addNavHeaders()
-
-    override fun chapterListRequest(manga: SManga): Request =
-        super.chapterListRequest(manga).addNavHeaders()
-
-    override fun genresRequest(): Request =
-        super.genresRequest().addNavHeaders()
-
-    // ─── DATE PARSING ────────────────────────────────────────────
-    override fun parseChapterDate(date: String?): Long {
-        date ?: return 0L
-        val trimmed = date.trim()
-        if (trimmed.contains("yang lalu", ignoreCase = true)) {
-            return parseRelativeDate(trimmed)
-        }
-        return super.parseChapterDate(trimmed)
-    }
-
-    // ─── GENRES ──────────────────────────────────────────────────
-    override fun parseGenres(document: Document): List<Genre> = listOf(
-        Genre("Action", "action"),
-        Genre("Adaptation", "adaptation"),
-        Genre("Adult", "adult"),
-        Genre("Adventure", "adventure"),
-        Genre("Animals", "animals"),
-        Genre("Apocalypse", "apocalypse"),
-        Genre("Comedy", "comedy"),
-        Genre("Cooking", "cooking"),
-        Genre("Crime", "crime"),
-        Genre("Demons", "demons"),
-        Genre("Drama", "drama"),
-        Genre("Dungeons", "dungeons"),
-        Genre("Ecchi", "ecchi"),
-        Genre("Fantasy", "fantasy"),
-        Genre("Fighting", "fighting"),
-        Genre("Full Color", "full-color"),
-        Genre("Game", "game"),
-        Genre("Gender Bender", "gender-bender"),
-        Genre("Gore", "gore"),
-        Genre("Harem", "harem"),
-        Genre("Historical", "historical"),
-        Genre("Horror", "horror"),
-        Genre("Isekai", "isekai"),
-        Genre("Josei", "josei"),
-        Genre("Kids", "kids"),
-        Genre("Magic", "magic"),
-        Genre("Manga", "manga"),
-        Genre("Manhua", "manhua"),
-        Genre("Manhwa", "manhwa"),
-        Genre("Martial Arts", "martial-arts"),
-        Genre("Mature", "mature"),
-        Genre("Mecha", "mecha"),
-        Genre("Medical", "medical"),
-        Genre("Military", "military"),
-        Genre("Monsters", "monsters"),
-        Genre("Murim", "murim"),
-        Genre("Music", "music"),
-        Genre("Mystery", "mystery"),
-        Genre("Office Workers", "office-workers"),
-        Genre("One-Shot", "one-shot"),
-        Genre("Overpowered", "overpowered"),
-        Genre("Psychological", "psychological"),
-        Genre("Regression", "regression"),
-        Genre("Reincarnation", "reincarnation"),
-        Genre("Revenge", "revenge"),
-        Genre("Reverse Harem", "reverse-harem"),
-        Genre("Romance", "romance"),
-        Genre("School Life", "school-life"),
-        Genre("Sci-fi", "sci-fi"),
-        Genre("Seinen", "seinen"),
-        Genre("Shoujo", "shoujo"),
-        Genre("Shoujo AI", "shouai"),
-        Genre("Shounen", "shounen"),
-        Genre("Slice of Life", "slice-of-life"),
-        Genre("Smut", "smut"),
-        Genre("Sports", "sports"),
-        Genre("Super Power", "super-power"),
-        Genre("Superhero", "superhero"),
-        Genre("Supernatural", "supernatural"),
-        Genre("Survival", "survival"),
-        Genre("System", "system"),
-        Genre("Thriller", "thriller"),
-        Genre("Time Travel", "time-travel"),
-        Genre("Tragedy", "tragedy"),
-        Genre("Transmigration", "transmigration"),
-        Genre("Vampire", "vampire"),
-        Genre("Violence", "violence"),
-        Genre("War", "war"),
-        Genre("Webtoon", "webtoon"),
-        Genre("Wuxia", "wuxia"),
-        Genre("Yuri", "yuri"),
-    )
+                if (value.matches(Regex("""^\d+[kKmM]?$"""))) return@mapNotNull null
+                Genre(label, value)
+            }
 
     companion object {
         private const val CH_VERSION = "147"
