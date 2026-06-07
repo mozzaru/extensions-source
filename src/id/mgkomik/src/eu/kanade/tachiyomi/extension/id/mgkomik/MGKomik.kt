@@ -4,7 +4,9 @@ import eu.kanade.tachiyomi.multisrc.madara.Madara
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.model.SChapter
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
+import org.jsoup.nodes.Document
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -67,11 +69,9 @@ class MGKomik :
 
     // LATEST UPDATES
     override fun latestUpdatesRequest(page: Int): Request {
-        val ts = System.currentTimeMillis() / 1000
         val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}".toHttpUrl()
             .newBuilder()
             .addQueryParameter("m_orderby", "latest")
-            .addQueryParameter("_", ts.toString())
             .build()
         return GET(url, headers)
     }
