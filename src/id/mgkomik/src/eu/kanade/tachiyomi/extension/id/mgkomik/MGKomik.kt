@@ -29,7 +29,7 @@ class MGKomik :
         set("Sec-CH-UA-Model", "\"\"")
     }
 
-    // HTTP CLIENT
+    // CLIENT — interceptor injects XHR headers into AJAX requests
     override val client = network.client.newBuilder()
         .addInterceptor { chain ->
             val request = chain.request()
@@ -51,31 +51,21 @@ class MGKomik :
                         .build(),
                 )
             } else {
-                chain.proceed(
-                    request.newBuilder()
-                        .removeHeader("X-Requested-With")
-                        .build(),
-                )
+                chain.proceed(request)
             }
         }
         .rateLimit(3)
         .build()
 
-    // POPULAR MANGA
+    // POPULAR
     override fun popularMangaRequest(page: Int): Request {
         val url = "$baseUrl/$mangaSubString${if (page > 1) "/page/$page/" else "/"}?m_orderby=trending"
         return GET(url, headers)
     }
 
-    // CHAPTER LIST
-    override fun xhrChaptersRequest(mangaUrl: String): Request =
-        GET(mangaUrl, headers)
-
-    // MANGA DETAILS
     override val mangaDetailsSelectorDescription =
         "div.description-summary div.summary__content p"
 
-    // GENRES
     override fun parseGenres(document: Document): List<Genre> =
         document.select("div.checkbox-group div.checkbox")
             .mapNotNull { cb ->
