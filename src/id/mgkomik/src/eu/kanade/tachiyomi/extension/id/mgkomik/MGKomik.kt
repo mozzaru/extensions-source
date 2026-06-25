@@ -2,7 +2,6 @@ package eu.kanade.tachiyomi.extension.id.mgkomik
 
 import eu.kanade.tachiyomi.multisrc.madara.Madara
 import eu.kanade.tachiyomi.network.GET
-import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
@@ -25,7 +24,6 @@ class MGKomik :
     override val chapterUrlSuffix = ""
 
     override fun headersBuilder() = super.headersBuilder().apply {
-        set("User-Agent", USER_AGENT)
         set("Sec-CH-UA-Model", "\"\"")
     }
 
@@ -90,8 +88,8 @@ class MGKomik :
             when (filter) {
                 is AuthorFilter -> filter.state.isNotBlank()
                 is ArtistFilter -> filter.state.isNotBlank()
-                is YearFilter   -> filter.state.isNotBlank()
-                is GenreList    -> filter.state.any { it.state }
+                is YearFilter -> filter.state.isNotBlank()
+                is GenreList -> filter.state.any { it.state }
                 else -> false
             }
         }
@@ -107,12 +105,5 @@ class MGKomik :
         }.build()
 
         return superRequest.newBuilder().post(newBody).build()
-    }
-
-    companion object {
-        private const val CH_VERSION = "147"
-        private const val USER_AGENT =
-            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 " +
-                "(KHTML, like Gecko) Chrome/$CH_VERSION.0.0.0 Mobile Safari/537.36"
     }
 }
