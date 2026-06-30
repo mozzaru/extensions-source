@@ -1,0 +1,130 @@
+package eu.kanade.tachiyomi.extension.id.mgkomik
+
+import eu.kanade.tachiyomi.source.model.Filter
+
+open class UriPartFilter(
+    name: String,
+    private val entries: Array<Pair<String, String>>,
+) : Filter.Select<String>(
+    name,
+    entries.map { it.first }.toTypedArray(),
+) {
+    fun selectedValue(): String = entries[state].second
+}
+
+class SortFilter : UriPartFilter(
+    "Urutkan",
+    arrayOf(
+        Pair("Terbaru", "latest"),
+        Pair("A-Z", "alphabet"),
+        Pair("Trending", "trending"),
+        Pair("Most Views", "views"),
+        Pair("Komik Baru", "new-manga"),
+    ),
+)
+
+class TypeFilter : UriPartFilter(
+    "Tipe",
+    arrayOf(
+        Pair("Semua", ""),
+        Pair("Manga", "manga"),
+        Pair("Manhua", "manhua"),
+        Pair("Manhwa", "manhwa"),
+    ),
+)
+
+class StatusFilter : UriPartFilter(
+    "Status/Koleksi",
+    arrayOf(
+        Pair("Semua", ""),
+        Pair("Ongoing", "on-going"),
+        Pair("Completed", "completed"),
+        Pair("Project", "project"),
+    ),
+)
+
+class GenreFilter : UriPartFilter(
+    "Genre",
+    arrayOf(
+        Pair("Semua", ""),
+        Pair("Action", "action"),
+        Pair("Adaptation", "adaptation"),
+        Pair("Adult", "adult"),
+        Pair("Adventure", "adventure"),
+        Pair("Age Gap", "age-gap"),
+        Pair("Animals", "animals"),
+        Pair("Apocalypse", "apocalypse"),
+        Pair("Based On A Novel", "based-on-a-novel"),
+        Pair("Beasts", "beasts"),
+        Pair("Comedy", "comedy"),
+        Pair("Cooking", "cooking"),
+        Pair("Crime", "crime"),
+        Pair("Cultivation", "cultivation"),
+        Pair("Demon", "demon"),
+        Pair("Demons", "demons"),
+        Pair("Drama", "drama"),
+        Pair("Dungeon", "dungeon"),
+        Pair("Ecchi", "ecchi"),
+        Pair("Fantasy", "fantasy"),
+        Pair("Fighting", "fighting"),
+        Pair("Full Color", "full-color"),
+        Pair("Game", "game"),
+        Pair("Gender Bender", "gender-bender"),
+        Pair("Gore", "gore"),
+        Pair("Harem", "harem"),
+        Pair("Historical", "historical"),
+        Pair("Horror", "horror"),
+        Pair("Hunter", "hunter"),
+        Pair("Isekai", "isekai"),
+        Pair("Josei", "josei"),
+        Pair("Long Strip", "long-strip"),
+        Pair("Magic", "magic"),
+        Pair("Manga", "manga"),
+        Pair("Manhua", "manhua"),
+        Pair("Manhwa", "manhwa"),
+        Pair("Martial Arts", "martial-arts"),
+        Pair("Mature", "mature"),
+        Pair("Mecha", "mecha"),
+        Pair("Medical", "medical"),
+        Pair("Military", "military"),
+        Pair("Murim", "murim"),
+        Pair("Mystery", "mystery"),
+        Pair("Office Workers", "office-workers"),
+        Pair("Overpowered", "overpowered"),
+        Pair("Parody", "parody"),
+        Pair("Politics", "politics"),
+        Pair("Post-Apocalyptic", "post-apocalyptic"),
+        Pair("Psychological", "psychological"),
+        Pair("Regression", "regression"),
+        Pair("Reincarnation", "reincarnation"),
+        Pair("Returner", "returner"),
+        Pair("Revenge", "revenge"),
+        Pair("Romance", "romance"),
+        Pair("School", "school"),
+        Pair("School Life", "school-life"),
+        Pair("Sci-fi", "sci-fi"),
+        Pair("Seinen", "seinen"),
+        Pair("Shoujo", "shoujo"),
+        Pair("Shounen", "shounen"),
+        Pair("Slice of Life", "slice-of-life"),
+        Pair("Smut", "smut"),
+        Pair("Sports", "sports"),
+        Pair("Super Power", "super-power"),
+        Pair("Supernatural", "supernatural"),
+        Pair("Survival", "survival"),
+        Pair("System", "system"),
+        Pair("Thriller", "thriller"),
+        Pair("Time Travel", "time-travel"),
+        Pair("Tower", "tower"),
+        Pair("Tragedy", "tragedy"),
+        Pair("Transmigration", "transmigration"),
+        Pair("Vampire", "vampire"),
+        Pair("Villain", "villain"),
+        Pair("Villainess", "villainess"),
+        Pair("Violence", "violence"),
+        Pair("War", "war"),
+        Pair("Webtoon", "webtoon"),
+        Pair("Wuxia", "wuxia"),
+        Pair("Yuri", "yuri"),
+    ),
+)
