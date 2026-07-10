@@ -6,13 +6,20 @@ plugins {
 
 keiyoushi {
     name = "Soul Scans"
-    versionCode = 2
+    versionCode = 35
     contentWarning = ContentWarning.SAFE
     libVersion = "1.4"
-    theme = "mangathemesia"
 
     source {
         lang = "id"
-        baseUrl = "https://soulscans.my.id"
+        baseUrl {
+            custom("https://v1.soulscans.org")
+        }
+        id = 8061354444776372735L
+    }
+
+    deeplink {
+        host("v1.soulscans.asia")
+        path("/comic/..*")
     }
 }
