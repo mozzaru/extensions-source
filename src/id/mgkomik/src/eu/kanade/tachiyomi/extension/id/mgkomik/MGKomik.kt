@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.extension.id.mgkomik
 
+import android.util.Log
 import eu.kanade.tachiyomi.multisrc.madara.Madara
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.source.model.Filter
@@ -25,6 +26,29 @@ abstract class MGKomik : Madara() {
     }
 
     override val client = network.client.newBuilder()
+        // ---- INTERCEPTOR LOGGING (SEMENTARA, buat debug) ----
+        // Hapus/comment interceptor ini kalau sudah selesai debugging.
+        .addInterceptor { chain ->
+            val request = chain.request()
+            Log.d("MGKomikDebug", "===> REQUEST: ${request.method} ${request.url}")
+            Log.d("MGKomikDebug", "===> REQUEST HEADERS:\n${request.headers}")
+
+            val response = chain.proceed(request)
+
+            Log.d("MGKomikDebug", "<=== RESPONSE: ${response.code} for ${request.url}")
+            Log.d("MGKomikDebug", "<=== RESPONSE HEADERS:\n${response.headers}")
+
+            // Peek body tanpa "menghabiskan" stream asli, biar tetap bisa diparse Madara/Jsoup.
+            try {
+                val peekBody = response.peekBody(2000).string()
+                Log.d("MGKomikDebug", "<=== RESPONSE BODY (2000 char pertama):\n$peekBody")
+            } catch (e: Exception) {
+                Log.d("MGKomikDebug", "<=== Gagal peek body: ${e.message}")
+            }
+
+            response
+        }
+        // ---- INTERCEPTOR AJAX (logic asli, jangan dihapus) ----
         .addInterceptor { chain ->
             val request = chain.request()
             val path = request.url.encodedPath
