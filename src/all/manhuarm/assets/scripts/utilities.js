@@ -115,8 +115,15 @@ function XHRProxy() {
                             try { payload = JSON.stringify(payload); } catch (e) { payload = String(payload); }
                         }
                         try {
+                            // Pass the *captured* headers (not the empty
+                            // default) - the server validates X-Gate-Token,
+                            // X-Gate-Nonce and X-Gate-Timestamp and returns
+                            // 403 if any are missing. The previous version
+                            // of this script always sent '{}' here, which
+                            // caused every captured request to be rejected
+                            // with 403 by the server.
                             window.__manhuarmBridge && window.__manhuarmBridge.onFetch(
-                                state.url, payload || '', '{}'
+                                state.url, payload || '', JSON.stringify(state.headers || {})
                             );
                         } catch (e) { /* ignore */ }
                     }
