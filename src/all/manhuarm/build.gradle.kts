@@ -6,7 +6,7 @@ plugins {
 
 keiyoushi {
     name = "Manhuarm"
-    versionCode = 26
+    versionCode = 27
     contentWarning = ContentWarning.MIXED
     libVersion = "1.4"
     theme = "madara"

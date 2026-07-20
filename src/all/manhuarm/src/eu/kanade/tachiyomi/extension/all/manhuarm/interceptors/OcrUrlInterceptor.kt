@@ -8,7 +8,6 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import okhttp3.Headers
-import org.json.JSONObject
 import uy.kohesive.injekt.injectLazy
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -17,7 +16,9 @@ class OcrUrlInterceptor(private val headers: Headers) {
 
     private val context: Application by injectLazy()
     private val handler = Handler(Looper.getMainLooper())
-    private val bridgeName = ('a'..'z').shuffled().take(10).joinToString("")
+
+    // A predictable name so utilities.js can find us via `window.__manhuarmBridge`.
+    private val bridgeName = "__manhuarmBridge"
 
     fun getOcrRequest(url: String): OcrRequest? {
         val latch = CountDownLatch(1)
@@ -42,19 +43,34 @@ class OcrUrlInterceptor(private val headers: Headers) {
                     @JavascriptInterface
                     fun onFetch(url: String, body: String, headersJson: String) {
                         if (ocrRequest == null && url.contains("fetch-ocr.php")) {
+                            // Filter out the scraper-detection probe. The
+                            // website sends a fake payload with cid="fake" and
+                            // ref="fake" - we have to ignore that and only act
+                            // on a real-looking payload.
+                            if (body.contains("\"cid\":\"fake\"") || body.contains("\"ref\":\"fake\"")) {
+                                Log.d(
+                                    TAG,
+                                    "Ignoring scraper-detection probe",
+                                )
+                                return
+                            }
                             val headerMap = mutableMapOf<String, String>()
                             try {
-                                val json = JSONObject(headersJson)
+                                val json = org.json.JSONObject(headersJson)
                                 val keys = json.keys()
                                 while (keys.hasNext()) {
                                     val key = keys.next()
                                     headerMap[key] = json.getString(key)
                                 }
-                            } catch (_: Exception) { /* do nothing */ }
+                            } catch (_: Exception) { /* ignore */ }
 
                             ocrRequest = OcrRequest(url, body, headerMap)
                             val elapsed = System.currentTimeMillis() - startedAt
-                            Log.d(TAG, "OCR call captured after ${elapsed}ms, body=${body.take(80)}")
+                            Log.d(
+                                TAG,
+                                "Real OCR call captured after ${elapsed}ms, " +
+                                    "body=${body.take(120)}",
+                            )
                             latch.countDown()
                         }
                     }
@@ -84,14 +100,11 @@ class OcrUrlInterceptor(private val headers: Headers) {
             Log.w(
                 TAG,
                 "OCR call NOT captured after ${elapsed}ms (timeout). " +
-                    "This is the cause of empty bubbles. The website may be using " +
-                    "a transport that our JS patches do not cover.",
+                    "Anti-scraping may have rejected the page - check that " +
+                    "Function.prototype.toString is being patched correctly.",
             )
         } else {
-            Log.d(
-                TAG,
-                "OCR request returned in ${elapsed}ms",
-            )
+            Log.d(TAG, "OCR request returned in ${elapsed}ms")
         }
         return ocrRequest
     }
@@ -101,79 +114,12 @@ class OcrUrlInterceptor(private val headers: Headers) {
     }
 
     private fun injectScript(view: WebView?) {
-        view?.evaluateJavascript(
-            """
-            (function() {
-                if (window.__manhuarmPatched) {
-                    return;
-                }
-                window.__manhuarmPatched = true;
-                window.__manhuarmBridge = '$bridgeName';
-
-                // Capture the native fetch BEFORE we (and utilities.js)
-                // override it, so the XHRProxy inside utilities.js can be
-                // wrapped and report the OCR call back to us. The website
-                // uses XMLHttpRequest which utilities.js patches via an
-                // XHRProxy that delegates to fetch(); if we don't override
-                // fetch first, the OCR call bypasses our interceptor.
-                const nativeFetch = window.fetch ? window.fetch.bind(window) : null;
-
-                if (nativeFetch) {
-                    window.fetch = function() {
-                        const input = arguments[0];
-                        const options = arguments[1] || {};
-                        const url = typeof input === 'string' ? input : (input.url || "");
-
-                        if (url && url.indexOf('fetch-ocr.php') !== -1) {
-                            let body = options.body;
-                            if (body && typeof body !== 'string') {
-                                try { body = JSON.stringify(body); } catch (_) { body = String(body); }
-                            }
-                            try {
-                                window.$bridgeName.onFetch(url, body || '', JSON.stringify(options.headers || {}));
-                            } catch (_) { /* ignore */ }
-                        }
-                        return nativeFetch.apply(window, arguments);
-                    };
-                }
-
-                // Also patch XMLHttpRequest.prototype.open to capture the URL
-                // and method, and .send to capture the body. This is a
-                // belt-and-braces fallback for the case where the page's own
-                // scripts run before our fetch override and create their own
-                // XHR before the XHRProxy in utilities.js is installed.
-                const origOpen = XMLHttpRequest.prototype.open;
-                const origSend = XMLHttpRequest.prototype.send;
-                const xhrState = new WeakMap();
-                XMLHttpRequest.prototype.open = function(method, url) {
-                    xhrState.set(this, { method: method, url: String(url || ''), body: null });
-                    return origOpen.apply(this, arguments);
-                };
-                XMLHttpRequest.prototype.send = function(body) {
-                    const state = xhrState.get(this);
-                    if (state) {
-                        state.body = body;
-                        if (state.url && state.url.indexOf('fetch-ocr.php') !== -1) {
-                            try {
-                                let payload = body;
-                                if (payload && typeof payload !== 'string') {
-                                    try { payload = JSON.stringify(payload); } catch (_) { payload = String(payload); }
-                                }
-                                window.$bridgeName.onFetch(state.url, payload || '', '{}');
-                            } catch (_) { /* ignore */ }
-                        }
-                    }
-                    return origSend.apply(this, arguments);
-                };
-
-                // Now run utilities.js which replaces XMLHttpRequest with a
-                // proxy. The proxy calls fetch() internally, which is now our
-                // patched version, so OCR calls are also reported back.
-                $utilities
-            })();
-            """.trimIndent(),
-            null,
-        )
+        // The utilities.js script does ALL the patching now: it patches
+        // Function.prototype.toString to fool the anti-scraping check, then
+        // installs XHR/fetch/setTimeout/setInterval/Worker wrappers. It uses
+        // `window.__manhuarmBridge` (set up by the JavascriptInterface above)
+        // to send the captured OCR request back to us.
+        view?.evaluateJavascript(utilities, null)
     }
 
     private companion object {
