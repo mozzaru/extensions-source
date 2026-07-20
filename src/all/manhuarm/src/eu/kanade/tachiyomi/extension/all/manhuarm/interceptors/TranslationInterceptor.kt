@@ -18,7 +18,6 @@ import kotlinx.serialization.json.Json
 import okhttp3.Interceptor
 import okhttp3.Response
 import uy.kohesive.injekt.injectLazy
-import java.util.concurrent.ConcurrentHashMap
 
 class TranslationInterceptor(
     val language: Language,
@@ -27,10 +26,10 @@ class TranslationInterceptor(
 
     private val json: Json by injectLazy()
 
-    // A small in-memory cache for the duration of the page load. Many pages
-    // have repeated text ("Hey", "Ugh", etc.) - translating each one
-    // separately wastes API quota. We use the source text as the key and
-    // the translated text as the value.
+    // An LRU cache for translated text. Many pages have repeated phrases
+    // ("Hey", "Ugh", character names) and translating each one separately
+    // wastes API quota. We use the source text as the key and the translated
+    // text as the value.
     //
     // The cache is per-TranslationInterceptor instance, which means it's
     // recreated every time Mihon rebuilds the OkHttp client (which happens
@@ -38,9 +37,15 @@ class TranslationInterceptor(
     // often imply the user wants a fresh state, and the per-chapter benefit
     // is still significant.
     //
-    // ConcurrentHashMap because multiple coroutines read/write at the same
-    // time (we translate the unique texts in parallel).
-    private val cache = ConcurrentHashMap<String, String>(64)
+    // CACHE BOUND: we cap the size at MAX_CACHE_ENTRIES to prevent OOM. When
+    // the cache is full and a new entry is inserted, the oldest entry is
+    // evicted. With MAX_CACHE_ENTRIES=1000 and an average entry size of
+    // ~700 bytes, the cache can hold up to ~700KB at most, which is well
+    // within the heap budget of any Android app. The eviction policy is
+    // simple (insertion order) - not true LRU but good enough for a small
+    // fixed-size cache.
+    private val cache = LinkedHashMap<String, String>(64, 0.75f, false)
+    private val cacheLock = Any()
 
     // Concurrency cap. Bing/Google both rate-limit, so spawning a coroutine
     // per dialog would hit the limit and either fail or just queue. With a
@@ -69,9 +74,6 @@ class TranslationInterceptor(
             runCatching {
                 runBlocking(Dispatchers.IO) {
                     // First pass: collect unique source texts to translate.
-                    // This is the key optimisation - a 100-page chapter with
-                    // "Hey", "Ugh" and a few long sentences only needs 3
-                    // API calls instead of 100+.
                     val sourceToTranslated = HashMap<String, String>()
                     val toTranslate = LinkedHashSet<String>()
                     dialogues.forEach { d ->
@@ -80,19 +82,17 @@ class TranslationInterceptor(
                     }
 
                     // Translate unique texts in parallel, capped at 4 concurrent.
-                    // The cache (and the in-flight sourceToTranslated map)
-                    // ensure we never translate the same text twice.
                     coroutineScope {
                         toTranslate.map { src ->
                             async(Dispatchers.IO) {
                                 rateLimiter.withPermit {
-                                    val cached = cache[src]
+                                    val cached = cacheLookup(src)
                                     if (cached != null) {
                                         sourceToTranslated[src] = cached
                                         return@async
                                     }
                                     val translatedText = translateWithFallback(src)
-                                    cache[src] = translatedText
+                                    cacheStore(src, translatedText)
                                     sourceToTranslated[src] = translatedText
                                 }
                             }
@@ -120,16 +120,16 @@ class TranslationInterceptor(
 
         val elapsed = System.currentTimeMillis() - startedAt
         val emptyCount = translated.count { it.getTextBy(language).isBlank() }
-        val uniqueSources = translated.map { it.text }.toSet().size
+        val cacheSize = synchronized(cacheLock) { cache.size }
         if (emptyCount > 0) {
             Log.w(
                 TAG,
-                "Translation finished in ${elapsed}ms but $emptyCount/${translated.size} dialogs are blank",
+                "Translation finished in ${elapsed}ms but $emptyCount/${translated.size} dialogs are blank (cache: $cacheSize)",
             )
         } else {
             Log.d(
                 TAG,
-                "Translation finished in ${elapsed}ms, ${translated.size} dialogs / $uniqueSources unique sources, all have text",
+                "Translation finished in ${elapsed}ms, ${translated.size} dialogs, cache: $cacheSize entries",
             )
         }
 
@@ -138,6 +138,35 @@ class TranslationInterceptor(
             .build()
 
         return chain.proceed(newRequest)
+    }
+
+    /**
+     * Thread-safe cache lookup.
+     */
+    private fun cacheLookup(key: String): String? = synchronized(cacheLock) {
+        cache[key]
+    }
+
+    /**
+     * Thread-safe cache store with size limit. When the cache is full, the
+     * oldest entry is evicted. This prevents OOM in the (unlikely) case of
+     * a very long session with many unique dialogs.
+     */
+    private fun cacheStore(key: String, value: String) {
+        synchronized(cacheLock) {
+            // If key already exists, just update the value
+            if (cache.containsKey(key)) {
+                cache[key] = value
+                return
+            }
+            // Evict oldest entries until we have room
+            while (cache.size >= MAX_CACHE_ENTRIES) {
+                val evicted = cache.keys.iterator().next()
+                cache.remove(evicted)
+                Log.d(TAG, "Cache full, evicted: ${evicted.take(30)}")
+            }
+            cache[key] = value
+        }
     }
 
     /**
@@ -174,5 +203,18 @@ class TranslationInterceptor(
 
     private companion object {
         const val TAG = "Manhuarm.Translate"
+
+        /**
+         * Maximum number of entries in the translation cache. The cache
+         * uses LinkedHashMap with insertion-order iteration and evicts the
+         * oldest entry when full. With 1000 entries and an average of
+         * ~700 bytes per entry (English text + translation), the cache
+         * can hold up to ~700KB which is well within the heap budget.
+         *
+         * If the user reads many distinct manga in one session, only the
+         * last 1000 unique phrases are kept. Earlier ones will be re-
+         * translated next time (small cost) but the app won't OOM.
+         */
+        const val MAX_CACHE_ENTRIES = 1000
     }
 }
