@@ -1,6 +1,5 @@
 package eu.kanade.tachiyomi.extension.id.mgkomik
 
-import android.util.Log
 import eu.kanade.tachiyomi.multisrc.madara.Madara
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.source.model.Filter
@@ -22,56 +21,35 @@ abstract class MGKomik : Madara() {
     override val chapterUrlSuffix = ""
 
     override fun headersBuilder() = super.headersBuilder().apply {
+        set(
+            "User-Agent",
+            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36",
+        )
+        set("Sec-CH-UA", "\"Not(A:Brand\";v=\"99\", \"Google Chrome\";v=\"141\", \"Chromium\";v=\"141\"")
+        set("Sec-CH-UA-Mobile", "?1")
+        set("Sec-CH-UA-Platform", "\"Android\"")
+        set("Sec-CH-UA-Platform-Version", "\"10.0.0\"")
         set("Sec-CH-UA-Model", "\"\"")
+        set("Sec-CH-UA-Full-Version", "\"141.0.0.0\"")
+        set(
+            "Sec-CH-UA-Full-Version-List",
+            "\"Not(A:Brand\";v=\"99.0.0.0\", \"Google Chrome\";v=\"141.0.0.0\", " +
+                "\"Chromium\";v=\"141.0.0.0\"",
+        )
+        set("Sec-CH-UA-Arch", "\"arm\"")
+        set("Sec-CH-UA-Bitness", "\"64\"")
+        set("Upgrade-Insecure-Requests", "1")
+        set(
+            "Accept",
+            "text/html,application/xhtml+xml,application/xml;q=0.9," +
+                "image/avif,image/webp,image/apng,*/*;q=0.8," +
+                "application/signed-exchange;v=b3;q=0.7",
+        )
+        set("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
     }
 
     override val client = network.client.newBuilder()
-        // ---- INTERCEPTOR LOGGING (SEMENTARA, buat debug) ----
-        // Hapus/comment interceptor ini kalau sudah selesai debugging.
-        .addInterceptor { chain ->
-            val request = chain.request()
-            Log.d("MGKomikDebug", "===> REQUEST: ${request.method} ${request.url}")
-            Log.d("MGKomikDebug", "===> REQUEST HEADERS:\n${request.headers}")
-
-            val response = chain.proceed(request)
-
-            Log.d("MGKomikDebug", "<=== RESPONSE: ${response.code} for ${request.url}")
-            Log.d("MGKomikDebug", "<=== RESPONSE HEADERS:\n${response.headers}")
-
-            // Peek body tanpa "menghabiskan" stream asli, biar tetap bisa diparse Madara/Jsoup.
-            try {
-                val peekBody = response.peekBody(2000).string()
-                Log.d("MGKomikDebug", "<=== RESPONSE BODY (2000 char pertama):\n$peekBody")
-            } catch (e: Exception) {
-                Log.d("MGKomikDebug", "<=== Gagal peek body: ${e.message}")
-            }
-
-            response
-        }
-        // ---- INTERCEPTOR AJAX (logic asli, jangan dihapus) ----
-        .addInterceptor { chain ->
-            val request = chain.request()
-            val path = request.url.encodedPath
-            val isAjax = path.contains("admin-ajax.php") ||
-                path.contains("wp-json") ||
-                path.endsWith("/ajax/chapters")
-            if (isAjax) {
-                chain.proceed(
-                    request.newBuilder()
-                        .header("X-Requested-With", "XMLHttpRequest")
-                        .header("Sec-Fetch-Dest", "empty")
-                        .header("Sec-Fetch-Mode", "cors")
-                        .header("Sec-Fetch-Site", "same-origin")
-                        .header("Origin", baseUrl)
-                        .header("Priority", "u=1, i")
-                        .removeHeader("Sec-Fetch-User")
-                        .removeHeader("Upgrade-Insecure-Requests")
-                        .build(),
-                )
-            } else {
-                chain.proceed(request)
-            }
-        }
         .rateLimit(3)
         .build()
 
