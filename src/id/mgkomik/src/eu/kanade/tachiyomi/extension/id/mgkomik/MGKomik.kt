@@ -21,22 +21,25 @@ abstract class MGKomik : Madara() {
     override val chapterUrlSuffix = ""
 
     override fun headersBuilder() = super.headersBuilder().apply {
-        set(
-            "User-Agent",
-            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 " +
-                "(KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36",
-        )
-        set("Sec-CH-UA", "\"Not(A:Brand\";v=\"99\", \"Google Chrome\";v=\"141\", \"Chromium\";v=\"141\"")
+        val ua = get("User-Agent").orEmpty()
+        val chromeVersion = Regex("""Chrome/(\d+)""").find(ua)?.groupValues?.get(1)
+
+        if (chromeVersion != null) {
+            set(
+                "Sec-CH-UA",
+                "\"Not(A:Brand\";v=\"99\", \"Google Chrome\";v=\"$chromeVersion\", " +
+                    "\"Chromium\";v=\"$chromeVersion\"",
+            )
+            set(
+                "Sec-CH-UA-Full-Version-List",
+                "\"Not(A:Brand\";v=\"99.0.0.0\", \"Google Chrome\";v=\"$chromeVersion.0.0.0\", " +
+                    "\"Chromium\";v=\"$chromeVersion.0.0.0\"",
+            )
+        }
+
         set("Sec-CH-UA-Mobile", "?1")
         set("Sec-CH-UA-Platform", "\"Android\"")
-        set("Sec-CH-UA-Platform-Version", "\"10.0.0\"")
         set("Sec-CH-UA-Model", "\"\"")
-        set("Sec-CH-UA-Full-Version", "\"141.0.0.0\"")
-        set(
-            "Sec-CH-UA-Full-Version-List",
-            "\"Not(A:Brand\";v=\"99.0.0.0\", \"Google Chrome\";v=\"141.0.0.0\", " +
-                "\"Chromium\";v=\"141.0.0.0\"",
-        )
         set("Sec-CH-UA-Arch", "\"arm\"")
         set("Sec-CH-UA-Bitness", "\"64\"")
         set("Upgrade-Insecure-Requests", "1")
