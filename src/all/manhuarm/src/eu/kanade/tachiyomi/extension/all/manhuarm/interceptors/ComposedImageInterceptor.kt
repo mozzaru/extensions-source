@@ -11,6 +11,7 @@ import android.os.Build
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
+import android.util.Log
 import eu.kanade.tachiyomi.extension.all.manhuarm.Dialog
 import eu.kanade.tachiyomi.extension.all.manhuarm.Language
 import eu.kanade.tachiyomi.extension.all.manhuarm.Manhuarm.Companion.PAGE_REGEX
@@ -56,12 +57,39 @@ class ComposedImageInterceptor(
 
         val canvas = Canvas(bitmap)
 
+        var drawnCount = 0
+        var skippedCount = 0
+
         dialogues.forEach { dialog ->
             dialog.scale = language.dialogBoxScale
+            val text = dialog.getTextBy(language).cleanUp()
+            // Skip empty dialogs. Drawing an empty box would just show a
+            // white rectangle with no text inside, which is what the user
+            // sees when the OCR response or translation API is missing
+            // the text for a particular bubble.
+            if (text.isBlank()) {
+                skippedCount++
+                return@forEach
+            }
             val textPaint = createTextPaint(selectFontFamily())
-            val dialogBox = createDialogBox(dialog, textPaint)
+            val dialogBox = createDialogBox(dialog, text, textPaint)
             val y = getYAxis(textPaint, dialog, dialogBox)
             canvas.draw(textPaint, dialogBox, dialog, dialog.x, y)
+            drawnCount++
+        }
+
+        if (dialogues.isNotEmpty()) {
+            Log.d(
+                TAG,
+                "Composed image: drew=$drawnCount, skipped=$skippedCount (lang=${language.lang})",
+            )
+            if (drawnCount == 0) {
+                Log.w(
+                    TAG,
+                    "All ${dialogues.size} dialogs were empty for ${language.lang}! " +
+                        "Check the OCR data and translation pipeline.",
+                )
+            }
         }
 
         val output = ByteArrayOutputStream()
@@ -143,13 +171,13 @@ class ComposedImageInterceptor(
         }
     }
 
-    private fun createDialogBox(dialog: Dialog, textPaint: TextPaint): StaticLayout {
-        var dialogBox = createBoxLayout(dialog, textPaint)
+    private fun createDialogBox(dialog: Dialog, text: String, textPaint: TextPaint): StaticLayout {
+        var dialogBox = createBoxLayout(dialog, text, textPaint)
 
         // The best way I've found to adjust the text in the dialog box (Especially in long dialogues)
         while (dialogBox.height > dialog.height) {
             textPaint.textSize -= 0.5f
-            dialogBox = createBoxLayout(dialog, textPaint)
+            dialogBox = createBoxLayout(dialog, text, textPaint)
         }
 
         textPaint.color = Color.BLACK
@@ -158,9 +186,7 @@ class ComposedImageInterceptor(
         return dialogBox
     }
 
-    private fun createBoxLayout(dialog: Dialog, textPaint: TextPaint): StaticLayout {
-        val text = dialog.getTextBy(language).cleanUp()
-
+    private fun createBoxLayout(dialog: Dialog, text: String, textPaint: TextPaint): StaticLayout {
         return StaticLayout.Builder.obtain(text, 0, text.length, textPaint, dialog.width.toInt()).apply {
             setAlignment(Layout.Alignment.ALIGN_CENTER)
             setIncludePad(language.disableFontSettings)
@@ -213,5 +239,6 @@ class ComposedImageInterceptor(
         // w3: Absolute Lengths [...](https://www.w3.org/TR/css3-values/#absolute-lengths)
         const val SCALED_DENSITY = 0.75f // 1px = 0.75pt
         val mediaType = "image/png".toMediaType()
+        private const val TAG = "Manhuarm.Render"
     }
 }

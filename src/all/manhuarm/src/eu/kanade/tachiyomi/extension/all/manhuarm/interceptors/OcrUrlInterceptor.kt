@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.extension.all.manhuarm.interceptors
 import android.app.Application
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -22,6 +23,7 @@ class OcrUrlInterceptor(private val headers: Headers) {
         val latch = CountDownLatch(1)
         var ocrRequest: OcrRequest? = null
         var webView: WebView? = null
+        val startedAt = System.currentTimeMillis()
 
         handler.post {
             val webview = WebView(context)
@@ -51,6 +53,8 @@ class OcrUrlInterceptor(private val headers: Headers) {
                             } catch (_: Exception) { /* do nothing */ }
 
                             ocrRequest = OcrRequest(url, body, headerMap)
+                            val elapsed = System.currentTimeMillis() - startedAt
+                            Log.d(TAG, "OCR call captured after ${elapsed}ms, body=${body.take(80)}")
                             latch.countDown()
                         }
                     }
@@ -66,7 +70,8 @@ class OcrUrlInterceptor(private val headers: Headers) {
             webview.loadUrl(url, headers.toMultimap().mapValues { it.value.first() })
         }
 
-        latch.await(10, TimeUnit.SECONDS)
+        val completed = latch.await(15, TimeUnit.SECONDS)
+        val elapsed = System.currentTimeMillis() - startedAt
 
         handler.post {
             webView?.apply {
@@ -75,6 +80,19 @@ class OcrUrlInterceptor(private val headers: Headers) {
             }
         }
 
+        if (!completed) {
+            Log.w(
+                TAG,
+                "OCR call NOT captured after ${elapsed}ms (timeout). " +
+                    "This is the cause of empty bubbles. The website may be using " +
+                    "a transport that our JS patches do not cover.",
+            )
+        } else {
+            Log.d(
+                TAG,
+                "OCR request returned in ${elapsed}ms",
+            )
+        }
         return ocrRequest
     }
 
@@ -86,28 +104,80 @@ class OcrUrlInterceptor(private val headers: Headers) {
         view?.evaluateJavascript(
             """
             (function() {
-                $utilities
+                if (window.__manhuarmPatched) {
+                    return;
+                }
+                window.__manhuarmPatched = true;
+                window.__manhuarmBridge = '$bridgeName';
 
-                const nativeFetch = window.fetch;
-                window.fetch = function() {
-                    const input = arguments[0];
-                    const options = arguments[1] || {};
-                    const url = typeof input === 'string' ? input : (input.url || "");
+                // Capture the native fetch BEFORE we (and utilities.js)
+                // override it, so the XHRProxy inside utilities.js can be
+                // wrapped and report the OCR call back to us. The website
+                // uses XMLHttpRequest which utilities.js patches via an
+                // XHRProxy that delegates to fetch(); if we don't override
+                // fetch first, the OCR call bypasses our interceptor.
+                const nativeFetch = window.fetch ? window.fetch.bind(window) : null;
 
-                    if (url.includes('fetch-ocr.php')) {
-                        const body = options.body || "";
-                        const headers = serializeHeaders(options.headers);
+                if (nativeFetch) {
+                    window.fetch = function() {
+                        const input = arguments[0];
+                        const options = arguments[1] || {};
+                        const url = typeof input === 'string' ? input : (input.url || "");
 
-                        if (window.$bridgeName) {
-                            window.$bridgeName.onFetch(url, body.toString(), headers);
+                        if (url && url.indexOf('fetch-ocr.php') !== -1) {
+                            let body = options.body;
+                            if (body && typeof body !== 'string') {
+                                try { body = JSON.stringify(body); } catch (_) { body = String(body); }
+                            }
+                            try {
+                                window.$bridgeName.onFetch(url, body || '', JSON.stringify(options.headers || {}));
+                            } catch (_) { /* ignore */ }
+                        }
+                        return nativeFetch.apply(window, arguments);
+                    };
+                }
+
+                // Also patch XMLHttpRequest.prototype.open to capture the URL
+                // and method, and .send to capture the body. This is a
+                // belt-and-braces fallback for the case where the page's own
+                // scripts run before our fetch override and create their own
+                // XHR before the XHRProxy in utilities.js is installed.
+                const origOpen = XMLHttpRequest.prototype.open;
+                const origSend = XMLHttpRequest.prototype.send;
+                const xhrState = new WeakMap();
+                XMLHttpRequest.prototype.open = function(method, url) {
+                    xhrState.set(this, { method: method, url: String(url || ''), body: null });
+                    return origOpen.apply(this, arguments);
+                };
+                XMLHttpRequest.prototype.send = function(body) {
+                    const state = xhrState.get(this);
+                    if (state) {
+                        state.body = body;
+                        if (state.url && state.url.indexOf('fetch-ocr.php') !== -1) {
+                            try {
+                                let payload = body;
+                                if (payload && typeof payload !== 'string') {
+                                    try { payload = JSON.stringify(payload); } catch (_) { payload = String(payload); }
+                                }
+                                window.$bridgeName.onFetch(state.url, payload || '', '{}');
+                            } catch (_) { /* ignore */ }
                         }
                     }
-                    return nativeFetch.apply(this, arguments);
+                    return origSend.apply(this, arguments);
                 };
+
+                // Now run utilities.js which replaces XMLHttpRequest with a
+                // proxy. The proxy calls fetch() internally, which is now our
+                // patched version, so OCR calls are also reported back.
+                $utilities
             })();
             """.trimIndent(),
             null,
         )
+    }
+
+    private companion object {
+        const val TAG = "Manhuarm.OCR"
     }
 }
 

@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.extension.all.manhuarm
 
 import android.content.SharedPreferences
+import android.util.Log
 import android.widget.Toast
 import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
@@ -313,7 +314,28 @@ abstract class Manhuarm :
             .removeAllQueryParameters("style")
             .build()
 
-        val ocrRequest = ocrUrlInterceptor.getOcrRequest(chapterUrl.toString()) ?: return pages
+        Log.d(
+            TAG,
+            "pageListParse: ${pages.size} raw pages for $chapterUrl",
+        )
+
+        val ocrRequest = try {
+            ocrUrlInterceptor.getOcrRequest(chapterUrl.toString())
+        } catch (e: Exception) {
+            Log.w(
+                TAG,
+                "OCR interceptor threw: ${e.message}",
+            )
+            null
+        }
+        if (ocrRequest == null) {
+            Log.w(
+                TAG,
+                "OCR request not captured; bubbles will be empty. " +
+                    "Returning ${pages.size} un-translated pages.",
+            )
+            return pages
+        }
 
         val jsonHeaders = Headers.Builder().apply {
             add("Referer", chapterUrl.toString())
@@ -333,15 +355,27 @@ abstract class Manhuarm :
                 ),
             ).execute()
 
-            // If server returns error (403, etc), skip translations
             if (!response.isSuccessful) {
+                Log.w(
+                    TAG,
+                    "OCR POST returned ${response.code}; skipping translations",
+                )
                 response.close()
                 emptyList()
             } else {
-                response.parseAs<List<PageDto>>()
+                val parsed = response.parseAs<List<PageDto>>()
+                Log.d(
+                    TAG,
+                    "OCR POST returned ${parsed.size} pages, " +
+                        "total dialogs: ${parsed.sumOf { it.dialogues.size }}",
+                )
+                parsed
             }
-        } catch (_: Exception) {
-            // If JSON parsing fails, skip translations
+        } catch (e: Exception) {
+            Log.w(
+                TAG,
+                "OCR POST threw: ${e.message}",
+            )
             emptyList()
         }
 
@@ -350,14 +384,23 @@ abstract class Manhuarm :
         }
 
         return dialog.mapIndexed { index, dto ->
-            val page = pages.first { it.imageUrl?.contains(dto.imageUrl, true)!! }
-            val fragment = json.encodeToString<List<Dialog>>(
-                dto.dialogues.filter { it.getTextBy(language).isNotBlank() },
-            )
-            if (dto.dialogues.isEmpty()) {
+            val page = pages.firstOrNull { page ->
+                dto.imageUrl.isNotBlank() &&
+                    page.imageUrl?.contains(dto.imageUrl, ignoreCase = true) == true
+            } ?: run {
+                Log.w(
+                    TAG,
+                    "No page matches OCR image '${dto.imageUrl}' at index $index",
+                )
+                return@mapIndexed pages.getOrNull(index) ?: Page(index, imageUrl = "")
+            }
+
+            val activeDialogues = dto.dialogues.filter { it.getTextBy(language).isNotBlank() }
+            if (activeDialogues.isEmpty()) {
                 return@mapIndexed page
             }
 
+            val fragment = json.encodeToString<List<Dialog>>(activeDialogues)
             Page(index, imageUrl = "${page.imageUrl}${fragment.toFragment()}")
         }
     }
@@ -610,5 +653,6 @@ abstract class Manhuarm :
         private const val TRANSLATOR_PROVIDER_PREF = "translatorProviderPref"
         private const val CUSTOM_UA_PREF = "customUserAgentPref"
         private const val DEFAULT_FONT_SIZE = "28"
+        private const val TAG = "Manhuarm"
     }
 }

@@ -1,11 +1,13 @@
 package eu.kanade.tachiyomi.extension.all.manhuarm
 
+import android.util.Log
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.JsonTransformingSerializer
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
@@ -30,18 +32,53 @@ data class Dialog(
     private val _height: Float,
     val angle: Float = 0f,
     val textByLanguage: Map<String, String> = emptyMap(),
+    /**
+     * The source/origin language text captured at parse time. This is set by
+     * [DialogListSerializer] when the dialog is built so the renderer always
+     * has a non-empty fallback even if the upstream [textByLanguage] map does
+     * not contain the requested language key.
+     */
+    val sourceText: String = "",
 ) {
     var scale: Float = 1F
     val height: Float get() = scale * _height
     val width: Float get() = scale * _width
 
-    val text: String get() = textByLanguage["text"] ?: throw Exception("Dialog not found")
-    fun getTextBy(language: Language) = when {
-        !language.disableTranslator -> textByLanguage[language.origin]
-        else -> textByLanguage[language.target]
-    } ?: text
+    /**
+     * Returns the raw text. Tries the new-format "text" key, the legacy
+     * language-keyed map (origin language) and finally the captured
+     * [sourceText]. Never throws - returns an empty string if no text is
+     * available.
+     */
+    val text: String get() = textByLanguage["text"]
+        ?: textByLanguage[LANGUAGE_ORIGIN_FALLBACK]
+        ?: sourceText
+
+    /**
+     * Returns the text to render for the given language. The behaviour is:
+     * 1. If the language has native translation disabled, look for the
+     *    target language key (native translation in the OCR response).
+     * 2. Otherwise look for the origin language key (source text used by the
+     *    translation interceptor).
+     * 3. Fall back to the new-format "text" key.
+     * 4. Fall back to the captured [sourceText].
+     * 5. Return an empty string if nothing is available - this prevents the
+     *    entire request from failing when the OCR response is missing a key.
+     */
+    fun getTextBy(language: Language): String {
+        val key = if (language.disableTranslator) language.target else language.origin
+        return textByLanguage[key]
+            ?: textByLanguage["text"]
+            ?: sourceText
+    }
+
     val centerY get() = height / 2 + y
     val centerX get() = width / 2 + x
+
+    companion object {
+        // Used as a last-ditch fallback when the JSON is missing language keys.
+        const val LANGUAGE_ORIGIN_FALLBACK = "en"
+    }
 }
 
 private object DialogListSerializer :
@@ -56,27 +93,73 @@ private object DialogListSerializer :
             return JsonArray(emptyList())
         }
 
-        return JsonArray(
+        var parsedCount = 0
+        var skippedCount = 0
+        var oldFormatCount = 0
+        var newFormatCount = 0
+        var unknownFormatCount = 0
+
+        val result = JsonArray(
             element.jsonArray.mapNotNull { jsonElement ->
                 try {
-                    val coordinates = getCoordinates(jsonElement) ?: return@mapNotNull null
-                    val textByLanguage = getDialogs(jsonElement)
+                    parsedCount++
 
-                    // Validate coordinates array has at least 4 elements
-                    if (coordinates.size < 4) return@mapNotNull null
+                    // If the element is already a Dialog object (e.g. the JSON
+                    // has been re-serialised by us), pass it through as-is so
+                    // the round-trip works. The original OCR shape is
+                    // [[x,y,w,h], "text"] or {"box":[...], "en":"..."} - in
+                    // both cases we transform.
+                    if (jsonElement is JsonObject &&
+                        "x" in jsonElement &&
+                        "y" in jsonElement &&
+                        "_width" in jsonElement &&
+                        "_height" in jsonElement
+                    ) {
+                        newFormatCount++
+                        jsonElement
+                    } else {
+                        val coordinates = getCoordinates(jsonElement) ?: run {
+                            skippedCount++
+                            return@mapNotNull null
+                        }
+                        val (textByLanguage, sourceText) = getDialogs(jsonElement)
 
-                    buildJsonObject {
-                        put("x", coordinates[0])
-                        put("y", coordinates[1])
-                        put("_width", coordinates[2])
-                        put("_height", coordinates[3])
-                        put("textByLanguage", textByLanguage)
+                        // Validate coordinates array has at least 4 elements
+                        if (coordinates.size < 4) {
+                            skippedCount++
+                            return@mapNotNull null
+                        }
+
+                        if (jsonElement is JsonArray) oldFormatCount++ else newFormatCount++
+
+                        buildJsonObject {
+                            put("x", coordinates[0])
+                            put("y", coordinates[1])
+                            put("_width", coordinates[2])
+                            put("_height", coordinates[3])
+                            put("textByLanguage", textByLanguage)
+                            if (sourceText.isNotEmpty()) {
+                                put("sourceText", JsonPrimitive(sourceText))
+                            }
+                        }
                     }
-                } catch (e: Exception) {
+                } catch (_: Exception) {
+                    unknownFormatCount++
                     null
                 }
             },
         )
+
+        if (parsedCount > 0) {
+            Log.d(
+                TAG,
+                "DialogListSerializer: parsed=$parsedCount, skipped=$skippedCount, " +
+                    "oldFormat=$oldFormatCount, newFormat=$newFormatCount, " +
+                    "unknownFormat=$unknownFormatCount",
+            )
+        }
+
+        return result
     }
 
     private fun getCoordinates(element: JsonElement): JsonArray = when (element) {
@@ -86,19 +169,43 @@ private object DialogListSerializer :
             ?: throw IOException("Dialog box position not found")
     }
 
-    private fun getDialogs(element: JsonElement): JsonObject = buildJsonObject {
-        when (element) {
-            is JsonArray -> put("text", element.jsonArray[1])
+    /**
+     * Returns a pair of (textByLanguage map, sourceText).
+     *
+     * Supported shapes:
+     * - Old format: [[[x, y, w, h]], "text"] - the "text" string is stored
+     *   under the "text" key and also captured as sourceText.
+     * - New format: {"box": [...], "en": "...", "id": "...", "text": "..."}
+     *   - All string values are kept in the map (so native translations
+     *     survive the round trip).
+     *   - The "en" key (if present) is preferred as sourceText, then the
+     *     "text" key.
+     */
+    private fun getDialogs(element: JsonElement): Pair<JsonObject, String> = when (element) {
+        is JsonArray -> {
+            val text = element.jsonArray[1]
+            buildJsonObject { put("text", text) } to text.jsonPrimitive.content
+        }
 
-            else -> {
+        else -> {
+            val map = buildJsonObject {
                 element.jsonObject.entries
                     .filter { it.value.isString }
                     .forEach { put(it.key, it.value) }
             }
+            val source = element.jsonObject["en"]?.jsonPrimitive?.contentOrNull
+                ?: element.jsonObject["text"]?.jsonPrimitive?.contentOrNull
+                ?: ""
+            map to source
         }
     }
+
+    private val JsonElement.contentOrNull: String?
+        get() = if (this.isString) jsonPrimitive.content else null
 
     private val JsonElement.isArray get() = this is JsonArray
     private val JsonElement.isObject get() = this is JsonObject
     private val JsonElement.isString get() = this.isObject.not() && this.isArray.not() && this.jsonPrimitive.isString
+
+    private const val TAG = "Manhuarm.Dto"
 }
