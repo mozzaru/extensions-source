@@ -309,10 +309,21 @@ abstract class Manhuarm :
     // =========================== Pages ==========================================
 
     override fun pageListParse(document: Document): List<Page> {
-        val pages = super.pageListParse(document)
-        val chapterUrl = document.location().toHttpUrl().newBuilder()
-            .removeAllQueryParameters("style")
-            .build()
+        val pages = try {
+            super.pageListParse(document)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to parse base page list: ${e.message}", e)
+            return emptyList()
+        }
+
+        val chapterUrl = try {
+            document.location().toHttpUrl().newBuilder()
+                .removeAllQueryParameters("style")
+                .build()
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to build chapter URL: ${e.message}")
+            return pages
+        }
 
         Log.d(
             TAG,
@@ -383,16 +394,20 @@ abstract class Manhuarm :
             return pages
         }
 
-        return dialog.mapIndexed { index, dto ->
-            val page = pages.firstOrNull { page ->
-                dto.imageUrl.isNotBlank() &&
-                    page.imageUrl?.contains(dto.imageUrl, ignoreCase = true) == true
-            } ?: run {
-                Log.w(
-                    TAG,
-                    "No page matches OCR image '${dto.imageUrl}' at index $index",
-                )
-                return@mapIndexed pages.getOrNull(index) ?: Page(index, imageUrl = "")
+        return pages.mapIndexed { index, page ->
+            val pageUrl = page.imageUrl ?: return@mapIndexed page
+
+            val dto = dialog.firstOrNull { d ->
+                d.imageUrl.isNotBlank() && (
+                    pageUrl.contains(d.imageUrl, ignoreCase = true) ||
+                        d.imageUrl.contains(pageUrl, ignoreCase = true) ||
+                        pageUrl.substringAfterLast("/").substringBefore("?")
+                            .equals(d.imageUrl.substringAfterLast("/").substringBefore("?"), ignoreCase = true)
+                    )
+            } ?: dialog.getOrNull(index)
+
+            if (dto == null) {
+                return@mapIndexed page
             }
 
             val activeDialogues = dto.dialogues.filter { it.getTextBy(language).isNotBlank() }
@@ -401,7 +416,7 @@ abstract class Manhuarm :
             }
 
             val fragment = json.encodeToString<List<Dialog>>(activeDialogues)
-            Page(index, imageUrl = "${page.imageUrl}${fragment.toFragment()}")
+            Page(page.index, imageUrl = "${pageUrl.substringBefore("#")}${fragment.toFragment()}")
         }
     }
 

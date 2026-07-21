@@ -15,3 +15,14 @@ data class Language(
     val supportNativeTranslation: Boolean = false,
     val fontName: String = "comic_neue_bold",
 )
+
+val TRANSLATION_FAILED_REGEX = Regex(
+    """(?i)\[?\s*(?:TERJEMA\s*HAN|TERJEMAHAN|TRANSLAT(?:ION|ED|E)|TRADUCT(?:ION)?|TRADUCC(?:IÓ|I)N|FALHA\s*NA\s*TRADUÇ[ÃA]O|TRANSLATE|翻译)\s*(?:GAGAL|FAILED|FAILURE|ÉCHOUÉE|ECHOUEE|FALLIDA|失败)\s*\]?|\[\s*(?:TERJEMA\s*HAN|TERJEMAHAN|TRANSLAT(?:ION|ED|E)|TRADUCT(?:ION)?|TRADUCC(?:IÓ|I)N|FALHA\s*NA\s*TRADUÇ[ÃA]O|TRANSLATE|翻译)\s*\]""",
+)
+
+fun String.cleanTranslationFailure(): String {
+    if (this.isBlank()) return ""
+    var cleaned = this.replace(TRANSLATION_FAILED_REGEX, "").trim()
+    cleaned = cleaned.replace(Regex("""^[\s:\-–—|]+"""), "").trim()
+    return cleaned
+}

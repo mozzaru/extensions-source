@@ -51,19 +51,26 @@ const nativeFetch = window.fetch ? window.fetch.bind(window) : null;
 
 function serializeHeaders(h) {
     if (!h) return '{}';
-    if (h instanceof Headers) {
+    if (typeof Headers !== 'undefined' && h instanceof Headers) {
         const obj = {};
         h.forEach((v, k) => { obj[k] = v; });
         return JSON.stringify(obj);
     }
-    return JSON.stringify(h);
+    if (typeof h === 'object') {
+        try {
+            return JSON.stringify(h);
+        } catch (e) {
+            return '{}';
+        }
+    }
+    return String(h);
 }
 
 if (nativeFetch) {
     window.fetch = function () {
         const input = arguments[0];
         const options = arguments[1] || {};
-        const url = typeof input === 'string' ? input : (input.url || '');
+        const url = typeof input === 'string' ? input : (input && input.url ? input.url : '');
 
         if (url && url.indexOf('fetch-ocr.php') !== -1) {
             let body = options.body;
@@ -72,7 +79,7 @@ if (nativeFetch) {
             }
             try {
                 window.__manhuarmBridge && window.__manhuarmBridge.onFetch(
-                    url, body || '', JSON.stringify(options.headers || {})
+                    url, body || '', serializeHeaders(options.headers)
                 );
             } catch (e) { /* ignore */ }
         }
@@ -103,6 +110,7 @@ function XHRProxy() {
                 return function (method, url) {
                     state.method = method;
                     state.url = String(url || '');
+                    state.headers = {};
                     return target.open(method, url);
                 };
             }
@@ -115,13 +123,6 @@ function XHRProxy() {
                             try { payload = JSON.stringify(payload); } catch (e) { payload = String(payload); }
                         }
                         try {
-                            // Pass the *captured* headers (not the empty
-                            // default) - the server validates X-Gate-Token,
-                            // X-Gate-Nonce and X-Gate-Timestamp and returns
-                            // 403 if any are missing. The previous version
-                            // of this script always sent '{}' here, which
-                            // caused every captured request to be rejected
-                            // with 403 by the server.
                             window.__manhuarmBridge && window.__manhuarmBridge.onFetch(
                                 state.url, payload || '', JSON.stringify(state.headers || {})
                             );
@@ -140,9 +141,11 @@ function XHRProxy() {
     });
 }
 
-XHRProxy.prototype = NativeXHR.prototype;
-window.XMLHttpRequest = XHRProxy;
-Object.defineProperty(window.XMLHttpRequest, 'name', { value: 'XMLHttpRequest' });
+if (NativeXHR) {
+    XHRProxy.prototype = NativeXHR.prototype;
+    window.XMLHttpRequest = XHRProxy;
+    Object.defineProperty(window.XMLHttpRequest, 'name', { value: 'XMLHttpRequest' });
+}
 
 // --- 4. setTimeout / setInterval patches ----------------------------------
 // The website checks that setTimeout/setInterval report "[native code]".
@@ -151,38 +154,44 @@ Object.defineProperty(window.XMLHttpRequest, 'name', { value: 'XMLHttpRequest' }
 // upstream code had, in case the page relies on it.
 const origSetTimeout = window.setTimeout;
 const origSetInterval = window.setInterval;
-window.setTimeout = function (callback, delay) {
-    const args = Array.prototype.slice.call(arguments, 2);
-    return origSetTimeout.apply(window, [callback, Math.max(1, Math.floor((delay || 0) * 0.01))].concat(args));
-};
-Object.defineProperty(window.setTimeout, 'name', { value: 'setTimeout' });
-window.setInterval = function (callback, delay) {
-    const args = Array.prototype.slice.call(arguments, 2);
-    return origSetInterval.apply(window, [callback, Math.max(1, Math.floor((delay || 0) * 0.01))].concat(args));
-};
-Object.defineProperty(window.setInterval, 'name', { value: 'setInterval' });
+if (origSetTimeout) {
+    window.setTimeout = function (callback, delay) {
+        const args = Array.prototype.slice.call(arguments, 2);
+        return origSetTimeout.apply(window, [callback, Math.max(1, Math.floor((delay || 0) * 0.01))].concat(args));
+    };
+    Object.defineProperty(window.setTimeout, 'name', { value: 'setTimeout' });
+}
+if (origSetInterval) {
+    window.setInterval = function (callback, delay) {
+        const args = Array.prototype.slice.call(arguments, 2);
+        return origSetInterval.apply(window, [callback, Math.max(1, Math.floor((delay || 0) * 0.01))].concat(args));
+    };
+    Object.defineProperty(window.setInterval, 'name', { value: 'setInterval' });
+}
 
 // --- 5. Worker mock -------------------------------------------------------
 // The page checks that Worker reports "[native code]" too. We replace it
 // with a tiny mock that just runs the worker script inline (if it can be
 // fetched) and stubs out postMessage/onmessage.
-const NativeWorker = window.Worker;
-function WorkerMock(scriptURL) {
-    if (typeof scriptURL === 'string' && scriptURL.indexOf('blob:') === 0) {
-        try {
-            const xhr = new NativeXHR();
-            xhr.open('GET', scriptURL, false);
-            xhr.send();
-            try { new Function(xhr.responseText)(); } catch (e) { /* ignore */ }
-        } catch (e) { /* ignore */ }
+if (window.Worker) {
+    const NativeWorker = window.Worker;
+    function WorkerMock(scriptURL) {
+        if (typeof scriptURL === 'string' && scriptURL.indexOf('blob:') === 0) {
+            try {
+                const xhr = new NativeXHR();
+                xhr.open('GET', scriptURL, false);
+                xhr.send();
+                try { new Function(xhr.responseText)(); } catch (e) { /* ignore */ }
+            } catch (e) { /* ignore */ }
+        }
+        return {
+            onmessage: null,
+            onerror: null,
+            postMessage: function () { /* no-op */ },
+            terminate: function () { /* no-op */ },
+        };
     }
-    return {
-        onmessage: null,
-        onerror: null,
-        postMessage: function () { /* no-op */ },
-        terminate: function () { /* no-op */ },
-    };
+    WorkerMock.prototype = NativeWorker.prototype;
+    window.Worker = WorkerMock;
+    Object.defineProperty(window.Worker, 'name', { value: 'Worker' });
 }
-WorkerMock.prototype = NativeWorker.prototype;
-window.Worker = WorkerMock;
-Object.defineProperty(window.Worker, 'name', { value: 'Worker' });

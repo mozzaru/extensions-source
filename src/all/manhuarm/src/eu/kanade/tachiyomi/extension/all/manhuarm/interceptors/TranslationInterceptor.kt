@@ -4,6 +4,7 @@ import android.util.Log
 import eu.kanade.tachiyomi.extension.all.manhuarm.Dialog
 import eu.kanade.tachiyomi.extension.all.manhuarm.Language
 import eu.kanade.tachiyomi.extension.all.manhuarm.Manhuarm.Companion.PAGE_REGEX
+import eu.kanade.tachiyomi.extension.all.manhuarm.cleanTranslationFailure
 import eu.kanade.tachiyomi.multisrc.machinetranslations.translator.TranslatorEngine
 import keiyoushi.utils.parseAs
 import kotlinx.coroutines.Dispatchers
@@ -30,20 +31,6 @@ class TranslationInterceptor(
     // ("Hey", "Ugh", character names) and translating each one separately
     // wastes API quota. We use the source text as the key and the translated
     // text as the value.
-    //
-    // The cache is per-TranslationInterceptor instance, which means it's
-    // recreated every time Mihon rebuilds the OkHttp client (which happens
-    // whenever the user toggles a setting). That's fine: settings changes
-    // often imply the user wants a fresh state, and the per-chapter benefit
-    // is still significant.
-    //
-    // CACHE BOUND: we cap the size at MAX_CACHE_ENTRIES to prevent OOM. When
-    // the cache is full and a new entry is inserted, the oldest entry is
-    // evicted. With MAX_CACHE_ENTRIES=1000 and an average entry size of
-    // ~700 bytes, the cache can hold up to ~700KB at most, which is well
-    // within the heap budget of any Android app. The eviction policy is
-    // simple (insertion order) - not true LRU but good enough for a small
-    // fixed-size cache.
     private val cache = LinkedHashMap<String, String>(64, 0.75f, false)
     private val cacheLock = Any()
 
@@ -77,7 +64,7 @@ class TranslationInterceptor(
                     val sourceToTranslated = HashMap<String, String>()
                     val toTranslate = LinkedHashSet<String>()
                     dialogues.forEach { d ->
-                        val src = d.text
+                        val src = d.text.cleanTranslationFailure()
                         if (src.isNotBlank()) toTranslate.add(src)
                     }
 
@@ -91,7 +78,7 @@ class TranslationInterceptor(
                                         sourceToTranslated[src] = cached
                                         return@async
                                     }
-                                    val translatedText = translateWithFallback(src)
+                                    val translatedText = translateWithFallback(src).cleanTranslationFailure()
                                     cacheStore(src, translatedText)
                                     sourceToTranslated[src] = translatedText
                                 }
@@ -101,9 +88,9 @@ class TranslationInterceptor(
 
                     // Second pass: map translations back to each dialog.
                     dialogues.map { d ->
-                        val src = d.text
+                        val src = d.text.cleanTranslationFailure()
                         if (src.isBlank()) {
-                            d
+                            d.replaceText("")
                         } else {
                             val translatedText = sourceToTranslated[src] ?: src
                             d.replaceText(translatedText)
@@ -148,18 +135,14 @@ class TranslationInterceptor(
     }
 
     /**
-     * Thread-safe cache store with size limit. When the cache is full, the
-     * oldest entry is evicted. This prevents OOM in the (unlikely) case of
-     * a very long session with many unique dialogs.
+     * Thread-safe cache store with size limit.
      */
     private fun cacheStore(key: String, value: String) {
         synchronized(cacheLock) {
-            // If key already exists, just update the value
             if (cache.containsKey(key)) {
                 cache[key] = value
                 return
             }
-            // Evict oldest entries until we have room
             while (cache.size >= MAX_CACHE_ENTRIES) {
                 val evicted = cache.keys.iterator().next()
                 cache.remove(evicted)
@@ -171,9 +154,7 @@ class TranslationInterceptor(
 
     /**
      * Tries the configured translator; on failure or empty result, returns
-     * the original source text. This guarantees the user never sees an
-     * empty bubble because of a translation failure - they may just see the
-     * English text instead of the translated text.
+     * the original source text.
      */
     private fun translateWithFallback(source: String): String = try {
         val result = translator.translate(language.origin, language.target, source)
@@ -188,33 +169,8 @@ class TranslationInterceptor(
         source
     }
 
-    /**
-     * Replace the rendered text while preserving the captured source text so
-     * that [Dialog.text] keeps returning a non-empty string in case the
-     * translation comes back blank.
-     */
-    private fun Dialog.replaceText(value: String) = this.copy(
-        textByLanguage = buildMap {
-            // Keep any existing native-translation keys the OCR response had.
-            putAll(textByLanguage)
-            put("text", value)
-        },
-    )
-
     private companion object {
         const val TAG = "Manhuarm.Translate"
-
-        /**
-         * Maximum number of entries in the translation cache. The cache
-         * uses LinkedHashMap with insertion-order iteration and evicts the
-         * oldest entry when full. With 1000 entries and an average of
-         * ~700 bytes per entry (English text + translation), the cache
-         * can hold up to ~700KB which is well within the heap budget.
-         *
-         * If the user reads many distinct manga in one session, only the
-         * last 1000 unique phrases are kept. Earlier ones will be re-
-         * translated next time (small cost) but the app won't OOM.
-         */
         const val MAX_CACHE_ENTRIES = 1000
     }
 }

@@ -27,72 +27,77 @@ class OcrUrlInterceptor(private val headers: Headers) {
         val startedAt = System.currentTimeMillis()
 
         handler.post {
-            val webview = WebView(context)
-            webView = webview
-            with(webview.settings) {
-                javaScriptEnabled = true
-                domStorageEnabled = true
-                databaseEnabled = true
-                useWideViewPort = false
-                loadWithOverviewMode = false
-                userAgentString = headers["User-Agent"]
-            }
+            try {
+                val webview = WebView(context)
+                webView = webview
+                with(webview.settings) {
+                    javaScriptEnabled = true
+                    domStorageEnabled = true
+                    databaseEnabled = true
+                    useWideViewPort = false
+                    loadWithOverviewMode = false
+                    userAgentString = headers["User-Agent"]
+                }
 
-            webview.addJavascriptInterface(
-                object {
-                    @JavascriptInterface
-                    fun onFetch(url: String, body: String, headersJson: String) {
-                        if (ocrRequest == null && url.contains("fetch-ocr.php")) {
-                            // Filter out the scraper-detection probe. The
-                            // website sends a fake payload with cid="fake" and
-                            // ref="fake" - we have to ignore that and only act
-                            // on a real-looking payload.
-                            if (body.contains("\"cid\":\"fake\"") || body.contains("\"ref\":\"fake\"")) {
+                webview.addJavascriptInterface(
+                    object {
+                        @JavascriptInterface
+                        fun onFetch(url: String, body: String, headersJson: String) {
+                            if (ocrRequest == null && url.contains("fetch-ocr.php")) {
+                                if (body.contains("\"cid\":\"fake\"") || body.contains("\"ref\":\"fake\"")) {
+                                    Log.d(
+                                        TAG,
+                                        "Ignoring scraper-detection probe",
+                                    )
+                                    return
+                                }
+                                val headerMap = mutableMapOf<String, String>()
+                                try {
+                                    val json = org.json.JSONObject(headersJson)
+                                    val keys = json.keys()
+                                    while (keys.hasNext()) {
+                                        val key = keys.next()
+                                        headerMap[key] = json.getString(key)
+                                    }
+                                } catch (_: Exception) { /* ignore */ }
+
+                                ocrRequest = OcrRequest(url, body, headerMap)
+                                val elapsed = System.currentTimeMillis() - startedAt
                                 Log.d(
                                     TAG,
-                                    "Ignoring scraper-detection probe",
+                                    "Real OCR call captured after ${elapsed}ms, " +
+                                        "body=${body.take(120)}",
                                 )
-                                return
+                                latch.countDown()
                             }
-                            val headerMap = mutableMapOf<String, String>()
-                            try {
-                                val json = org.json.JSONObject(headersJson)
-                                val keys = json.keys()
-                                while (keys.hasNext()) {
-                                    val key = keys.next()
-                                    headerMap[key] = json.getString(key)
-                                }
-                            } catch (_: Exception) { /* ignore */ }
-
-                            ocrRequest = OcrRequest(url, body, headerMap)
-                            val elapsed = System.currentTimeMillis() - startedAt
-                            Log.d(
-                                TAG,
-                                "Real OCR call captured after ${elapsed}ms, " +
-                                    "body=${body.take(120)}",
-                            )
-                            latch.countDown()
                         }
-                    }
-                },
-                bridgeName,
-            )
+                    },
+                    bridgeName,
+                )
 
-            webview.webViewClient = object : WebViewClient() {
-                override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) = injectScript(view)
-                override fun onPageFinished(view: WebView?, url: String?) = injectScript(view)
+                webview.webViewClient = object : WebViewClient() {
+                    override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) = injectScript(view)
+                    override fun onPageFinished(view: WebView?, url: String?) = injectScript(view)
+                }
+
+                webview.loadUrl(url, headers.toMultimap().mapValues { it.value.first() })
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to initialize or load WebView: ${e.message}", e)
+                latch.countDown()
             }
-
-            webview.loadUrl(url, headers.toMultimap().mapValues { it.value.first() })
         }
 
         val completed = latch.await(15, TimeUnit.SECONDS)
         val elapsed = System.currentTimeMillis() - startedAt
 
         handler.post {
-            webView?.apply {
-                stopLoading()
-                destroy()
+            try {
+                webView?.apply {
+                    stopLoading()
+                    destroy()
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to destroy WebView: ${e.message}")
             }
         }
 
@@ -114,12 +119,11 @@ class OcrUrlInterceptor(private val headers: Headers) {
     }
 
     private fun injectScript(view: WebView?) {
-        // The utilities.js script does ALL the patching now: it patches
-        // Function.prototype.toString to fool the anti-scraping check, then
-        // installs XHR/fetch/setTimeout/setInterval/Worker wrappers. It uses
-        // `window.__manhuarmBridge` (set up by the JavascriptInterface above)
-        // to send the captured OCR request back to us.
-        view?.evaluateJavascript(utilities, null)
+        try {
+            view?.evaluateJavascript(utilities, null)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to inject utilities.js: ${e.message}")
+        }
     }
 
     private companion object {

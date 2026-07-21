@@ -47,12 +47,14 @@ data class Dialog(
     /**
      * Returns the raw text. Tries the new-format "text" key, the legacy
      * language-keyed map (origin language) and finally the captured
-     * [sourceText]. Never throws - returns an empty string if no text is
-     * available.
+     * [sourceText]. Cleaned to ensure error messages like [TERJEMAHAN GAGAL]
+     * are never returned.
      */
-    val text: String get() = textByLanguage["text"]
-        ?: textByLanguage[LANGUAGE_ORIGIN_FALLBACK]
-        ?: sourceText
+    val text: String get() = (
+        textByLanguage["text"]
+            ?: textByLanguage[LANGUAGE_ORIGIN_FALLBACK]
+            ?: sourceText
+        ).cleanTranslationFailure()
 
     /**
      * Returns the text to render for the given language. The behaviour is:
@@ -64,12 +66,29 @@ data class Dialog(
      * 4. Fall back to the captured [sourceText].
      * 5. Return an empty string if nothing is available - this prevents the
      *    entire request from failing when the OCR response is missing a key.
+     * Always strips translation failure watermarks like [TERJEMAHAN GAGAL].
      */
     fun getTextBy(language: Language): String {
         val key = if (language.disableTranslator) language.target else language.origin
-        return textByLanguage[key]
-            ?: textByLanguage["text"]
-            ?: sourceText
+        return (
+            textByLanguage[key]
+                ?: textByLanguage["text"]
+                ?: sourceText
+            ).cleanTranslationFailure()
+    }
+
+    /**
+     * Replace the rendered text while preserving the captured source text.
+     */
+    fun replaceText(value: String): Dialog {
+        val cleanedValue = value.cleanTranslationFailure()
+        return this.copy(
+            textByLanguage = buildMap {
+                putAll(textByLanguage)
+                put("text", cleanedValue)
+            },
+            sourceText = if (sourceText.isNotBlank()) sourceText.cleanTranslationFailure() else cleanedValue,
+        )
     }
 
     val centerY get() = height / 2 + y
@@ -130,6 +149,8 @@ private object DialogListSerializer :
                             return@mapNotNull null
                         }
 
+                        val cleanedSourceText = sourceText.cleanTranslationFailure()
+
                         if (jsonElement is JsonArray) oldFormatCount++ else newFormatCount++
 
                         buildJsonObject {
@@ -138,8 +159,8 @@ private object DialogListSerializer :
                             put("_width", coordinates[2])
                             put("_height", coordinates[3])
                             put("textByLanguage", textByLanguage)
-                            if (sourceText.isNotEmpty()) {
-                                put("sourceText", JsonPrimitive(sourceText))
+                            if (cleanedSourceText.isNotEmpty()) {
+                                put("sourceText", JsonPrimitive(cleanedSourceText))
                             }
                         }
                     }
@@ -177,26 +198,30 @@ private object DialogListSerializer :
      *   under the "text" key and also captured as sourceText.
      * - New format: {"box": [...], "en": "...", "id": "...", "text": "..."}
      *   - All string values are kept in the map (so native translations
-     *     survive the round trip).
-     *   - The "en" key (if present) is preferred as sourceText, then the
-     *     "text" key.
+     *     survive the round trip), cleaned of failure markers.
      */
     private fun getDialogs(element: JsonElement): Pair<JsonObject, String> = when (element) {
         is JsonArray -> {
-            val text = element.jsonArray[1]
-            buildJsonObject { put("text", text) } to text.jsonPrimitive.content
+            val textRaw = element.jsonArray[1].contentOrNull ?: ""
+            val textClean = textRaw.cleanTranslationFailure()
+            buildJsonObject { put("text", JsonPrimitive(textClean)) } to textClean
         }
 
         else -> {
             val map = buildJsonObject {
                 element.jsonObject.entries
                     .filter { it.value.isString }
-                    .forEach { put(it.key, it.value) }
+                    .forEach { (key, value) ->
+                        val rawStr = value.contentOrNull ?: ""
+                        val cleanStr = rawStr.cleanTranslationFailure()
+                        put(key, JsonPrimitive(cleanStr))
+                    }
             }
-            val source = element.jsonObject["en"]?.jsonPrimitive?.contentOrNull
-                ?: element.jsonObject["text"]?.jsonPrimitive?.contentOrNull
+            val sourceRaw = element.jsonObject["en"]?.contentOrNull
+                ?: element.jsonObject["text"]?.contentOrNull
                 ?: ""
-            map to source
+            val sourceClean = sourceRaw.cleanTranslationFailure()
+            map to sourceClean
         }
     }
 

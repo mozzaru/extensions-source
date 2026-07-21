@@ -15,6 +15,7 @@ import android.util.Log
 import eu.kanade.tachiyomi.extension.all.manhuarm.Dialog
 import eu.kanade.tachiyomi.extension.all.manhuarm.Language
 import eu.kanade.tachiyomi.extension.all.manhuarm.Manhuarm.Companion.PAGE_REGEX
+import eu.kanade.tachiyomi.extension.all.manhuarm.cleanTranslationFailure
 import keiyoushi.utils.parseAs
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
@@ -62,11 +63,11 @@ class ComposedImageInterceptor(
 
         dialogues.forEach { dialog ->
             dialog.scale = language.dialogBoxScale
-            val text = dialog.getTextBy(language).cleanUp()
+            val text = dialog.getTextBy(language).cleanUp().cleanTranslationFailure()
             // Skip empty dialogs. Drawing an empty box would just show a
             // white rectangle with no text inside, which is what the user
             // sees when the OCR response or translation API is missing
-            // the text for a particular bubble.
+            // the text for a particular bubble or had failure markers like [TERJEMAHAN GAGAL].
             if (text.isBlank()) {
                 skippedCount++
                 return@forEach
