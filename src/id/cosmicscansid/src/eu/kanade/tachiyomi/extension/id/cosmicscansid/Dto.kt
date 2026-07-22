@@ -6,12 +6,8 @@ import eu.kanade.tachiyomi.source.model.SManga
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import org.jsoup.Jsoup
-import java.text.SimpleDateFormat
+import java.time.Instant
 import java.util.Locale
-import java.util.TimeZone
-
-private val dateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.ROOT)
-    .apply { timeZone = TimeZone.getTimeZone("UTC") }
 
 @Serializable
 class MangaListResponse(
@@ -105,7 +101,7 @@ class ChapterDto(
         name = "Chapter ${this@ChapterDto.chapterNum.orEmpty()}".trim()
         url = "/chapter/${this@ChapterDto.slug.orEmpty()}"
         chapter_number = this@ChapterDto.chapterNum?.toFloatOrNull() ?: -1f
-        date_upload = runCatching { dateFormat.parse(this@ChapterDto.time ?: "")?.time }.getOrNull() ?: 0L
+        date_upload = runCatching { Instant.parse(this@ChapterDto.time).toEpochMilli() }.getOrDefault(0L)
     }
 }
 
