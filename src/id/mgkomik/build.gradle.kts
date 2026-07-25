@@ -6,7 +6,7 @@ plugins {
 
 keiyoushi {
     name = "MG Komik"
-    versionCode = 24
+    versionCode = 25
     contentWarning = ContentWarning.SAFE
     libVersion = "1.4"
     theme = "madara"

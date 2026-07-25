@@ -21,33 +21,40 @@ abstract class MGKomik : Madara() {
     override val chapterUrlSuffix = ""
 
     override fun headersBuilder() = super.headersBuilder().apply {
+        val ua = get("User-Agent").orEmpty()
+        val chromeVersion = Regex("""Chrome/(\d+)""").find(ua)?.groupValues?.get(1)
+
+        if (chromeVersion != null) {
+            set(
+                "Sec-CH-UA",
+                "\"Not(A:Brand\";v=\"99\", \"Google Chrome\";v=\"$chromeVersion\", " +
+                    "\"Chromium\";v=\"$chromeVersion\"",
+            )
+            set(
+                "Sec-CH-UA-Full-Version-List",
+                "\"Not(A:Brand\";v=\"99.0.0.0\", \"Google Chrome\";v=\"$chromeVersion.0.0.0\", " +
+                    "\"Chromium\";v=\"$chromeVersion.0.0.0\"",
+            )
+            set("Sec-CH-UA-Full-Version", "\"$chromeVersion.0.0.0\"")
+        }
+
+        set("Sec-CH-UA-Mobile", "?1")
+        set("Sec-CH-UA-Platform", "\"Android\"")
+        set("Sec-CH-UA-Platform-Version", "\"14.0.0\"")
         set("Sec-CH-UA-Model", "\"\"")
+        set("Sec-CH-UA-Arch", "\"arm\"")
+        set("Sec-CH-UA-Bitness", "\"64\"")
+        set("Upgrade-Insecure-Requests", "1")
+        set(
+            "Accept",
+            "text/html,application/xhtml+xml,application/xml;q=0.9," +
+                "image/avif,image/webp,image/apng,*/*;q=0.8," +
+                "application/signed-exchange;v=b3;q=0.7",
+        )
+        set("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
     }
 
     override val client = network.client.newBuilder()
-        .addInterceptor { chain ->
-            val request = chain.request()
-            val path = request.url.encodedPath
-            val isAjax = path.contains("admin-ajax.php") ||
-                path.contains("wp-json") ||
-                path.endsWith("/ajax/chapters")
-            if (isAjax) {
-                chain.proceed(
-                    request.newBuilder()
-                        .header("X-Requested-With", "XMLHttpRequest")
-                        .header("Sec-Fetch-Dest", "empty")
-                        .header("Sec-Fetch-Mode", "cors")
-                        .header("Sec-Fetch-Site", "same-origin")
-                        .header("Origin", baseUrl)
-                        .header("Priority", "u=1, i")
-                        .removeHeader("Sec-Fetch-User")
-                        .removeHeader("Upgrade-Insecure-Requests")
-                        .build(),
-                )
-            } else {
-                chain.proceed(request)
-            }
-        }
         .rateLimit(3)
         .build()
 
