@@ -11,7 +11,6 @@ import androidx.preference.SwitchPreferenceCompat
 import eu.kanade.tachiyomi.extension.all.manhuarm.interceptors.CloudflareWarmupInterceptor
 import eu.kanade.tachiyomi.extension.all.manhuarm.interceptors.ComposedImageInterceptor
 import eu.kanade.tachiyomi.extension.all.manhuarm.interceptors.OcrUrlInterceptor
-import eu.kanade.tachiyomi.extension.all.manhuarm.interceptors.TranslationInterceptor
 import eu.kanade.tachiyomi.extension.all.manhuarm.translator.bing.BingTranslator
 import eu.kanade.tachiyomi.extension.all.manhuarm.translator.google.GoogleTranslator
 import eu.kanade.tachiyomi.multisrc.machinetranslations.translator.TranslatorEngine
@@ -29,10 +28,16 @@ import keiyoushi.lib.i18n.Intl.Companion.createDefaultMessageFileName
 import keiyoushi.network.rateLimit
 import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.parseAs
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.encodeToString
 import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -159,6 +164,8 @@ abstract class Manhuarm :
 
     private lateinit var translator: TranslatorEngine
 
+    private val translateCache = LinkedHashMap<String, String>(256, 0.75f, false)
+
     private fun clientBuilder(): OkHttpClient {
         translator = when (provider) {
             "Google" -> GoogleTranslator(clientUtils, headers)
@@ -174,10 +181,6 @@ abstract class Manhuarm :
                 if (index >= 0) interceptors().add(networkInterceptors().removeAt(index))
             }
             .addInterceptor(warmupInterceptor)
-            .addInterceptorIf(
-                !disableTranslator && language.lang != language.origin,
-                TranslationInterceptor(settings, translator),
-            )
             .addInterceptor(ComposedImageInterceptor(settings))
             .rateLimit(3, 1.seconds)
             .build()
@@ -191,8 +194,6 @@ abstract class Manhuarm :
         }
         return builder
     }
-
-    private fun OkHttpClient.Builder.addInterceptorIf(condition: Boolean, interceptor: Interceptor): OkHttpClient.Builder = this.takeIf { condition.not() } ?: this.addInterceptor(interceptor)
 
     private val translationAvailability = Calendar.getInstance().apply {
         set(2025, Calendar.SEPTEMBER, 9, 0, 0, 0)
@@ -423,6 +424,65 @@ abstract class Manhuarm :
             return pages
         }
 
+        // Pre-translate all unique dialogs at pipeline level instead of per-page
+        val shouldTranslate = !disableTranslator && language.target != language.origin
+        val sourceToTranslated: Map<String, String>
+        if (shouldTranslate) {
+            val t0 = System.currentTimeMillis()
+            val uniqueSources = LinkedHashSet<String>()
+            dialog.forEach { pageDto ->
+                pageDto.dialogues.forEach { d ->
+                    val src = d.text.cleanTranslationFailure()
+                    if (src.isNotBlank()) uniqueSources.add(src)
+                }
+            }
+
+            val rateLimiter = Semaphore(4)
+            val map = HashMap<String, String>(uniqueSources.size)
+            if (uniqueSources.isNotEmpty()) {
+                runBlocking(Dispatchers.IO) {
+                    coroutineScope {
+                        uniqueSources.map { src ->
+                            async(Dispatchers.IO) {
+                                rateLimiter.withPermit {
+                                    val cached = synchronized(translateCache) { translateCache[src] }
+                                    if (cached != null) {
+                                        map[src] = cached
+                                        return@async
+                                    }
+                                    val result = try {
+                                        val r = translator.translate(language.origin, language.target, src)
+                                        if (r.isBlank()) src else r
+                                    } catch (e: Exception) {
+                                        src
+                                    }.cleanTranslationFailure()
+                                    synchronized(translateCache) {
+                                        translateCache[src] = result
+                                        while (translateCache.size > 1000) translateCache.remove(translateCache.keys.iterator().next())
+                                    }
+                                    map[src] = result
+                                }
+                            }
+                        }.awaitAll()
+                    }
+                }
+                val changed = map.entries.count { it.key != it.value }
+                val unchanged = map.entries.count { it.key == it.value }
+                Log.d(
+                    TAG,
+                    "Pre-translate [$provider]: ${uniqueSources.size} unique, " +
+                        "changed=$changed, unchanged=$unchanged, " +
+                        "cache=${synchronized(translateCache) { translateCache.size }} " +
+                        "in ${System.currentTimeMillis() - t0}ms",
+                )
+            } else {
+                Log.d(TAG, "No unique texts to translate")
+            }
+            sourceToTranslated = map
+        } else {
+            sourceToTranslated = emptyMap()
+        }
+
         val mappedPages = pages.mapIndexed { index, page ->
             val pageUrl = page.imageUrl ?: return@mapIndexed page
 
@@ -439,7 +499,23 @@ abstract class Manhuarm :
                 return@mapIndexed page
             }
 
-            val activeDialogues = dto.dialogues.filter { it.getTextBy(language).isNotBlank() }
+            val activeDialogues = dto.dialogues.mapNotNull { d ->
+                val src = d.text.cleanTranslationFailure()
+                val translated = sourceToTranslated[src] ?: src
+                val updated = if (src.isBlank()) {
+                    d.replaceText("")
+                } else {
+                    d.copy(
+                        textByLanguage = buildMap {
+                            putAll(d.textByLanguage)
+                            put(language.origin, translated)
+                            put("text", translated)
+                        },
+                        sourceText = d.sourceText.cleanTranslationFailure(),
+                    )
+                }
+                if (updated.getTextBy(language).isNotBlank()) updated else null
+            }
             if (activeDialogues.isEmpty()) {
                 return@mapIndexed page
             }

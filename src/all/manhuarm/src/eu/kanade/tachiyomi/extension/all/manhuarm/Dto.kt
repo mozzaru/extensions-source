@@ -171,8 +171,8 @@ private object DialogListSerializer :
             },
         )
 
-        if (parsedCount > 0) {
-            Log.d(
+        if (skippedCount > 0 || unknownFormatCount > 0) {
+            Log.w(
                 TAG,
                 "DialogListSerializer: parsed=$parsedCount, skipped=$skippedCount, " +
                     "oldFormat=$oldFormatCount, newFormat=$newFormatCount, " +
