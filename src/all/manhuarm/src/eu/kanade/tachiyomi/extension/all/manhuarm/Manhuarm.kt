@@ -19,6 +19,7 @@ import eu.kanade.tachiyomi.multisrc.madara.Madara
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.source.ConfigurableSource
+import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
@@ -226,6 +227,13 @@ abstract class Manhuarm :
 
     override fun popularMangaNextPageSelector(): String = "a.next.page-numbers"
 
+    override fun popularMangaParse(response: Response): MangasPage {
+        val t0 = System.currentTimeMillis()
+        val result = super.popularMangaParse(response)
+        Log.d(TAG, "Popular manga list: ${result.mangas.size} items in ${System.currentTimeMillis() - t0}ms")
+        return result
+    }
+
     // =========================== Latest ==========================================
 
     override fun latestUpdatesRequest(page: Int): Request {
@@ -243,6 +251,13 @@ abstract class Manhuarm :
 
     override fun latestUpdatesNextPageSelector(): String = popularMangaNextPageSelector()
 
+    override fun latestUpdatesParse(response: Response): MangasPage {
+        val t0 = System.currentTimeMillis()
+        val result = super.latestUpdatesParse(response)
+        Log.d(TAG, "Latest manga list: ${result.mangas.size} items in ${System.currentTimeMillis() - t0}ms")
+        return result
+    }
+
     // =========================== Search ==========================================
 
     override fun searchMangaSelector(): String = "li.mrm-r-item"
@@ -250,6 +265,13 @@ abstract class Manhuarm :
     override fun searchMangaFromElement(element: Element): SManga = popularMangaFromElement(element)
 
     override fun searchMangaNextPageSelector(): String? = "a.next.page-numbers"
+
+    override fun searchMangaParse(response: Response): MangasPage {
+        val t0 = System.currentTimeMillis()
+        val result = super.searchMangaParse(response)
+        Log.d(TAG, "Search results: ${result.mangas.size} items in ${System.currentTimeMillis() - t0}ms")
+        return result
+    }
 
     // =========================== Details ==========================================
 

@@ -26,6 +26,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
+import java.util.concurrent.ConcurrentHashMap
 
 // The Interceptor joins the dialogues and pages of the manga.
 class ComposedImageInterceptor(
@@ -81,12 +82,22 @@ class ComposedImageInterceptor(
         }
 
         val composeElapsed = System.currentTimeMillis() - composeStarted
+        val now = System.currentTimeMillis()
         if (dialogues.isNotEmpty()) {
-            Log.d(
-                TAG,
-                "Composed image: drew=$drawnCount, skipped=$skippedCount, " +
-                    "took=${composeElapsed}ms (lang=${language.lang})",
-            )
+            val pageNum = extractPageNumber(url)
+            val chapterKey = extractChapterKey(url)
+            val gapSinceLast = chapterKey?.let { key ->
+                lastRenderTime[key]?.let { prev -> now - prev }
+            }
+            chapterKey?.let { lastRenderTime[it] = now }
+
+            val timingInfo = buildString {
+                append("drew=$drawnCount, skipped=$skippedCount")
+                if (pageNum != null) append(", page=$pageNum")
+                if (gapSinceLast != null) append(", gap=${gapSinceLast}ms")
+                append(", took=${composeElapsed}ms (lang=${language.lang})")
+            }
+            Log.d(TAG, "Composed image: $timingInfo")
             if (drawnCount == 0) {
                 Log.w(
                     TAG,
@@ -244,5 +255,20 @@ class ComposedImageInterceptor(
         const val SCALED_DENSITY = 0.75f // 1px = 0.75pt
         val mediaType = "image/png".toMediaType()
         private const val TAG = "Manhuarm.Render"
+        private val lastRenderTime = ConcurrentHashMap<String, Long>()
+        private val PAGE_NUM_REGEX = Regex("""/(\d+)\.[a-z]+(?:\?|#|$)""", RegexOption.IGNORE_CASE)
+
+        /** URL up to (excluding) the last path segment + fragment, e.g.
+         *  `https://site.com/wp-content/uploads/2023/01/001.jpg#...` → `https://site.com/wp-content/uploads/2023/01/` */
+        fun extractChapterKey(url: String): String? {
+            val cleanUrl = url.substringBefore("#")
+            val slashIdx = cleanUrl.lastIndexOf('/')
+            return if (slashIdx > 0) cleanUrl.substring(0, slashIdx + 1) else null
+        }
+
+        fun extractPageNumber(url: String): Int? {
+            val cleanUrl = url.substringBefore("#")
+            return PAGE_NUM_REGEX.find(cleanUrl)?.groupValues?.get(1)?.toIntOrNull()
+        }
     }
 }

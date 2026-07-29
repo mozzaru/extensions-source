@@ -56,6 +56,7 @@ class TranslationInterceptor(
 
         Log.d(TAG, "Translating ${dialogues.size} dialogs ${language.origin} -> ${language.target}")
         val startedAt = System.currentTimeMillis()
+        var uniqueTextCount = 0
 
         val translated = try {
             runCatching {
@@ -67,6 +68,7 @@ class TranslationInterceptor(
                         val src = d.text.cleanTranslationFailure()
                         if (src.isNotBlank()) toTranslate.add(src)
                     }
+                    uniqueTextCount = toTranslate.size
 
                     // Translate unique texts in parallel, capped at 4 concurrent.
                     coroutineScope {
@@ -107,18 +109,24 @@ class TranslationInterceptor(
 
         val elapsed = System.currentTimeMillis() - startedAt
         val emptyCount = translated.count { it.getTextBy(language).isBlank() }
-        val cacheSize = synchronized(cacheLock) { cache.size }
-        if (emptyCount > 0) {
-            Log.w(
-                TAG,
-                "Translation finished in ${elapsed}ms but $emptyCount/${translated.size} dialogs are blank (cache: $cacheSize)",
-            )
-        } else {
-            Log.d(
-                TAG,
-                "Translation finished in ${elapsed}ms, ${translated.size} dialogs, cache: $cacheSize entries",
-            )
+        val unchangedCount = translated.count { t ->
+            val src = t.sourceText.cleanTranslationFailure()
+            val translated = t.getTextBy(language).cleanTranslationFailure()
+            src.isNotBlank() && translated == src
         }
+        val changedCount = translated.count { t ->
+            val src = t.sourceText.cleanTranslationFailure()
+            val translated = t.getTextBy(language).cleanTranslationFailure()
+            src.isNotBlank() && translated.isNotBlank() && translated != src
+        }
+        val cacheSize = synchronized(cacheLock) { cache.size }
+        Log.d(
+            TAG,
+            "Translation: ${elapsed}ms for ${translated.size} dialogs " +
+                "($uniqueTextCount unique), " +
+                "changed=$changedCount unchanged=$unchangedCount empty=$emptyCount " +
+                "cache=$cacheSize",
+        )
 
         val newRequest = request.newBuilder()
             .url("${url.substringBeforeLast("#")}#${json.encodeToString(translated)}")
