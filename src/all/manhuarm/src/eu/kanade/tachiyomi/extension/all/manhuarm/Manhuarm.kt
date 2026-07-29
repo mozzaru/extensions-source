@@ -35,6 +35,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.encodeToString
 import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -48,6 +49,8 @@ import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.util.Calendar
 import java.util.Date
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
@@ -159,7 +162,7 @@ abstract class Manhuarm :
         }
 
     private val clientUtils = network.client.newBuilder()
-        .rateLimit(3, 2.seconds)
+        .rateLimit(6, 1.seconds)
         .build()
 
     private lateinit var translator: TranslatorEngine
@@ -418,15 +421,16 @@ abstract class Manhuarm :
             emptyList()
         }
 
+        val ocrEnd = System.currentTimeMillis()
         if (dialog.isEmpty()) {
-            val pipelineElapsed = System.currentTimeMillis() - pipelineStarted
+            val pipelineElapsed = ocrEnd - pipelineStarted
             Log.w(TAG, "OCR returned no dialogs for $chapterUrl (took ${pipelineElapsed}ms)")
             return pages
         }
 
         // Pre-translate all unique dialogs at pipeline level instead of per-page
         val shouldTranslate = !disableTranslator && language.target != language.origin
-        val sourceToTranslated: Map<String, String>
+        var sourceToTranslated: Map<String, String> = emptyMap()
         if (shouldTranslate) {
             val t0 = System.currentTimeMillis()
             val uniqueSources = LinkedHashSet<String>()
@@ -437,51 +441,60 @@ abstract class Manhuarm :
                 }
             }
 
-            val rateLimiter = Semaphore(4)
-            val map = HashMap<String, String>(uniqueSources.size)
+            val rateLimiter = Semaphore(6)
             if (uniqueSources.isNotEmpty()) {
-                runBlocking(Dispatchers.IO) {
-                    coroutineScope {
-                        uniqueSources.map { src ->
-                            async(Dispatchers.IO) {
-                                rateLimiter.withPermit {
-                                    val cached = synchronized(translateCache) { translateCache[src] }
-                                    if (cached != null) {
-                                        map[src] = cached
-                                        return@async
+                val map = ConcurrentHashMap<String, String>(uniqueSources.size)
+                val cacheHits = AtomicInteger(0)
+                try {
+                    runBlocking(Dispatchers.IO) {
+                        withTimeout(60_000L) {
+                            coroutineScope {
+                                uniqueSources.map { src ->
+                                    async(Dispatchers.IO) {
+                                        rateLimiter.withPermit {
+                                            val cached = synchronized(translateCache) { translateCache[src] }
+                                            if (cached != null) {
+                                                cacheHits.incrementAndGet()
+                                                map[src] = cached
+                                                return@async
+                                            }
+                                            val result = try {
+                                                val r = translator.translate(language.origin, language.target, src)
+                                                if (r.isBlank()) src else r
+                                            } catch (e: Throwable) {
+                                                src
+                                            }.cleanTranslationFailure()
+                                            synchronized(translateCache) {
+                                                translateCache[src] = result
+                                                while (translateCache.size > 1000) translateCache.remove(translateCache.keys.iterator().next())
+                                            }
+                                            map[src] = result
+                                        }
                                     }
-                                    val result = try {
-                                        val r = translator.translate(language.origin, language.target, src)
-                                        if (r.isBlank()) src else r
-                                    } catch (e: Exception) {
-                                        src
-                                    }.cleanTranslationFailure()
-                                    synchronized(translateCache) {
-                                        translateCache[src] = result
-                                        while (translateCache.size > 1000) translateCache.remove(translateCache.keys.iterator().next())
-                                    }
-                                    map[src] = result
-                                }
+                                }.awaitAll()
                             }
-                        }.awaitAll()
+                        }
                     }
+                    val changed = map.entries.count { it.key != it.value }
+                    val unchanged = map.entries.count { it.key == it.value }
+                    Log.d(
+                        TAG,
+                        "Pre-translate [$provider]: ${uniqueSources.size} unique, " +
+                            "changed=$changed, unchanged=$unchanged, " +
+                            "hits=${cacheHits.get()}, " +
+                            "cache=${synchronized(translateCache) { translateCache.size }} " +
+                            "in ${System.currentTimeMillis() - t0}ms",
+                    )
+                    sourceToTranslated = map
+                } catch (e: Throwable) {
+                    Log.w(TAG, "Pre-translate failed after ${System.currentTimeMillis() - t0}ms: ${e.message}. Using source text.")
+                    sourceToTranslated = uniqueSources.associateWith { it }
                 }
-                val changed = map.entries.count { it.key != it.value }
-                val unchanged = map.entries.count { it.key == it.value }
-                Log.d(
-                    TAG,
-                    "Pre-translate [$provider]: ${uniqueSources.size} unique, " +
-                        "changed=$changed, unchanged=$unchanged, " +
-                        "cache=${synchronized(translateCache) { translateCache.size }} " +
-                        "in ${System.currentTimeMillis() - t0}ms",
-                )
             } else {
                 Log.d(TAG, "No unique texts to translate")
             }
-            sourceToTranslated = map
-        } else {
-            sourceToTranslated = emptyMap()
         }
+        val translateEnd = System.currentTimeMillis()
 
         val mappedPages = pages.mapIndexed { index, page ->
             val pageUrl = page.imageUrl ?: return@mapIndexed page
@@ -529,9 +542,14 @@ abstract class Manhuarm :
             if (frag.isNullOrBlank()) 0 else 1
         }
         val pipelineElapsed = System.currentTimeMillis() - pipelineStarted
+        val ocrTime = ocrEnd - pipelineStarted
+        val translateTime = translateEnd - ocrEnd
+        val mappingTime = pipelineElapsed - ocrTime - translateTime
         Log.d(
             TAG,
-            "pageListParse: mapped $dialogsCount/${pages.size} pages with dialogs, took ${pipelineElapsed}ms",
+            "pageListParse: $dialogsCount/${pages.size} pages " +
+                "[ocr=${ocrTime}ms | translate=${translateTime}ms | map=${mappingTime}ms] " +
+                "= ${pipelineElapsed}ms",
         )
         return mappedPages
     }

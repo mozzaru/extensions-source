@@ -93,6 +93,7 @@ class ComposedImageInterceptor(
 
             val timingInfo = buildString {
                 append("drew=$drawnCount, skipped=$skippedCount")
+                append(", total=${dialogues.size}")
                 if (pageNum != null) append(", page=$pageNum")
                 if (gapSinceLast != null) append(", gap=${gapSinceLast}ms")
                 append(", took=${composeElapsed}ms (lang=${language.lang})")
