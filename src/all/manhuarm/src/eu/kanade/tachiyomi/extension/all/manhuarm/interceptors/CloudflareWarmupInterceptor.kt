@@ -22,14 +22,13 @@ class CloudflareWarmupInterceptor(
         val request = chain.request()
         val response = chain.proceed(request)
 
-        if (!response.isSuccessful && !isWarmedUp.get()) {
+        if (!response.isSuccessful && !isWarmedUp.getAndSet(true)) {
             response.close()
 
             try {
                 val warmupRequest = GET(baseUrl, headers)
                 val warmupResponse = chain.proceed(warmupRequest)
                 warmupResponse.close()
-                isWarmedUp.set(true)
             } catch (_: Exception) {
             }
 

@@ -58,6 +58,7 @@ class ComposedImageInterceptor(
 
         val canvas = Canvas(bitmap)
 
+        val composeStarted = System.currentTimeMillis()
         var drawnCount = 0
         var skippedCount = 0
 
@@ -79,10 +80,12 @@ class ComposedImageInterceptor(
             drawnCount++
         }
 
+        val composeElapsed = System.currentTimeMillis() - composeStarted
         if (dialogues.isNotEmpty()) {
             Log.d(
                 TAG,
-                "Composed image: drew=$drawnCount, skipped=$skippedCount (lang=${language.lang})",
+                "Composed image: drew=$drawnCount, skipped=$skippedCount, " +
+                    "took=${composeElapsed}ms (lang=${language.lang})",
             )
             if (drawnCount == 0) {
                 Log.w(

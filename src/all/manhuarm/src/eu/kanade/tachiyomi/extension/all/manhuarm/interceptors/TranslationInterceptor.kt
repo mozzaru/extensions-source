@@ -146,7 +146,6 @@ class TranslationInterceptor(
             while (cache.size >= MAX_CACHE_ENTRIES) {
                 val evicted = cache.keys.iterator().next()
                 cache.remove(evicted)
-                Log.d(TAG, "Cache full, evicted: ${evicted.take(30)}")
             }
             cache[key] = value
         }

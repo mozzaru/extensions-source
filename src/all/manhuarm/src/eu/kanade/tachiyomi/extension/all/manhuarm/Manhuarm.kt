@@ -61,6 +61,11 @@ abstract class Manhuarm :
 
     override val useNewChapterEndpoint: Boolean = true
 
+    // Site uses custom mrm-* classes instead of standard Madara selectors
+    override val mangaDetailsSelectorTitle = "h1.mrm-hero__title"
+    override val mangaDetailsSelectorThumbnail = "div.mrm-hero__cover img, div.summary_image img"
+    override val mangaDetailsSelectorGenre = "div.mrm-genres__list a, div.genres-content a"
+
     private val preferences: SharedPreferences by getPreferencesLazy()
 
     /**
@@ -136,17 +141,15 @@ abstract class Manhuarm :
 
     private val ocrUrlInterceptor by lazy { OcrUrlInterceptor(headers) }
 
-    /**
-     * This ensures that the `OkHttpClient` instance is only created when required, and it is rebuilt
-     * when there are configuration changes to ensure that the client uses the most up-to-date settings.
-     */
     private var clientInstance: OkHttpClient? = null
         get() {
-            if (field == null || isSettingsChanged) {
-                warmupInterceptor.reset()
-                field = clientBuilder()
+            synchronized(this) {
+                if (field == null || isSettingsChanged) {
+                    warmupInterceptor.reset()
+                    field = clientBuilder()
+                }
+                return field
             }
-            return field
         }
 
     private val clientUtils = network.client.newBuilder()
@@ -175,7 +178,7 @@ abstract class Manhuarm :
                 TranslationInterceptor(settings, translator),
             )
             .addInterceptor(ComposedImageInterceptor(settings))
-            .rateLimit(2, 1.seconds)
+            .rateLimit(3, 1.seconds)
             .build()
     }
 
@@ -199,53 +202,54 @@ abstract class Manhuarm :
 
     override fun popularMangaRequest(page: Int): Request {
         val url = if (page == 1) {
-            "$baseUrl/manga/?m_orderby=trending"
+            "$baseUrl/manga/?sort=trending"
         } else {
-            "$baseUrl/manga/page/$page/?m_orderby=trending"
+            "$baseUrl/manga/page/$page/?sort=trending"
         }
         return GET(url, headers)
     }
 
-    override fun popularMangaSelector(): String = ".page-item-detail, .manga-card"
+    override fun popularMangaSelector(): String = "li.mrm-r-item"
 
     override fun popularMangaFromElement(element: Element): SManga {
         val manga = SManga.create()
-        val titleEl = element.selectFirst(".post-title a, .manga-title a")
-        val thumbEl = element.selectFirst(".item-thumb img, .manga-thumb img, img")
-        manga.setUrlWithoutDomain(titleEl!!.attr("href"))
-        manga.title = titleEl.text()
+        val linkEl = element.selectFirst("a.mrm-r-item__link")
+        val titleEl = element.selectFirst(".mrm-r-item__title")
+        val thumbEl = element.selectFirst(".mrm-r-item__art img")
+        if (linkEl != null) {
+            manga.setUrlWithoutDomain(linkEl.attr("href"))
+        }
+        manga.title = titleEl?.text() ?: ""
         manga.thumbnail_url = thumbEl?.extractCoverUrl()
         return manga
     }
 
-    override fun popularMangaNextPageSelector(): String = "a.next, a.nextpostslink, .pagination a.next, .navigation-ajax #navigation-ajax"
+    override fun popularMangaNextPageSelector(): String = "a.next.page-numbers"
 
     // =========================== Latest ==========================================
 
     override fun latestUpdatesRequest(page: Int): Request {
         val url = if (page == 1) {
-            "$baseUrl/manga/?m_orderby=latest"
+            "$baseUrl/manga/?sort=latest"
         } else {
-            "$baseUrl/manga/page/$page/?m_orderby=latest"
+            "$baseUrl/manga/page/$page/?sort=latest"
         }
         return GET(url, headers)
     }
 
     override fun latestUpdatesSelector(): String = popularMangaSelector()
 
-    override fun latestUpdatesFromElement(element: Element): SManga {
-        val manga = SManga.create()
-        val titleEl = element.selectFirst(".manga-title a")
-            ?: element.selectFirst(".post-title a, h3.h5 a, .post-title h3 a")
-        val thumbEl = element.selectFirst(".manga-thumb img")
-            ?: element.selectFirst(".item-thumb img, img")
-        manga.setUrlWithoutDomain(titleEl!!.attr("href"))
-        manga.title = titleEl.text()
-        manga.thumbnail_url = thumbEl?.extractCoverUrl()
-        return manga
-    }
+    override fun latestUpdatesFromElement(element: Element): SManga = popularMangaFromElement(element)
 
     override fun latestUpdatesNextPageSelector(): String = popularMangaNextPageSelector()
+
+    // =========================== Search ==========================================
+
+    override fun searchMangaSelector(): String = "li.mrm-r-item"
+
+    override fun searchMangaFromElement(element: Element): SManga = popularMangaFromElement(element)
+
+    override fun searchMangaNextPageSelector(): String? = "a.next.page-numbers"
 
     // =========================== Details ==========================================
 
@@ -283,14 +287,10 @@ abstract class Manhuarm :
             manga.description = translator.translate(language.origin, language.target, manga.description!!)
         }
 
-        // Ensure cover is always set from detail page if it wasn't set from listing
-        if (manga.thumbnail_url.isNullOrBlank()) {
-            val coverEl = document.selectFirst(".summary_image img, .wp-post-image, .item-thumb img, .manga-thumb img, img.wp-post-image")
-            manga.thumbnail_url = coverEl?.extractCoverUrl()
-        } else {
-            // Even if cover was set, try to get a better quality version from detail page
-            val coverEl = document.selectFirst(".summary_image img, .wp-post-image, .item-thumb img, .manga-thumb img, img.wp-post-image")
-            coverEl?.extractCoverUrl()?.let {
+        // Site uses custom mrm-* classes instead of standard Madara selectors
+        val coverEl = document.selectFirst(".mrm-hero__cover img, .summary_image img, .wp-post-image, .item-thumb img, img.wp-post-image")
+        if (coverEl != null) {
+            coverEl.extractCoverUrl()?.let {
                 if (it.isNotBlank() && !it.contains("placeholder")) {
                     manga.thumbnail_url = it
                 }
@@ -316,6 +316,10 @@ abstract class Manhuarm :
             return emptyList()
         }
 
+        if (language.target == language.origin) {
+            return pages
+        }
+
         val chapterUrl = try {
             document.location().toHttpUrl().newBuilder()
                 .removeAllQueryParameters("style")
@@ -325,6 +329,7 @@ abstract class Manhuarm :
             return pages
         }
 
+        val pipelineStarted = System.currentTimeMillis()
         Log.d(
             TAG,
             "pageListParse: ${pages.size} raw pages for $chapterUrl",
@@ -391,10 +396,12 @@ abstract class Manhuarm :
         }
 
         if (dialog.isEmpty()) {
+            val pipelineElapsed = System.currentTimeMillis() - pipelineStarted
+            Log.w(TAG, "OCR returned no dialogs for $chapterUrl (took ${pipelineElapsed}ms)")
             return pages
         }
 
-        return pages.mapIndexed { index, page ->
+        val mappedPages = pages.mapIndexed { index, page ->
             val pageUrl = page.imageUrl ?: return@mapIndexed page
 
             val dto = dialog.firstOrNull { d ->
@@ -418,6 +425,17 @@ abstract class Manhuarm :
             val fragment = json.encodeToString<List<Dialog>>(activeDialogues)
             Page(page.index, imageUrl = "${pageUrl.substringBefore("#")}${fragment.toFragment()}")
         }
+
+        val dialogsCount = mappedPages.sumOf { page ->
+            val frag = page.imageUrl?.substringAfter("#", "")
+            if (frag.isNullOrBlank()) 0 else 1
+        }
+        val pipelineElapsed = System.currentTimeMillis() - pipelineStarted
+        Log.d(
+            TAG,
+            "pageListParse: mapped $dialogsCount/${pages.size} pages with dialogs, took ${pipelineElapsed}ms",
+        )
+        return mappedPages
     }
 
     override fun imageRequest(page: Page): Request {

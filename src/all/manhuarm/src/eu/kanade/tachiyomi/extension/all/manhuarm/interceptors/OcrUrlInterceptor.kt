@@ -87,7 +87,7 @@ class OcrUrlInterceptor(private val headers: Headers) {
             }
         }
 
-        val completed = latch.await(15, TimeUnit.SECONDS)
+        val completed = latch.await(10, TimeUnit.SECONDS)
         val elapsed = System.currentTimeMillis() - startedAt
 
         handler.post {
