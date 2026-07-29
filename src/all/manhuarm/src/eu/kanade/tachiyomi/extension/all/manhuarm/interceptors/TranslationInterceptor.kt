@@ -37,7 +37,7 @@ class TranslationInterceptor(
     // Concurrency cap. Bing/Google both rate-limit, so spawning a coroutine
     // per dialog would hit the limit and either fail or just queue. With a
     // small cap we get good parallelism without triggering the limiter.
-    private val rateLimiter = Semaphore(permits = 4)
+    private val rateLimiter = Semaphore(permits = 6)
 
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
