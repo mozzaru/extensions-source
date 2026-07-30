@@ -42,6 +42,7 @@ import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.util.Calendar
 import java.util.Date
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
@@ -417,24 +418,45 @@ abstract class Manhuarm :
             return pages
         }
 
+        val matchedByUrl = AtomicInteger(0)
+        val matchedByIndex = AtomicInteger(0)
+        val unmatchedPages = AtomicInteger(0)
+        val pagesWithoutUsableDialogs = AtomicInteger(0)
+        val usableDialogCount = AtomicInteger(0)
         val mappedPages = pages.mapIndexed { index, page ->
             val pageUrl = page.imageUrl ?: return@mapIndexed page
 
-            val dto = dialog.firstOrNull { d ->
+            val urlMatch = dialog.firstOrNull { d ->
                 d.imageUrl.isNotBlank() && (
                     pageUrl.contains(d.imageUrl, ignoreCase = true) ||
                         d.imageUrl.contains(pageUrl, ignoreCase = true) ||
                         pageUrl.substringAfterLast("/").substringBefore("?")
                             .equals(d.imageUrl.substringAfterLast("/").substringBefore("?"), ignoreCase = true)
                     )
-            } ?: dialog.getOrNull(index)
+            }
+            val dto = urlMatch ?: if (dialog.size == pages.size) {
+                // OCR normally returns one DTO per image in identical order. Do not
+                // use positional fallback for a partial response: that could paint
+                // text from a different page onto this image.
+                matchedByIndex.incrementAndGet()
+                dialog.getOrNull(index)
+            } else {
+                unmatchedPages.incrementAndGet()
+                Log.w(TAG, "No OCR image match for page ${index + 1}; leaving original image")
+                null
+            }
+            if (urlMatch != null) matchedByUrl.incrementAndGet()
 
             if (dto == null) return@mapIndexed page
 
             val activeDialogues = dto.dialogues.mapNotNull { d ->
                 if (d.text.cleanTranslationFailure().isBlank()) null else d
             }
-            if (activeDialogues.isEmpty()) return@mapIndexed page
+            if (activeDialogues.isEmpty()) {
+                pagesWithoutUsableDialogs.incrementAndGet()
+                return@mapIndexed page
+            }
+            usableDialogCount.addAndGet(activeDialogues.size)
 
             val fragment = json.encodeToString<List<Dialog>>(activeDialogues)
             Page(page.index, imageUrl = "${pageUrl.substringBefore("#")}${fragment.toFragment()}")
@@ -442,7 +464,12 @@ abstract class Manhuarm :
 
         val pipelineElapsed = System.currentTimeMillis() - pipelineStarted
         val dialogCount = mappedPages.count { it.imageUrl?.contains("#") == true }
-        Log.d(TAG, "pageListParse: $dialogCount/${pages.size} pages with dialogs in ${pipelineElapsed}ms")
+        Log.d(
+            TAG,
+            "pageListParse: rendered=$dialogCount/${pages.size} pages, dialogs=${usableDialogCount.get()}, " +
+                "match(url=${matchedByUrl.get()}, index=${matchedByIndex.get()}, miss=${unmatchedPages.get()}), " +
+                "noUsableDialogs=${pagesWithoutUsableDialogs.get()}, took=${pipelineElapsed}ms",
+        )
         return mappedPages
     }
 

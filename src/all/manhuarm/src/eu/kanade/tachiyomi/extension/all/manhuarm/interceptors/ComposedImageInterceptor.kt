@@ -25,7 +25,6 @@ import org.jsoup.Jsoup
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
-import java.io.InputStream
 import java.util.concurrent.ConcurrentHashMap
 
 // The Interceptor joins the dialogues and pages of the manga.
@@ -54,8 +53,17 @@ class ComposedImageInterceptor(
             return response
         }
 
-        val bitmap = BitmapFactory.decodeStream(response.body.byteStream())!!
-            .copy(Bitmap.Config.ARGB_8888, true)
+        val decodedBitmap = try {
+            BitmapFactory.decodeStream(response.body.byteStream())
+        } catch (e: Exception) {
+            Log.w(TAG, "Unable to decode image at ${request.url}: ${e.message}")
+            null
+        }
+        val bitmap = decodedBitmap?.copy(Bitmap.Config.ARGB_8888, true)
+        if (bitmap == null) {
+            Log.w(TAG, "Image decoder returned no bitmap for ${request.url}; returning original response")
+            return response
+        }
 
         val canvas = Canvas(bitmap)
 
@@ -72,6 +80,11 @@ class ComposedImageInterceptor(
             // the text for a particular bubble or had failure markers like [TERJEMAHAN GAGAL].
             if (text.isBlank()) {
                 skippedCount++
+                return@forEach
+            }
+            if (dialog.width <= 0f || dialog.height <= 0f) {
+                skippedCount++
+                Log.w(TAG, "Skipping invalid dialog box ${dialog.width}x${dialog.height}")
                 return@forEach
             }
             val textPaint = createTextPaint(selectFontFamily())
@@ -95,6 +108,7 @@ class ComposedImageInterceptor(
                 append("drew=$drawnCount, skipped=$skippedCount")
                 append(", total=${dialogues.size}")
                 if (pageNum != null) append(", page=$pageNum")
+                append(", image=${url.substringBefore('#').substringAfterLast('/')}")
                 if (gapSinceLast != null) append(", gap=${gapSinceLast}ms")
                 append(", took=${composeElapsed}ms (lang=${language.lang})")
             }
@@ -113,15 +127,15 @@ class ComposedImageInterceptor(
         val ext = url.substringBefore("#")
             .substringAfterLast(".")
             .lowercase()
-        val format = when (ext) {
-            "png" -> Bitmap.CompressFormat.PNG
-            "jpeg", "jpg" -> Bitmap.CompressFormat.JPEG
-            else -> Bitmap.CompressFormat.WEBP
+        val (format, outputMediaType) = when (ext) {
+            "png" -> Bitmap.CompressFormat.PNG to "image/png".toMediaType()
+            "jpeg", "jpg" -> Bitmap.CompressFormat.JPEG to "image/jpeg".toMediaType()
+            else -> Bitmap.CompressFormat.WEBP to "image/webp".toMediaType()
         }
 
         bitmap.compress(format, 100, output)
 
-        val responseBody = output.toByteArray().toResponseBody(mediaType)
+        val responseBody = output.toByteArray().toResponseBody(outputMediaType)
 
         return response.newBuilder()
             .body(responseBody)
@@ -158,18 +172,27 @@ class ComposedImageInterceptor(
      *   val typeface: TypeFace? = loadFont("filename.ttf")
      * }</pre>
      */
-    private fun loadFont(fontName: String): Typeface? = try {
-        this::class.java.classLoader!!
-            .getResourceAsStream("assets/fonts/$fontName")
-            .toTypeface(fontName)
-    } catch (_: Exception) {
-        null
-    }
+    private fun loadFont(fontName: String): Typeface? {
+        typefaceCache[fontName]?.let { return it }
 
-    private fun InputStream.toTypeface(fontName: String): Typeface? {
-        val fontFile = File.createTempFile(fontName, fontName.substringAfter("."))
-        this.copyTo(FileOutputStream(fontFile))
-        return Typeface.createFromFile(fontFile)
+        val typeface = try {
+            val fontFile = File.createTempFile(fontName.substringBeforeLast('.'), ".ttf")
+            this::class.java.classLoader
+                ?.getResourceAsStream("assets/fonts/$fontName")
+                ?.use { input ->
+                    FileOutputStream(fontFile).use { output -> input.copyTo(output) }
+                    Typeface.createFromFile(fontFile)
+                }
+                .also { fontFile.delete() }
+        } catch (e: Exception) {
+            Log.w(TAG, "Unable to load font $fontName: ${e.message}")
+            null
+        }
+
+        if (typeface != null) {
+            return typefaceCache.putIfAbsent(fontName, typeface) ?: typeface
+        }
+        return null
     }
 
     /**
@@ -191,7 +214,7 @@ class ComposedImageInterceptor(
         var dialogBox = createBoxLayout(dialog, text, textPaint)
 
         // The best way I've found to adjust the text in the dialog box (Especially in long dialogues)
-        while (dialogBox.height > dialog.height) {
+        while (dialogBox.height > dialog.height && textPaint.textSize > MIN_TEXT_SIZE) {
             textPaint.textSize -= 0.5f
             dialogBox = createBoxLayout(dialog, text, textPaint)
         }
@@ -254,9 +277,10 @@ class ComposedImageInterceptor(
     companion object {
         // w3: Absolute Lengths [...](https://www.w3.org/TR/css3-values/#absolute-lengths)
         const val SCALED_DENSITY = 0.75f // 1px = 0.75pt
-        val mediaType = "image/png".toMediaType()
+        private const val MIN_TEXT_SIZE = 8f
         private const val TAG = "Manhuarm.Render"
         private val lastRenderTime = ConcurrentHashMap<String, Long>()
+        private val typefaceCache = ConcurrentHashMap<String, Typeface>()
         private val PAGE_NUM_REGEX = Regex("""/(\d+)\.[a-z]+(?:\?|#|$)""", RegexOption.IGNORE_CASE)
 
         /** URL up to (excluding) the last path segment + fragment, e.g.

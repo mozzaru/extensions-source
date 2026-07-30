@@ -65,8 +65,9 @@ class OcrUrlInterceptor(private val headers: Headers) {
                                 val elapsed = System.currentTimeMillis() - startedAt
                                 Log.d(
                                     TAG,
-                                    "Real OCR call captured after ${elapsed}ms, " +
-                                        "body=${body.take(120)}",
+                                    "Real OCR call captured after ${elapsed}ms: " +
+                                        "endpoint=${url.substringBefore('?')}, " +
+                                        "bodyBytes=${body.length}, headers=${headerMap.keys.sorted()}",
                                 )
                                 latch.countDown()
                             }
@@ -109,7 +110,11 @@ class OcrUrlInterceptor(private val headers: Headers) {
                     "Function.prototype.toString is being patched correctly.",
             )
         } else {
-            Log.d(TAG, "OCR request returned in ${elapsed}ms")
+            Log.d(
+                TAG,
+                "OCR request returned in ${elapsed}ms " +
+                    "(captured=${ocrRequest != null}, webViewDestroyed=true)",
+            )
         }
         return ocrRequest
     }

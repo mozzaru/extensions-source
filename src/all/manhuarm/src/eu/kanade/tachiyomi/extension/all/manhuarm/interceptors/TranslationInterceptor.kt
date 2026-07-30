@@ -19,6 +19,8 @@ import kotlinx.serialization.json.Json
 import okhttp3.Interceptor
 import okhttp3.Response
 import uy.kohesive.injekt.injectLazy
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 
 class TranslationInterceptor(
     val language: Language,
@@ -57,12 +59,13 @@ class TranslationInterceptor(
         Log.d(TAG, "Translating ${dialogues.size} dialogs ${language.origin} -> ${language.target}")
         val startedAt = System.currentTimeMillis()
         var uniqueTextCount = 0
+        val cacheHitCount = AtomicInteger(0)
 
         val translated = try {
             runCatching {
                 runBlocking(Dispatchers.IO) {
                     // First pass: collect unique source texts to translate.
-                    val sourceToTranslated = HashMap<String, String>()
+                    val sourceToTranslated = ConcurrentHashMap<String, String>()
                     val toTranslate = LinkedHashSet<String>()
                     dialogues.forEach { d ->
                         val src = d.text.cleanTranslationFailure()
@@ -77,6 +80,7 @@ class TranslationInterceptor(
                                 rateLimiter.withPermit {
                                     val cached = cacheLookup(src)
                                     if (cached != null) {
+                                        cacheHitCount.incrementAndGet()
                                         sourceToTranslated[src] = cached
                                         return@async
                                     }
@@ -125,6 +129,7 @@ class TranslationInterceptor(
             "Translation: ${elapsed}ms for ${translated.size} dialogs " +
                 "($uniqueTextCount unique), " +
                 "changed=$changedCount unchanged=$unchangedCount empty=$emptyCount " +
+                "cacheHits=${cacheHitCount.get()} apiCalls=${uniqueTextCount - cacheHitCount.get()} " +
                 "cache=$cacheSize",
         )
 
