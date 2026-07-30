@@ -4,6 +4,8 @@ import eu.kanade.tachiyomi.source.model.SManga
 import keiyoushi.utils.toJsonString
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.jsoup.Jsoup
 import org.jsoup.parser.Parser
 
@@ -21,17 +23,13 @@ class Manga(
     val title: Rendered,
     val content: Rendered,
     @SerialName("_embedded")
-    val embedded: Embedded,
+    val embedded: Embedded = Embedded(),
 ) {
-    fun toSManga(appendId: Boolean = false) = SManga.create().apply {
+    fun toSManga() = SManga.create().apply {
         url = MangaUrl(id, slug).toJsonString()
+        memo = buildJsonObject { put("slug", slug) }
         title = Parser.unescapeEntities(this@Manga.title.rendered, false)
-        description = buildString {
-            append(Jsoup.parseBodyFragment(content.rendered).wholeText())
-            if (appendId) {
-                append("\n\nID: $id")
-            }
-        }
+        description = Jsoup.parseBodyFragment(content.rendered).wholeText()
         thumbnail_url = embedded.featuredMedia.firstOrNull()?.sourceUrl
         author = embedded.getTerms("series-author").joinToString()
         artist = embedded.getTerms("artist").joinToString()
@@ -55,9 +53,9 @@ class Manga(
 @Serializable
 class Embedded(
     @SerialName("wp:featuredmedia")
-    val featuredMedia: List<FeaturedMedia>,
+    val featuredMedia: List<FeaturedMedia> = emptyList(),
     @SerialName("wp:term")
-    private val terms: List<List<Term>>,
+    private val terms: List<List<Term>> = emptyList(),
 ) {
     fun getTerms(type: String): List<String> = terms.find { it.getOrNull(0)?.taxonomy == type }?.map { it.name } ?: emptyList()
 }
