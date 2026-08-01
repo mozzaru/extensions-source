@@ -20,9 +20,9 @@ import keiyoushi.utils.parseAs
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Response
-import okhttp3.ResponseBody.Companion.toResponseBody
+import okhttp3.ResponseBody.Companion.asResponseBody
+import okio.Buffer
 import org.jsoup.Jsoup
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.ConcurrentHashMap
@@ -53,93 +53,98 @@ class ComposedImageInterceptor(
             return response
         }
 
-        val decodedBitmap = try {
-            BitmapFactory.decodeStream(response.body.byteStream())
-        } catch (e: Exception) {
-            Log.w(TAG, "Unable to decode image at ${request.url}: ${e.message}")
-            null
-        }
-        val bitmap = decodedBitmap?.copy(Bitmap.Config.ARGB_8888, true)
-        if (bitmap == null) {
-            Log.w(TAG, "Image decoder returned no bitmap for ${request.url}; returning original response")
-            return response
-        }
-
-        val canvas = Canvas(bitmap)
-
-        val composeStarted = System.currentTimeMillis()
-        var drawnCount = 0
-        var skippedCount = 0
-
-        dialogues.forEach { dialog ->
-            dialog.scale = language.dialogBoxScale
-            val text = dialog.getTextBy(language).cleanUp().cleanTranslationFailure()
-            // Skip empty dialogs. Drawing an empty box would just show a
-            // white rectangle with no text inside, which is what the user
-            // sees when the OCR response or translation API is missing
-            // the text for a particular bubble or had failure markers like [TERJEMAHAN GAGAL].
-            if (text.isBlank()) {
-                skippedCount++
-                return@forEach
+        return response.use {
+            val decodedBitmap = try {
+                BitmapFactory.decodeStream(response.body.byteStream())
+            } catch (e: Exception) {
+                Log.w(TAG, "Unable to decode image at ${request.url}: ${e.message}")
+                null
             }
-            if (dialog.width <= 0f || dialog.height <= 0f) {
-                skippedCount++
-                Log.w(TAG, "Skipping invalid dialog box ${dialog.width}x${dialog.height}")
-                return@forEach
+            val bitmap = decodedBitmap?.copy(Bitmap.Config.ARGB_8888, true)
+            if (bitmap == null) {
+                Log.w(TAG, "Image decoder returned no bitmap for ${request.url}; returning original response")
+                return@use response
             }
-            val textPaint = createTextPaint(selectFontFamily())
-            val dialogBox = createDialogBox(dialog, text, textPaint)
-            val y = getYAxis(textPaint, dialog, dialogBox)
-            canvas.draw(textPaint, dialogBox, dialog, dialog.x, y)
-            drawnCount++
+
+            try {
+                val canvas = Canvas(bitmap)
+
+                val composeStarted = System.currentTimeMillis()
+                var drawnCount = 0
+                var skippedCount = 0
+
+                dialogues.forEach { dialog ->
+                    dialog.scale = language.dialogBoxScale
+                    val text = dialog.getTextBy(language).cleanUp().cleanTranslationFailure()
+                    // Skip empty dialogs. Drawing an empty box would just show a
+                    // white rectangle with no text inside, which is what the user
+                    // sees when the OCR response or translation API is missing
+                    // the text for a particular bubble or had failure markers like [TERJEMAHAN GAGAL].
+                    if (text.isBlank()) {
+                        skippedCount++
+                        return@forEach
+                    }
+                    if (dialog.width <= 0f || dialog.height <= 0f) {
+                        skippedCount++
+                        Log.w(TAG, "Skipping invalid dialog box ${dialog.width}x${dialog.height}")
+                        return@forEach
+                    }
+                    val textPaint = createTextPaint(selectFontFamily())
+                    val dialogBox = createDialogBox(dialog, text, textPaint)
+                    val y = getYAxis(textPaint, dialog, dialogBox)
+                    canvas.draw(textPaint, dialogBox, dialog, dialog.x, y)
+                    drawnCount++
+                }
+
+                val composeElapsed = System.currentTimeMillis() - composeStarted
+                val now = System.currentTimeMillis()
+                if (dialogues.isNotEmpty()) {
+                    val pageNum = extractPageNumber(url)
+                    val chapterKey = extractChapterKey(url)
+                    val gapSinceLast = chapterKey?.let { key ->
+                        lastRenderTime[key]?.let { prev -> now - prev }
+                    }
+                    chapterKey?.let { lastRenderTime[it] = now }
+
+                    val timingInfo = buildString {
+                        append("drew=$drawnCount, skipped=$skippedCount")
+                        append(", total=${dialogues.size}")
+                        if (pageNum != null) append(", page=$pageNum")
+                        append(", image=${url.substringBefore('#').substringAfterLast('/')}")
+                        if (gapSinceLast != null) append(", gap=${gapSinceLast}ms")
+                        append(", took=${composeElapsed}ms (lang=${language.lang})")
+                    }
+                    Log.d(TAG, "Composed image: $timingInfo")
+                    if (drawnCount == 0) {
+                        Log.w(
+                            TAG,
+                            "All ${dialogues.size} dialogs were empty for ${language.lang}! " +
+                                "Check the OCR data and translation pipeline.",
+                        )
+                    }
+                }
+
+                val ext = url.substringBefore("#")
+                    .substringAfterLast(".")
+                    .lowercase()
+                val (format, outputMediaType) = when (ext) {
+                    "png" -> Bitmap.CompressFormat.PNG to "image/png".toMediaType()
+                    "jpeg", "jpg" -> Bitmap.CompressFormat.JPEG to "image/jpeg".toMediaType()
+                    else -> Bitmap.CompressFormat.WEBP to "image/webp".toMediaType()
+                }
+
+                val responseBody = Buffer().run {
+                    bitmap.compress(format, 100, outputStream())
+                    asResponseBody(outputMediaType)
+                }
+
+                response.newBuilder()
+                    .body(responseBody)
+                    .build()
+            } finally {
+                bitmap.recycle()
+            }
         }
-
-        val composeElapsed = System.currentTimeMillis() - composeStarted
-        val now = System.currentTimeMillis()
-        if (dialogues.isNotEmpty()) {
-            val pageNum = extractPageNumber(url)
-            val chapterKey = extractChapterKey(url)
-            val gapSinceLast = chapterKey?.let { key ->
-                lastRenderTime[key]?.let { prev -> now - prev }
-            }
-            chapterKey?.let { lastRenderTime[it] = now }
-
-            val timingInfo = buildString {
-                append("drew=$drawnCount, skipped=$skippedCount")
-                append(", total=${dialogues.size}")
-                if (pageNum != null) append(", page=$pageNum")
-                append(", image=${url.substringBefore('#').substringAfterLast('/')}")
-                if (gapSinceLast != null) append(", gap=${gapSinceLast}ms")
-                append(", took=${composeElapsed}ms (lang=${language.lang})")
-            }
-            Log.d(TAG, "Composed image: $timingInfo")
-            if (drawnCount == 0) {
-                Log.w(
-                    TAG,
-                    "All ${dialogues.size} dialogs were empty for ${language.lang}! " +
-                        "Check the OCR data and translation pipeline.",
-                )
-            }
-        }
-
-        val output = ByteArrayOutputStream()
-
-        val ext = url.substringBefore("#")
-            .substringAfterLast(".")
-            .lowercase()
-        val (format, outputMediaType) = when (ext) {
-            "png" -> Bitmap.CompressFormat.PNG to "image/png".toMediaType()
-            "jpeg", "jpg" -> Bitmap.CompressFormat.JPEG to "image/jpeg".toMediaType()
-            else -> Bitmap.CompressFormat.WEBP to "image/webp".toMediaType()
-        }
-
-        bitmap.compress(format, 100, output)
-
-        val responseBody = output.toByteArray().toResponseBody(outputMediaType)
-
-        return response.newBuilder()
-            .body(responseBody)
-            .build()
     }
 
     private fun createTextPaint(font: Typeface?): TextPaint {
