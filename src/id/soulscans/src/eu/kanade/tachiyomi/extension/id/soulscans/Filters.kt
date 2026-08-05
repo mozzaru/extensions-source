@@ -16,11 +16,6 @@ fun getSoulScansFilterList(genres: List<Pair<String, String>>): FilterList {
             Filter.Separator(),
             GenreFilter(genres.map { Genre(it.first, it.second) }),
         )
-    } else {
-        filters += listOf(
-            Filter.Separator(),
-            Filter.Header("Tekan 'Reset' untuk memuat daftar genre"),
-        )
     }
 
     return FilterList(filters)
