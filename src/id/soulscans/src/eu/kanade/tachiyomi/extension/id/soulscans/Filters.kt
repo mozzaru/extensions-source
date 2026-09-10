@@ -9,6 +9,7 @@ sealed class SelectFilter(
     val selected get() = options[state].second
 
     class Status(options: List<Pair<String, String>>) : SelectFilter("Status", options)
+    class Projects(options: List<Pair<String, String>>) : SelectFilter("Projects", options)
     class Genre(options: List<Pair<String, String>>) : SelectFilter("Genre", options)
     class Type(options: List<Pair<String, String>>) : SelectFilter("Type", options)
     class Colored(options: List<Pair<String, String>>) : SelectFilter("Colored", options)

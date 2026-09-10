@@ -92,8 +92,13 @@ class ChapterPagesResponseDto(private val chapter: ChapterPagesDto) {
 
 @Serializable
 class ChapterPagesDto(private val pages: List<PageDto>) {
-    fun toPageList() = pages.mapIndexed { index, page -> Page(index, imageUrl = page.imageUrl) }
+    fun toPageList() = pages.mapIndexed { index, page -> Page(index, imageUrl = page.imageUrl.toFullSize()) }
 }
 
 @Serializable
 class PageDto(@SerialName("image_url") val imageUrl: String)
+
+// Blogserve resized variants (e.g. /s1600/) can look blurry; the site itself uses /s0/ (original)
+private val bloggerSizeRegex = Regex("""(/img/b/[^/]+/[^/]+)/s\d+(/|$)""")
+
+private fun String.toFullSize() = bloggerSizeRegex.replace(this) { m -> m.groupValues[1] + "/s0" + m.groupValues[2] }

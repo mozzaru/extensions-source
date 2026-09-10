@@ -17,6 +17,8 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 
 @Source
 abstract class SoulScans : KeiSource() {
+    // support sugesttion komikku
+    override val supportRelatedMangasBySearch = true
 
     private suspend fun getMangaList(url: HttpUrl): MangasPage {
         val result = client.get(url).parseAs<MangaListResponseDto>()
@@ -43,7 +45,8 @@ abstract class SoulScans : KeiSource() {
             filters?.forEach { filter ->
                 when (filter) {
                     is SelectFilter.Status -> addQueryParameter("status", filter.selected)
-                    is SelectFilter.Genre -> addQueryParameter("genre", filter.selected)
+                    is SelectFilter.Projects -> if (filter.selected.isNotEmpty()) addQueryParameter("project_only", filter.selected)
+                    is SelectFilter.Genre -> if (filter.selected.isNotEmpty()) addQueryParameter("genre", filter.selected)
                     is SelectFilter.Type -> addQueryParameter("comic_type", filter.selected)
                     is SelectFilter.Colored -> addQueryParameter("color_format", filter.selected)
                     is SelectFilter.Format -> addQueryParameter("reading_format", filter.selected)
@@ -97,6 +100,12 @@ abstract class SoulScans : KeiSource() {
         val genres = data?.parseAs<List<GenreDto>>()?.map { it.toPair() }
 
         val filters = mutableListOf<Filter<*>>(
+            SelectFilter.Projects(
+                listOf(
+                    "All" to "",
+                    "Project Only" to "1",
+                ),
+            ),
             SelectFilter.Status(
                 listOf(
                     "All" to "",
@@ -109,7 +118,7 @@ abstract class SoulScans : KeiSource() {
         )
 
         if (genres != null) {
-            filters += SelectFilter.Genre(genres)
+            filters += SelectFilter.Genre(listOf("All" to "") + genres)
         }
 
         filters += listOf(
