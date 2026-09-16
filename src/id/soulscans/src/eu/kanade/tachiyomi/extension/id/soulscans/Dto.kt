@@ -92,13 +92,18 @@ class ChapterPagesResponseDto(private val chapter: ChapterPagesDto) {
 
 @Serializable
 class ChapterPagesDto(private val pages: List<PageDto>) {
-    fun toPageList() = pages.mapIndexed { index, page -> Page(index, imageUrl = page.imageUrl.toFullSize()) }
+    fun toPageList() = pages.mapIndexed { index, page -> Page(index, imageUrl = page.imageUrl.toImageUrl()) }
 }
 
 @Serializable
 class PageDto(@SerialName("image_url") val imageUrl: String)
 
-// Blogserve resized variants (e.g. /s1600/) can look blurry; the site itself uses /s0/ (original)
+// Blogger resized variants (e.g. /s1600/) can look blurry; the site itself uses /s0/ (original)
 private val bloggerSizeRegex = Regex("""(/img/b/[^/]+/[^/]+)/s\d+(/|$)""")
 
-private fun String.toFullSize() = bloggerSizeRegex.replace(this) { m -> m.groupValues[1] + "/s0" + m.groupValues[2] }
+private fun String.toImageUrl(): String {
+    // The API returns http:// URLs for the sscdn host, but plain http is dead (Cloudflare 522);
+    // the site's reader loads the same images over https, so upgrade the scheme.
+    val url = replace("http://", "https://")
+    return bloggerSizeRegex.replace(url) { m -> m.groupValues[1] + "/s0" + m.groupValues[2] }
+}
