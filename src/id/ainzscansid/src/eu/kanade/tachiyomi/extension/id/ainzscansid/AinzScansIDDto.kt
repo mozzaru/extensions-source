@@ -125,6 +125,14 @@ internal class PageDto(
     fun toPage(index: Int): Page {
         var url = if (imageUrl.startsWith("http")) imageUrl else "https://api.ainzscans01.com$imageUrl"
 
+        // The /api/agc-mirror/image-proxy route is dead (returns 404); the site's reader
+        // renders the direct image URL stored in the `url` query parameter instead.
+        if (url.contains("/api/agc-mirror/image-proxy")) {
+            url.toHttpUrlOrNull()?.queryParameter("url")?.let {
+                url = if (it.startsWith("http")) it else "https://api.ainzscans01.com$it"
+            }
+        }
+
         // Fix for older chapters using Blogger/Googleusercontent compressed images
         if (url.contains("googleusercontent.com") || url.contains("bp.blogspot.com")) {
             url = url.replace(Regex("""=[swh]\d+[^/?]*($|\?)""", RegexOption.IGNORE_CASE), "=s0$1")

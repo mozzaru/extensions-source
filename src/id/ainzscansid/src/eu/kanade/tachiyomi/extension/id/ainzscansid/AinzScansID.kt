@@ -20,6 +20,9 @@ abstract class AinzScansID : KeiSource() {
 
     private val apiUrl = "https://api.ainzscans01.com/api"
 
+    // support sugesttion komikku
+    override val supportRelatedMangasBySearch = true
+
     override fun OkHttpClient.Builder.configureClient() = rateLimit(3)
 
     // ============================== Popular ===============================
