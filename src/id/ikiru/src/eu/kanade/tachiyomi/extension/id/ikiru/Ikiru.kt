@@ -14,7 +14,6 @@ import keiyoushi.utils.firstInstanceOrNull
 import keiyoushi.utils.parseAs
 import keiyoushi.utils.stringOrNull
 import kotlinx.serialization.json.JsonElement
-import okhttp3.Headers
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -28,8 +27,7 @@ abstract class Ikiru : KeiSource() {
     override val supportRelatedMangasBySearch = true
 
     // Chapter images come from a separate CDN host, so only the API host is throttled.
-    override fun OkHttpClient.Builder.configureClient(): OkHttpClient.Builder =
-        rateLimit(8, 2.seconds) { it.host == apiUrlHost }
+    override fun OkHttpClient.Builder.configureClient(): OkHttpClient.Builder = rateLimit(8, 2.seconds) { it.host == apiUrlHost }
 
     private val apiUrl get() = baseUrl.toHttpUrl()
 
@@ -46,8 +44,7 @@ abstract class Ikiru : KeiSource() {
 
     override suspend fun getLatestUpdates(page: Int) = search(page, "", SortFilter.latest)
 
-    override suspend fun getSearchMangaList(page: Int, query: String, filters: FilterList): MangasPage =
-        search(page, query, filters)
+    override suspend fun getSearchMangaList(page: Int, query: String, filters: FilterList): MangasPage = search(page, query, filters)
 
     private suspend fun search(page: Int, query: String, filters: FilterList): MangasPage {
         // The project listing is a separate endpoint that ignores every other filter.
@@ -82,10 +79,10 @@ abstract class Ikiru : KeiSource() {
                     .forEach { addQueryParameter("type", it) }
                 filters.firstInstanceOrNull<StatusFilter>()?.checked.orEmpty()
                     .forEach { addQueryParameter("status", it) }
-                filters.firstInstanceOrNull<AuthorFilter>()?.state?.trim()
-                    ?.takeIf { it.isNotEmpty() }?.let { addQueryParameter("author", it) }
-                filters.firstInstanceOrNull<ArtistFilter>()?.state?.trim()
-                    ?.takeIf { it.isNotEmpty() }?.let { addQueryParameter("artist", it) }
+                filters.firstInstanceOrNull<AuthorFilter>()?.state.trim()
+                    .takeIf { it.isNotEmpty() }?.let { addQueryParameter("author", it) }
+                filters.firstInstanceOrNull<ArtistFilter>()?.state.trim()
+                    .takeIf { it.isNotEmpty() }?.let { addQueryParameter("artist", it) }
             }
             .build()
 
