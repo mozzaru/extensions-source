@@ -13,6 +13,7 @@ import keiyoushi.source.KeiSource
 import keiyoushi.utils.firstInstanceOrNull
 import keiyoushi.utils.parseAs
 import keiyoushi.utils.stringOrNull
+import keiyoushi.utils.toJsonElement
 import kotlinx.serialization.json.JsonElement
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -79,9 +80,9 @@ abstract class Ikiru : KeiSource() {
                     .forEach { addQueryParameter("type", it) }
                 filters.firstInstanceOrNull<StatusFilter>()?.checked.orEmpty()
                     .forEach { addQueryParameter("status", it) }
-                filters.firstInstanceOrNull<AuthorFilter>()?.state.trim()
+                filters.firstInstanceOrNull<AuthorFilter>()?.state.orEmpty().trim()
                     .takeIf { it.isNotEmpty() }?.let { addQueryParameter("author", it) }
-                filters.firstInstanceOrNull<ArtistFilter>()?.state.trim()
+                filters.firstInstanceOrNull<ArtistFilter>()?.state.orEmpty().trim()
                     .takeIf { it.isNotEmpty() }?.let { addQueryParameter("artist", it) }
             }
             .build()
@@ -100,7 +101,7 @@ abstract class Ikiru : KeiSource() {
         if (url.pathSegments.firstOrNull() != "manga") return null
         val slug = url.pathSegments.getOrNull(1) ?: return null
 
-        return client.get(api("api/public/manga/$slug"))
+        return client.get(api("api/public/manga/$slug").build())
             .parseAs<ApiResponse<MangaDetail>>()
             .data
             ?.toSManga()
@@ -117,12 +118,12 @@ abstract class Ikiru : KeiSource() {
         val slug = manga.slug()
 
         // Details and chapters come from the same response, so parse it once and return both.
-        val detail = client.get(api("api/public/manga/$slug"))
+        val detail = client.get(api("api/public/manga/$slug").build())
             .parseAs<ApiResponse<MangaDetail>>()
             .data ?: error("Manga not found")
 
         val chapterList = if (detail.hasMoreChapters) {
-            client.get(api("api/public/manga/$slug/chapter").addQueryParameter("all", "true"))
+            client.get(api("api/public/manga/$slug/chapter").addQueryParameter("all", "true").build())
                 .parseAs<ApiResponse<ChapterList>>()
                 .data
                 ?.chapters
