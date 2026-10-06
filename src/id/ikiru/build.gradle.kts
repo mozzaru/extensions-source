@@ -7,15 +7,23 @@ plugins {
 keiyoushi {
     name = "Ikiru"
     pkgName = "id.mangatale"
-    versionCode = 50
+    // natsuid contributed baseVersionCode 6, so the previous release was 1.6.56.
+    versionCode = 57
     contentWarning = ContentWarning.SAFE
     libVersion = "1.6"
-    theme = "natsuid"
 
     source {
         lang = "id"
-        baseUrl = "https://08.ikiru.wtf"
+        // Site moved from the WordPress (natsuid theme) install at 08.ikiru.wtf
+        // to a Nuxt SPA on 09.ikiru.wtf with a JSON API.
+        baseUrl {
+            custom("https://09.ikiru.wtf")
+        }
         // Formerly "MangaTale"
         id = 1532456597012176985L
+    }
+
+    deeplink {
+        path("/manga/..*")
     }
 }
